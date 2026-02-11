@@ -39,3 +39,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/ADRs
+/PRDs
+/Kozan - Agents project
+/User-Stories
