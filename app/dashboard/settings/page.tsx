@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useWorkspace } from "@/app/dashboard/workspace-context";
 
 interface Member {
   user_id: string;
@@ -34,13 +35,7 @@ export default function SettingsPage() {
     type: "success" | "error";
   } | null>(null);
 
-  const workspaceId =
-    typeof window !== "undefined"
-      ? document.cookie
-          .split("; ")
-          .find((c) => c.startsWith("workspace_id="))
-          ?.split("=")[1] ?? ""
-      : "";
+  const { id: workspaceId } = useWorkspace();
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -68,8 +63,8 @@ export default function SettingsPage() {
   }, [workspaceId]);
 
   useEffect(() => {
-    if (workspaceId) void fetchData();
-  }, [workspaceId, fetchData]);
+    void fetchData();
+  }, [fetchData]);
 
   const regenerateKey = async () => {
     if (

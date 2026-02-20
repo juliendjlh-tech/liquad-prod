@@ -103,10 +103,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const workspace = await createWorkspace(user.id, validation.data.name);
 
     return NextResponse.json(workspace, { status: 201 });
-  } catch {
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+  } catch (err) {
+    console.error("POST /api/workspaces error:", err);
+    const message =
+      err instanceof Error ? err.message : "Internal server error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

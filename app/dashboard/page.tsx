@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useWorkspace } from "@/app/dashboard/workspace-context";
 
 interface DashboardMetrics {
   contentAccessible: { covered: number; total: number; percentage: number };
@@ -22,13 +23,7 @@ export default function DashboardOverviewPage() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const workspaceId =
-    typeof window !== "undefined"
-      ? document.cookie
-          .split("; ")
-          .find((c) => c.startsWith("workspace_id="))
-          ?.split("=")[1] ?? ""
-      : "";
+  const { id: workspaceId } = useWorkspace();
 
   const fetchMetrics = useCallback(async () => {
     setLoading(true);
@@ -46,8 +41,8 @@ export default function DashboardOverviewPage() {
   }, [workspaceId, period]);
 
   useEffect(() => {
-    if (workspaceId) void fetchMetrics();
-  }, [workspaceId, fetchMetrics]);
+    void fetchMetrics();
+  }, [fetchMetrics]);
 
   const hasEvents =
     metrics &&

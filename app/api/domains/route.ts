@@ -1,30 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { getContents } from "@/lib/services/content.service";
+import { getDomainsWithContentCount } from "@/lib/services/content.service";
 
 /**
- * GET /api/contents
+ * GET /api/domains
  *
- * List imported contents for a workspace with pagination and search.
+ * List domains for a workspace with content counts.
  *
  * QUERY PARAMETERS:
  * - workspace_id (required): UUID of the workspace
- * - page (optional): Page number, default 1
- * - limit (optional): Items per page, default 50, max 100
- * - search (optional): Filter by source_url substring (case-insensitive)
- *
- * RESPONSES:
- * - 200: `{ items, total, page, totalPages }`
- * - 400: Missing workspace_id
- * - 401: Unauthorized
- * - 403: User not a member of the workspace
- * - 500: Internal server error
+ * - search (optional): Filter by domain name substring
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const { searchParams } = request.nextUrl;
 
-    // Extract and validate workspace_id
     const workspaceId = searchParams.get("workspace_id");
     if (!workspaceId) {
       return NextResponse.json(
@@ -33,7 +23,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // Auth check
     const supabase = await createServerClient();
     const {
       data: { user },
@@ -43,7 +32,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // Verify workspace membership
     const { data: membership } = await supabase
       .from("workspace_members")
       .select("role")
@@ -52,21 +40,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .single();
 
     if (!membership) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 }
-      );
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Parse pagination params
-    const page = parseInt(searchParams.get("page") ?? "1", 10);
-    const limit = parseInt(searchParams.get("limit") ?? "50", 10);
     const search = searchParams.get("search") ?? undefined;
-    const domain = searchParams.get("domain") ?? undefined;
+    const domains = await getDomainsWithContentCount(workspaceId, search);
 
-    const result = await getContents({ workspaceId, page, limit, search, domain });
-
-    return NextResponse.json(result, { status: 200 });
+    return NextResponse.json(domains, { status: 200 });
   } catch {
     return NextResponse.json(
       { error: "Internal server error" },

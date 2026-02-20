@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
+import { useWorkspace } from "@/app/dashboard/workspace-context";
 
 interface UserAgent {
   id: string;
@@ -40,13 +41,7 @@ export default function EditCatalogPage({
     type: "success" | "error";
   } | null>(null);
 
-  const workspaceId =
-    typeof window !== "undefined"
-      ? document.cookie
-          .split("; ")
-          .find((c) => c.startsWith("workspace_id="))
-          ?.split("=")[1] ?? ""
-      : "";
+  const { id: workspaceId } = useWorkspace();
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -73,7 +68,6 @@ export default function EditCatalogPage({
   }, [catalogId, workspaceId]);
 
   useEffect(() => {
-    if (!workspaceId) return;
     void fetchCatalog();
     void (async () => {
       const res = await fetch("/api/user-agents", {

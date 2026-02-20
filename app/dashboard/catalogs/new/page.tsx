@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useWorkspace } from "@/app/dashboard/workspace-context";
 
 interface UserAgent {
   id: string;
@@ -33,13 +34,7 @@ export default function NewCatalogPage() {
     type: "success" | "error";
   } | null>(null);
 
-  const workspaceId =
-    typeof window !== "undefined"
-      ? document.cookie
-          .split("; ")
-          .find((c) => c.startsWith("workspace_id="))
-          ?.split("=")[1] ?? ""
-      : "";
+  const { id: workspaceId } = useWorkspace();
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -48,7 +43,6 @@ export default function NewCatalogPage() {
 
   // Fetch agents for checkboxes
   useEffect(() => {
-    if (!workspaceId) return;
     void (async () => {
       const res = await fetch("/api/user-agents", {
         headers: { "x-workspace-id": workspaceId },

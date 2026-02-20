@@ -38,6 +38,15 @@ export interface GetContentsParams {
   page?: number;
   limit?: number;
   search?: string;
+  domain?: string;
+}
+
+export interface DomainWithCount {
+  id: string;
+  domain: string;
+  status: string;
+  content_count: number;
+  created_at: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -254,6 +263,58 @@ export async function importFromSitemap(
 }
 
 // ---------------------------------------------------------------------------
+// Domain Listing
+// ---------------------------------------------------------------------------
+
+/**
+ * List all domains for a workspace with their content count.
+ * Optionally filter by domain name substring.
+ */
+export async function getDomainsWithContentCount(
+  workspaceId: string,
+  search?: string
+): Promise<DomainWithCount[]> {
+  const supabase = await createServerClient();
+
+  let query = supabase
+    .from("domains")
+    .select("id, domain, status, created_at")
+    .eq("workspace_id", workspaceId)
+    .order("domain", { ascending: true });
+
+  if (search) {
+    query = query.ilike("domain", `%${search}%`);
+  }
+
+  const { data: domains, error } = await query;
+
+  if (error) {
+    throw new Error(`Failed to list domains: ${error.message}`);
+  }
+
+  if (!domains || domains.length === 0) return [];
+
+  // Get content counts per domain in a single query
+  const { data: counts } = await supabase
+    .from("contents")
+    .select("domain")
+    .eq("workspace_id", workspaceId);
+
+  const countMap = new Map<string, number>();
+  for (const row of counts ?? []) {
+    countMap.set(row.domain, (countMap.get(row.domain) ?? 0) + 1);
+  }
+
+  return domains.map((d) => ({
+    id: d.id,
+    domain: d.domain,
+    status: d.status,
+    content_count: countMap.get(d.domain) ?? 0,
+    created_at: d.created_at,
+  }));
+}
+
+// ---------------------------------------------------------------------------
 // Content Listing (Paginated + Search)
 // ---------------------------------------------------------------------------
 
@@ -282,6 +343,11 @@ export async function getContents(
     .eq("workspace_id", params.workspaceId)
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
+
+  // Apply domain filter if provided
+  if (params.domain) {
+    query = query.eq("domain", params.domain);
+  }
 
   // Apply search filter if provided
   if (params.search) {

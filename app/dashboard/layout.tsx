@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createServerClient } from "@/lib/db/supabase-server";
 import Sidebar from "@/app/components/Sidebar";
+import { WorkspaceProvider } from "@/app/dashboard/workspace-context";
 
 export default async function DashboardLayout({
   children,
@@ -25,7 +26,7 @@ export default async function DashboardLayout({
     .single();
 
   if (!membership?.workspaces) {
-    redirect("/dashboard/onboarding");
+    redirect("/onboarding");
   }
 
   const workspace = membership.workspaces as unknown as {
@@ -34,9 +35,11 @@ export default async function DashboardLayout({
   };
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar workspace={workspace} userEmail={user.email ?? ""} />
-      <main className="flex-1 p-6 md:p-8 overflow-auto">{children}</main>
-    </div>
+    <WorkspaceProvider workspace={workspace}>
+      <div className="flex min-h-screen bg-gray-50">
+        <Sidebar workspace={workspace} userEmail={user.email ?? ""} />
+        <main className="flex-1 p-6 md:p-8 overflow-auto">{children}</main>
+      </div>
+    </WorkspaceProvider>
   );
 }

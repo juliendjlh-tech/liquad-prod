@@ -104,8 +104,8 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // --- Dashboard protection: redirect unauthenticated users to /login ---
-  if (!user && pathname.startsWith("/dashboard")) {
+  // --- Protected pages: redirect unauthenticated users to /login ---
+  if (!user && (pathname.startsWith("/dashboard") || pathname.startsWith("/onboarding"))) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     return NextResponse.redirect(loginUrl);
@@ -139,5 +139,5 @@ export async function middleware(request: NextRequest) {
  * - /favicon.ico — Browser favicon request
  */
 export const config = {
-  matcher: ["/dashboard/:path*", "/api/:path*"],
+  matcher: ["/dashboard/:path*", "/onboarding", "/api/:path*"],
 };

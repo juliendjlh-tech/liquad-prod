@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import { useWorkspace } from "@/app/dashboard/workspace-context";
 
 interface UserAgent {
   id: string;
@@ -16,6 +17,7 @@ interface Preset {
 }
 
 export default function UserAgentsPage() {
+  const { id: workspaceId } = useWorkspace();
   const [agents, setAgents] = useState<UserAgent[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [loading, setLoading] = useState(true);
@@ -27,14 +29,6 @@ export default function UserAgentsPage() {
     message: string;
     type: "success" | "error";
   } | null>(null);
-
-  const workspaceId =
-    typeof window !== "undefined"
-      ? document.cookie
-          .split("; ")
-          .find((c) => c.startsWith("workspace_id="))
-          ?.split("=")[1] ?? ""
-      : "";
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -59,11 +53,9 @@ export default function UserAgentsPage() {
   }, []);
 
   useEffect(() => {
-    if (workspaceId) {
-      void fetchAgents();
-      void fetchPresets();
-    }
-  }, [workspaceId, fetchAgents, fetchPresets]);
+    void fetchAgents();
+    void fetchPresets();
+  }, [fetchAgents, fetchPresets]);
 
   const addPresetBot = async (preset: Preset) => {
     const res = await fetch("/api/user-agents", {
@@ -130,8 +122,7 @@ export default function UserAgentsPage() {
   };
 
   const deleteAgent = async (agent: UserAgent) => {
-    const msg = `Delete ${agent.name}?`;
-    if (!confirm(msg)) return;
+    if (!confirm(`Delete ${agent.name}?`)) return;
 
     const res = await fetch(`/api/user-agents/${agent.id}`, {
       method: "DELETE",
@@ -187,22 +178,31 @@ export default function UserAgentsPage() {
       </div>
 
       {/* Add preset dropdown */}
-      {showAddPreset && availablePresets.length > 0 && (
+      {showAddPreset && (
         <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4">
-          <h3 className="text-sm font-medium text-gray-900 mb-2">
-            Select a preset bot
+          <h3 className="text-sm font-medium text-gray-900 mb-3">
+            Select a bot to add
           </h3>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {availablePresets.map((p) => (
-              <button
-                key={p.name}
-                onClick={() => addPresetBot(p)}
-                className="rounded-md border border-gray-200 px-3 py-2 text-sm hover:bg-blue-50 hover:border-blue-300"
-              >
-                {p.name}
-              </button>
-            ))}
-          </div>
+          {availablePresets.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              All preset bots have been added.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {availablePresets.map((p) => (
+                <button
+                  key={p.name}
+                  onClick={() => addPresetBot(p)}
+                  className="rounded-md border border-gray-200 px-3 py-2 text-sm hover:bg-blue-50 hover:border-blue-300 text-left"
+                >
+                  <div className="font-medium text-gray-900">{p.name}</div>
+                  <div className="text-xs text-gray-500 truncate">
+                    {p.ua_pattern}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

@@ -35,7 +35,7 @@ export default function OnboardingPage() {
   };
 
   return (
-    <div className="flex min-h-[60vh] items-center justify-center">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50">
       <div className="w-full max-w-md rounded-lg border border-gray-200 bg-white p-8">
         <h1 className="text-2xl font-bold text-gray-900 mb-2">
           Create your workspace

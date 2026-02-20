@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import { useWorkspace } from "@/app/dashboard/workspace-context";
 
 interface CatalogItem {
   id: string;
@@ -20,13 +21,7 @@ export default function CatalogsPage() {
     type: "success" | "error" | "warning";
   } | null>(null);
 
-  const workspaceId =
-    typeof window !== "undefined"
-      ? document.cookie
-          .split("; ")
-          .find((c) => c.startsWith("workspace_id="))
-          ?.split("=")[1] ?? ""
-      : "";
+  const { id: workspaceId } = useWorkspace();
 
   const showToast = (
     message: string,
@@ -49,8 +44,8 @@ export default function CatalogsPage() {
   }, [workspaceId]);
 
   useEffect(() => {
-    if (workspaceId) void fetchCatalogs();
-  }, [workspaceId, fetchCatalogs]);
+    void fetchCatalogs();
+  }, [fetchCatalogs]);
 
   const toggleStatus = async (catalog: CatalogItem) => {
     const newStatus = catalog.status === "active" ? "inactive" : "active";
