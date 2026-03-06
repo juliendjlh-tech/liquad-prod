@@ -14,7 +14,7 @@ export default async function Navbar() {
           <Link href="/" className="flex items-center gap-2">
             <div className="h-8 w-8 rounded-lg bg-blue-600" />
             <span className="text-lg font-semibold text-gray-900">
-              DataFlow
+              Liquad
             </span>
           </Link>
 

@@ -20,7 +20,7 @@ const scryptAsync = promisify(scrypt);
  * Format: `df_` + 40 random alphanumeric characters.
  * Total length: 43 characters.
  *
- * The "df_" prefix makes DataFlow API keys visually identifiable
+ * The "df_" prefix makes Liquad API keys visually identifiable
  * in configuration files and logs (similar to how Stripe uses "sk_"
  * and GitHub uses "ghp_").
  *

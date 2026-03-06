@@ -6,7 +6,7 @@
 -- that enforce multi-tenant data isolation at the database level.
 --
 -- SECURITY MODEL:
--- DataFlow uses a dual-layer security approach:
+-- Liquad uses a dual-layer security approach:
 --   1. Next.js Middleware: Protects routes at the HTTP level
 --   2. Supabase RLS (this file): Protects data at the SQL level
 --

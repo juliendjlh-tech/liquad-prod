@@ -1,4 +1,4 @@
-import type { DataFlowConfig } from "./types";
+import type { LiquadConfig } from "./types";
 
 /**
  * Cached rules structure (mirrors SdkRules from the API).
@@ -23,10 +23,10 @@ export interface CachedRules {
 const MIN_REFRESH_INTERVAL = 10_000; // 10s minimum
 
 /**
- * Fetch rules from the DataFlow API using Node.js native https/http modules.
+ * Fetch rules from the Liquad API using Node.js native https/http modules.
  */
-function fetchRules(config: DataFlowConfig): Promise<CachedRules> {
-  const baseUrl = config.apiBaseUrl ?? "https://dataflow.app";
+function fetchRules(config: LiquadConfig): Promise<CachedRules> {
+  const baseUrl = config.apiBaseUrl ?? "https://liquad.app";
   const url = `${baseUrl}/api/sdk/rules`;
 
   return new Promise((resolve, reject) => {
@@ -80,7 +80,7 @@ function fetchRules(config: DataFlowConfig): Promise<CachedRules> {
  * - Serves stale rules if a refresh fails (stale-while-revalidate).
  * - Returns null if no rules have been fetched yet (passthrough mode).
  */
-export function createRulesCache(config: DataFlowConfig) {
+export function createRulesCache(config: LiquadConfig) {
   let rules: CachedRules | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
   const interval = Math.max(

@@ -12,7 +12,7 @@ export default function SdkPage() {
           Quick Start
         </h2>
         <p className="text-sm text-gray-600 mb-4">
-          Install the DataFlow SDK and add it to your server in 3 steps.
+          Install the Liquad SDK and add it to your server in 3 steps.
         </p>
 
         <div className="space-y-4">
@@ -21,7 +21,7 @@ export default function SdkPage() {
               1. Install the package
             </h3>
             <pre className="rounded-md bg-gray-900 p-3 text-sm text-green-400 overflow-x-auto">
-              npm install @dataflow/sdk
+              npm install @liquad/sdk
             </pre>
           </div>
 
@@ -30,9 +30,9 @@ export default function SdkPage() {
               2. Add the middleware
             </h3>
             <pre className="rounded-md bg-gray-900 p-3 text-sm text-green-400 overflow-x-auto">
-              {`const { createDataFlowMiddleware } = require('@dataflow/sdk');
+              {`const { createLiquadMiddleware } = require('@liquad/sdk');
 
-app.use(createDataFlowMiddleware({
+app.use(createLiquadMiddleware({
   apiKey: 'YOUR_API_KEY',
 }));`}
             </pre>

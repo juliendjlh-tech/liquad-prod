@@ -1,7 +1,7 @@
-import type { DataFlowConfig } from "./types";
+import type { LiquadConfig } from "./types";
 
 /**
- * An SDK event to be sent to the DataFlow API.
+ * An SDK event to be sent to the Liquad API.
  */
 export interface SdkEvent {
   domain: string;
@@ -17,13 +17,13 @@ export interface SdkEvent {
 const MAX_BUFFER_CAPACITY = 10_000;
 
 /**
- * Send a batch of events to the DataFlow API using Node.js native https/http.
+ * Send a batch of events to the Liquad API using Node.js native https/http.
  */
 function sendEvents(
-  config: DataFlowConfig,
+  config: LiquadConfig,
   events: SdkEvent[]
 ): Promise<void> {
-  const baseUrl = config.apiBaseUrl ?? "https://dataflow.app";
+  const baseUrl = config.apiBaseUrl ?? "https://liquad.app";
   const url = `${baseUrl}/api/sdk/events`;
   const payload = JSON.stringify({ events });
 
@@ -75,7 +75,7 @@ function sendEvents(
  * - Max capacity of 10,000 events (oldest dropped when exceeded).
  * - Best-effort final flush on stop().
  */
-export function createEventBuffer(config: DataFlowConfig) {
+export function createEventBuffer(config: LiquadConfig) {
   const buffer: SdkEvent[] = [];
   let timer: ReturnType<typeof setInterval> | null = null;
   let flushing = false;

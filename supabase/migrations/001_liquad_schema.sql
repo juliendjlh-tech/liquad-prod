@@ -1,8 +1,8 @@
 -- ============================================================================
--- Migration 001: DataFlow MVP Schema
+-- Migration 001: Liquad MVP Schema
 -- ============================================================================
 --
--- This migration creates the complete DataFlow database schema as defined
+-- This migration creates the complete Liquad database schema as defined
 -- in ADR-001 (Section 7.9). It includes:
 --
 --   1. Six new tables: domains, contents, user_agents, catalogs,
@@ -11,7 +11,7 @@
 --   3. Indexes for dashboard query performance
 --
 -- CONTEXT:
--- DataFlow is a B2B SaaS platform for publishers to control and monetize
+-- Liquad is a B2B SaaS platform for publishers to control and monetize
 -- AI bot access to their content. Each workspace represents one publisher
 -- company. All data is isolated per workspace via RLS (see migration 002).
 --
@@ -142,7 +142,7 @@ CREATE TABLE public.catalog_agents (
 -- TABLE: sdk_events
 -- ============================================================================
 -- Records every bot access event sent by the SDK deployed on publisher sites.
--- This is the core analytics table for the DataFlow dashboard.
+-- This is the core analytics table for the Liquad dashboard.
 --
 -- Each event captures:
 --   - Which workspace/domain received the bot request

@@ -1,9 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "http";
 
 /**
- * Configuration for the DataFlow SDK middleware.
+ * Configuration for the Liquad SDK middleware.
  */
-export interface DataFlowConfig {
+export interface LiquadConfig {
   /** Required: workspace API key (starts with "df_") */
   apiKey: string;
 
@@ -22,14 +22,14 @@ export interface DataFlowConfig {
   /** Optional error handler. Errors are never thrown to avoid crashing the host server. */
   onError?: (error: Error) => void;
 
-  /** DataFlow API base URL. Default: "https://dataflow.app" */
+  /** Liquad API base URL. Default: "https://liquad.app" */
   apiBaseUrl?: string;
 }
 
 /**
  * Express/Connect-compatible middleware signature.
  */
-export type DataFlowMiddleware = (
+export type LiquadMiddleware = (
   req: IncomingMessage,
   res: ServerResponse,
   next: () => void

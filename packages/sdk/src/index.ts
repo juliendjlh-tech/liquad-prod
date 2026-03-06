@@ -1,15 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "http";
-import type { DataFlowConfig, DataFlowMiddleware } from "./types";
+import type { LiquadConfig, LiquadMiddleware } from "./types";
 import { createRulesCache } from "./rules-cache";
 import { createEventBuffer } from "./event-buffer";
 import { matchRequest } from "./matcher";
 
 /**
- * Create a DataFlow middleware that intercepts incoming requests
+ * Create a Liquad middleware that intercepts incoming requests
  * and applies AI content licensing rules.
  *
  * Usage:
- *   const middleware = createDataFlowMiddleware({ apiKey: 'df_...' });
+ *   const middleware = createLiquadMiddleware({ apiKey: 'df_...' });
  *   app.use(middleware); // Express
  *
  * The middleware:
@@ -26,9 +26,9 @@ import { matchRequest } from "./matcher";
  * @returns Express/Connect-compatible middleware function
  * @throws Error only if apiKey is missing (at creation time, not at runtime)
  */
-export function createDataFlowMiddleware(
-  config: DataFlowConfig
-): DataFlowMiddleware {
+export function createLiquadMiddleware(
+  config: LiquadConfig
+): LiquadMiddleware {
   if (!config.apiKey) {
     throw new Error("apiKey is required");
   }
@@ -45,7 +45,7 @@ export function createDataFlowMiddleware(
   eventBuffer.start();
 
   // Return the middleware function
-  const middleware: DataFlowMiddleware = (
+  const middleware: LiquadMiddleware = (
     req: IncomingMessage,
     res: ServerResponse,
     next: () => void
@@ -80,7 +80,7 @@ export function createDataFlowMiddleware(
           const body = JSON.stringify(decision.responseBody);
           res.writeHead(402, {
             "Content-Type": "application/json",
-            "X-DataFlow-Status": "licensing-required",
+            "X-Liquad-Status": "licensing-required",
             "Content-Length": Buffer.byteLength(body),
           });
           res.end(body);
@@ -109,7 +109,7 @@ export function createDataFlowMiddleware(
   };
 
   // Attach cleanup method for graceful shutdown
-  (middleware as DataFlowMiddleware & { destroy: () => Promise<void> }).destroy =
+  (middleware as LiquadMiddleware & { destroy: () => Promise<void> }).destroy =
     async () => {
       rulesCache.stop();
       await eventBuffer.stop();
@@ -119,7 +119,7 @@ export function createDataFlowMiddleware(
 }
 
 // Re-export types
-export type { DataFlowConfig, DataFlowMiddleware } from "./types";
+export type { LiquadConfig, LiquadMiddleware } from "./types";
 export type { CachedRules } from "./rules-cache";
 export type { SdkEvent } from "./event-buffer";
 export type { MatchDecision } from "./matcher";
