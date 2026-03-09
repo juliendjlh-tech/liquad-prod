@@ -23,7 +23,7 @@ import { regenerateApiKey } from "@/lib/services/workspace.service";
  * 3. Return the new plaintext API key (shown once).
  *
  * RESPONSES:
- * - 200: `{ api_key: "df_..." }` — new plaintext key (shown once)
+ * - 200: `{ api_key: "lq_..." }` — new plaintext key (shown once)
  * - 401: Unauthorized (handled by middleware)
  * - 403: `{ error: "Only the workspace owner can regenerate the API key" }`
  * - 404: `{ error: "Workspace not found" }` (workspace doesn't exist or user is not a member)

@@ -3,7 +3,7 @@ import { verifyApiKey } from "@/lib/services/workspace.service";
 
 /**
  * Extract the API key from an Authorization header.
- * Expected format: "Bearer df_..."
+ * Expected format: "Bearer lq_..."
  *
  * @param authHeader - The Authorization header value
  * @returns The API key string, or null if missing/malformed
@@ -20,7 +20,7 @@ export function extractApiKey(
   }
 
   const key = authHeader.slice(7).trim();
-  if (!key || !key.startsWith("df_")) {
+  if (!key || !key.startsWith("lq_")) {
     return { error: "Invalid API key" };
   }
 

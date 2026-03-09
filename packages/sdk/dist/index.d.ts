@@ -18,7 +18,7 @@ interface JwtPayload {
  * Configuration for the Liquad SDK middleware.
  */
 interface LiquadConfig {
-    /** Required: workspace API key (starts with "df_") */
+    /** Required: workspace API key (starts with "lq_") */
     apiKey: string;
     /** Default price threshold in EUR. Default: 0 */
     defaultPrice?: number;
@@ -100,7 +100,7 @@ type MatchDecision = {
  * and applies AI content licensing rules.
  *
  * Usage:
- *   const middleware = createLiquadMiddleware({ apiKey: 'df_...' });
+ *   const middleware = createLiquadMiddleware({ apiKey: 'lq_...' });
  *   app.use(middleware); // Express
  *
  * The middleware:

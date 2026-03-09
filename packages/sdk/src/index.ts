@@ -52,7 +52,7 @@ function sendJsonResponse(
  * and applies AI content licensing rules.
  *
  * Usage:
- *   const middleware = createLiquadMiddleware({ apiKey: 'df_...' });
+ *   const middleware = createLiquadMiddleware({ apiKey: 'lq_...' });
  *   app.use(middleware); // Express
  *
  * The middleware:

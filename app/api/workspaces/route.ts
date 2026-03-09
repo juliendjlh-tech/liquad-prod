@@ -59,7 +59,7 @@ export async function GET(): Promise<NextResponse> {
  * 1. Validate the request body using createWorkspaceSchema.
  * 2. Get the authenticated user from the session.
  * 3. Call createWorkspace() which:
- *    - Generates a random API key (df_ prefix)
+ *    - Generates a random API key (lq_ prefix)
  *    - Hashes it with scrypt for storage
  *    - Creates the workspace record
  *    - Adds the user as owner in workspace_members

@@ -70,7 +70,7 @@ type RpcResult = RpcSuccess | RpcFailure;
  *
  * CRITICAL: This function NEVER throws. All errors are returned as typed results.
  *
- * @param authHeader - Authorization header (Bearer df_...)
+ * @param authHeader - Authorization header (Bearer lq_...)
  * @param userAgent  - User-Agent header from the consumer bot
  * @param input      - Validated request body { url, max_price_eur? }
  * @returns Typed result: success (with JWT), free (bot not tracked), or error

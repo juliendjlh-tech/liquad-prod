@@ -15,24 +15,24 @@ const scryptAsync = promisify(scrypt);
 // ---------------------------------------------------------------------------
 
 /**
- * Generate a random API key with prefix "df_".
+ * Generate a random API key with prefix "lq_".
  *
- * Format: `df_` + 40 random alphanumeric characters.
+ * Format: `lq_` + 40 random alphanumeric characters.
  * Total length: 43 characters.
  *
- * The "df_" prefix makes Liquad API keys visually identifiable
+ * The "lq_" prefix makes Liquad API keys visually identifiable
  * in configuration files and logs (similar to how Stripe uses "sk_"
  * and GitHub uses "ghp_").
  *
  * Uses Node.js built-in `crypto.randomBytes()` for cryptographically
  * secure random generation — no external dependencies needed.
  *
- * @returns The plaintext API key (e.g., "df_a1b2c3d4e5f6...")
+ * @returns The plaintext API key (e.g., "lq_a1b2c3d4e5f6...")
  *
  * @example
  * ```typescript
  * const apiKey = generateApiKey();
- * // "df_x7k9m2p4q8r1s5t3u6v0w2y4z7a9b1c3d5f8g0h2"
+ * // "lq_x7k9m2p4q8r1s5t3u6v0w2y4z7a9b1c3d5f8g0h2"
  * ```
  */
 export function generateApiKey(): string {
@@ -41,7 +41,7 @@ export function generateApiKey(): string {
   // 30 bytes of entropy = 240 bits, far more than the 128-bit minimum
   // recommended for API keys.
   const randomPart = randomBytes(30).toString("base64url").slice(0, 40);
-  return `df_${randomPart}`;
+  return `lq_${randomPart}`;
 }
 
 /**
@@ -64,7 +64,7 @@ export function generateApiKey(): string {
  *
  * @example
  * ```typescript
- * const hash = await hashApiKey("df_abc123...");
+ * const hash = await hashApiKey("lq_abc123...");
  * // "a1b2c3d4...:e5f6g7h8..."
  * ```
  */
@@ -87,7 +87,7 @@ export async function hashApiKey(apiKey: string): Promise<string> {
  *
  * @example
  * ```typescript
- * const isValid = await verifyApiKey("df_abc123...", storedHash);
+ * const isValid = await verifyApiKey("lq_abc123...", storedHash);
  * if (!isValid) {
  *   return NextResponse.json({ error: "Invalid API key" }, { status: 401 });
  * }
@@ -112,7 +112,7 @@ export async function verifyApiKey(
  * Create a new workspace with the authenticated user as owner.
  *
  * STEPS:
- * 1. Generate a random API key (df_ prefix + 40 random chars).
+ * 1. Generate a random API key (lq_ prefix + 40 random chars).
  * 2. Hash the API key with scrypt for secure storage.
  * 3. INSERT into workspaces (name, api_key_hash).
  * 4. INSERT into workspace_members (workspace_id, user_id, role='owner',
@@ -314,7 +314,7 @@ export async function getWorkspaceById(
  * STEPS:
  * 1. Verify the user is a member of the workspace (return null if not).
  * 2. Verify the user has the "owner" role (throw 403 if admin/member).
- * 3. Generate a new API key (same format as creation: df_ + 40 chars).
+ * 3. Generate a new API key (same format as creation: lq_ + 40 chars).
  * 4. Hash the new key with scrypt.
  * 5. UPDATE workspaces SET api_key_hash = new_hash, updated_at = now().
  * 6. Return the new plaintext API key (shown once).

@@ -19,7 +19,7 @@ export interface JwtPayload {
  * Configuration for the Liquad SDK middleware.
  */
 export interface LiquadConfig {
-  /** Required: workspace API key (starts with "df_") */
+  /** Required: workspace API key (starts with "lq_") */
   apiKey: string;
 
   /** Default price threshold in EUR. Default: 0 */

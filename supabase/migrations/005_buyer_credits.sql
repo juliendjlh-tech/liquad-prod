@@ -29,7 +29,7 @@ ALTER TABLE public.workspaces
 ALTER TABLE public.workspaces
   ADD COLUMN initial_credit_eur DECIMAL(10,2) NOT NULL DEFAULT 10.00;
 
--- API key prefix for O(1) lookup (first 11 chars: "df_" + 8 chars)
+-- API key prefix for O(1) lookup (first 11 chars: "lq_" + 8 chars)
 ALTER TABLE public.workspaces
   ADD COLUMN api_key_prefix TEXT;
 
