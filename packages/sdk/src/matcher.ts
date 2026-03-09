@@ -124,6 +124,7 @@ export function matchRequest(
       matched_catalog_id: catalog.id,
       decision: catalog.price_eur <= defaultPrice ? "granted" : "denied",
       price_applied: catalog.price_eur,
+      consumer_workspace_id: null,
       timestamp,
     };
 
@@ -164,6 +165,7 @@ export function matchRequest(
       matched_catalog_id: null,
       decision: "blocked_no_catalog",
       price_applied: null,
+      consumer_workspace_id: null,
       timestamp,
     },
   };

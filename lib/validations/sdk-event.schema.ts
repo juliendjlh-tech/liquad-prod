@@ -19,8 +19,16 @@ export const sdkEventSchema = z.object({
   user_agent_name: z.string().nullable().optional(),
   user_agent_raw: z.string().nullable().optional(),
   matched_catalog_id: z.string().uuid().nullable().optional(),
-  decision: z.enum(["granted", "denied", "blocked_no_catalog"]),
-  price_applied: z.number().min(0).max(1).nullable().optional(),
+  decision: z.enum([
+    "granted",
+    "denied",
+    "blocked_no_catalog",
+    "authorized_paid",
+    "denied_authorization_required",
+    "denied_invalid_token",
+  ]),
+  price_applied: z.number().min(0).nullable().optional(),
+  consumer_workspace_id: z.string().uuid().nullable().optional(),
   timestamp: z.string().datetime(),
 });
 

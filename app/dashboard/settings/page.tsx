@@ -20,6 +20,8 @@ interface WorkspaceInfo {
   id: string;
   name: string;
   created_at: string;
+  balance_eur?: number;
+  initial_credit_eur?: number;
 }
 
 export default function SettingsPage() {
@@ -183,6 +185,30 @@ export default function SettingsPage() {
               : "-"}
           </p>
         </div>
+      </section>
+
+      {/* Credits */}
+      <section className="rounded-lg border border-gray-200 bg-white p-6">
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Credits</h2>
+        <div className="flex gap-8">
+          <div>
+            <p className="text-sm text-gray-500">Solde actuel</p>
+            <p className="text-2xl font-bold text-gray-900">
+              {workspace?.balance_eur?.toFixed(2) ?? "0.00"} EUR
+            </p>
+          </div>
+          <div>
+            <p className="text-sm text-gray-500">Credit initial</p>
+            <p className="text-lg text-gray-600">
+              {workspace?.initial_credit_eur?.toFixed(2) ?? "10.00"} EUR
+            </p>
+          </div>
+        </div>
+        {workspace?.balance_eur === 0 && (
+          <p className="mt-2 text-sm text-amber-600">
+            Solde epuise. Contactez l&apos;administrateur pour recharger.
+          </p>
+        )}
       </section>
 
       {/* API Key */}

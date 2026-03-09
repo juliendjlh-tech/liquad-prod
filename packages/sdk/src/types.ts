@@ -1,6 +1,21 @@
 import type { IncomingMessage, ServerResponse } from "http";
 
 /**
+ * JWT payload claims for access tokens.
+ * Signed by publisher's jwt_signing_secret, verified locally by SDK.
+ */
+export interface JwtPayload {
+  sub: string; // consumer_workspace_id
+  pub: string; // publisher_workspace_id
+  url: string; // normalized content URL
+  cat: string; // catalog_id
+  amt: number; // price EUR
+  exp: number; // expiration timestamp
+  iat: number; // issued at
+  jti: string; // grant_id
+}
+
+/**
  * Configuration for the Liquad SDK middleware.
  */
 export interface LiquadConfig {

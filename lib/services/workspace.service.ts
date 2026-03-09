@@ -144,7 +144,7 @@ export async function createWorkspace(
   // Step 3: Insert the workspace with the hashed key
   const { data: workspace, error: wsError } = await supabase
     .from("workspaces")
-    .insert({ name, api_key_hash: apiKeyHash })
+    .insert({ name, api_key_hash: apiKeyHash, api_key_prefix: apiKey.slice(0, 11) })
     .select("id, name, created_at")
     .single();
 
@@ -368,6 +368,7 @@ export async function regenerateApiKey(
     .from("workspaces")
     .update({
       api_key_hash: newHash,
+      api_key_prefix: newApiKey.slice(0, 11),
       updated_at: new Date().toISOString(),
     })
     .eq("id", workspaceId);

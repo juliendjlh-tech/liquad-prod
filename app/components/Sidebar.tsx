@@ -14,6 +14,7 @@ const navLinks = [
   { label: "Contents", href: "/dashboard/contents" },
   { label: "AI Bots", href: "/dashboard/user-agents" },
   { label: "Catalogs", href: "/dashboard/catalogs" },
+  { label: "Revenue", href: "/dashboard/revenue" },
   { label: "SDK", href: "/dashboard/sdk" },
   { label: "Settings", href: "/dashboard/settings" },
 ];

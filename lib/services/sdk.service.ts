@@ -18,6 +18,7 @@ const DOMAIN_STALE_DAYS = 30;
 
 export interface SdkRules {
   workspace_id: string;
+  jwt_signing_secret: string;
   verified_domains: string[];
   user_agents: Array<{
     id: string;
@@ -55,6 +56,13 @@ export async function getWorkspaceRules(
   workspaceId: string
 ): Promise<SdkRules> {
   const supabase = await createServerClient();
+
+  // 0. Workspace jwt_signing_secret
+  const { data: workspace } = await supabase
+    .from("workspaces")
+    .select("jwt_signing_secret")
+    .eq("id", workspaceId)
+    .single();
 
   // 1. Verified domains
   const { data: domains } = await supabase
@@ -98,6 +106,7 @@ export async function getWorkspaceRules(
 
   return {
     workspace_id: workspaceId,
+    jwt_signing_secret: workspace?.jwt_signing_secret ?? "",
     verified_domains: (domains ?? []).map((d) => d.domain),
     user_agents: (agents ?? []).map((a) => ({
       id: a.id,
@@ -154,6 +163,7 @@ export async function ingestEvents(
       matched_catalog_id: e.matched_catalog_id ?? null,
       decision: e.decision,
       price_applied: e.price_applied ?? null,
+      consumer_workspace_id: e.consumer_workspace_id ?? null,
       timestamp: e.timestamp,
     }));
 

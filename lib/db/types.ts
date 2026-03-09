@@ -14,6 +14,61 @@ export type Database = {
   }
   public: {
     Tables: {
+      access_grants: {
+        Row: {
+          id: string
+          consumer_workspace_id: string
+          publisher_workspace_id: string
+          url: string
+          catalog_id: string
+          price_eur: number
+          expires_at: string
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          consumer_workspace_id: string
+          publisher_workspace_id: string
+          url: string
+          catalog_id: string
+          price_eur: number
+          expires_at: string
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          consumer_workspace_id?: string
+          publisher_workspace_id?: string
+          url?: string
+          catalog_id?: string
+          price_eur?: number
+          expires_at?: string
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "access_grants_consumer_workspace_id_fkey"
+            columns: ["consumer_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_grants_publisher_workspace_id_fkey"
+            columns: ["publisher_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_grants_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "catalogs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       catalog_agents: {
         Row: {
           catalog_id: string
@@ -123,6 +178,67 @@ export type Database = {
           },
         ]
       }
+      credit_transactions: {
+        Row: {
+          id: string
+          consumer_workspace_id: string
+          publisher_workspace_id: string
+          type: string
+          amount_eur: number
+          content_url: string | null
+          catalog_id: string | null
+          grant_id: string | null
+          description: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          consumer_workspace_id: string
+          publisher_workspace_id: string
+          type: string
+          amount_eur: number
+          content_url?: string | null
+          catalog_id?: string | null
+          grant_id?: string | null
+          description?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          consumer_workspace_id?: string
+          publisher_workspace_id?: string
+          type?: string
+          amount_eur?: number
+          content_url?: string | null
+          catalog_id?: string | null
+          grant_id?: string | null
+          description?: string | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_transactions_consumer_workspace_id_fkey"
+            columns: ["consumer_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_transactions_publisher_workspace_id_fkey"
+            columns: ["publisher_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_transactions_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "catalogs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       domains: {
         Row: {
           created_at: string | null
@@ -163,6 +279,7 @@ export type Database = {
       }
       sdk_events: {
         Row: {
+          consumer_workspace_id: string | null
           decision: string
           domain: string
           id: string
@@ -175,6 +292,7 @@ export type Database = {
           workspace_id: string
         }
         Insert: {
+          consumer_workspace_id?: string | null
           decision: string
           domain: string
           id?: string
@@ -187,6 +305,7 @@ export type Database = {
           workspace_id: string
         }
         Update: {
+          consumer_workspace_id?: string | null
           decision?: string
           domain?: string
           id?: string
@@ -291,22 +410,34 @@ export type Database = {
       workspaces: {
         Row: {
           api_key_hash: string | null
+          api_key_prefix: string | null
+          balance_eur: number
           created_at: string | null
           id: string
+          initial_credit_eur: number
+          jwt_signing_secret: string
           name: string
           updated_at: string | null
         }
         Insert: {
           api_key_hash?: string | null
+          api_key_prefix?: string | null
+          balance_eur?: number
           created_at?: string | null
           id?: string
+          initial_credit_eur?: number
+          jwt_signing_secret?: string
           name: string
           updated_at?: string | null
         }
         Update: {
           api_key_hash?: string | null
+          api_key_prefix?: string | null
+          balance_eur?: number
           created_at?: string | null
           id?: string
+          initial_credit_eur?: number
+          jwt_signing_secret?: string
           name?: string
           updated_at?: string | null
         }
@@ -317,7 +448,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      check_cache_and_debit: {
+        Args: {
+          p_consumer_id: string
+          p_publisher_id: string
+          p_url: string
+          p_catalog_id: string
+          p_price_eur: number
+          p_ttl_minutes?: number
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never

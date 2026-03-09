@@ -9,8 +9,15 @@ export interface SdkEvent {
   user_agent_name: string | null;
   user_agent_raw: string | null;
   matched_catalog_id: string | null;
-  decision: "granted" | "denied" | "blocked_no_catalog";
+  decision:
+    | "granted"
+    | "denied"
+    | "blocked_no_catalog"
+    | "authorized_paid"
+    | "denied_authorization_required"
+    | "denied_invalid_token";
   price_applied: number | null;
+  consumer_workspace_id: string | null;
   timestamp: string; // ISO 8601
 }
 

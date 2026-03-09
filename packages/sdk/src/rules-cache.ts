@@ -5,6 +5,7 @@ import type { LiquadConfig } from "./types";
  */
 export interface CachedRules {
   workspace_id: string;
+  jwt_signing_secret: string;
   verified_domains: string[];
   user_agents: Array<{
     id: string;
@@ -110,6 +111,10 @@ export function createRulesCache(config: LiquadConfig) {
 
     getRules(): CachedRules | null {
       return rules;
+    },
+
+    getJwtSecret(): string | null {
+      return rules?.jwt_signing_secret ?? null;
     },
 
     async refresh(): Promise<void> {
