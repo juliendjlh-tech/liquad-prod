@@ -82,10 +82,11 @@ export default function SettingsPage() {
 
     if (res.ok) {
       const json = await res.json();
-      setApiKeyRevealed(json.apiKey);
+      setApiKeyRevealed(json.api_key);
       showToast("API key regenerated", "success");
     } else {
-      showToast("Failed to regenerate key", "error");
+      const errJson = await res.json().catch(() => ({}));
+      showToast((errJson as { error?: string }).error ?? "Failed to regenerate key", "error");
     }
   };
 

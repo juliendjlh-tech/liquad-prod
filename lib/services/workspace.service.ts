@@ -374,7 +374,7 @@ export async function regenerateApiKey(
     .eq("id", workspaceId);
 
   if (updateError) {
-    throw new Error("UPDATE_FAILED");
+    throw new Error(`UPDATE_FAILED: ${updateError.message}`);
   }
 
   // Step 6: Return new plaintext key (shown once, never again)

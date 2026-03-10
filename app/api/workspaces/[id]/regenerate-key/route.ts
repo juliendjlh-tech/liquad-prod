@@ -69,8 +69,9 @@ export async function POST(
       }
     }
 
+    console.error("[regenerate-key]", err);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: err instanceof Error ? err.message : "Internal server error" },
       { status: 500 }
     );
   }
