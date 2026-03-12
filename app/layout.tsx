@@ -14,9 +14,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Liquad — Monétisez l'accès IA à votre contenu",
+  title: "Liquad — Monetize AI access to your content",
   description:
-    "Liquad permet aux éditeurs de surveiller, contrôler et monétiser l'accès de leurs contenus par les bots IA. Intégration en 5 minutes, sans modifier votre code.",
+    "Liquad lets publishers monitor, control, and monetize AI bot access to their content. Integration in 5 minutes, no code changes required.",
 };
 
 export default function RootLayout({

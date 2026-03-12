@@ -42,7 +42,7 @@ export default function LoginPage() {
     if (error) {
       setError(error.message);
     } else {
-      setError('Vérifiez votre email pour confirmer votre compte !');
+      setError('Check your email to confirm your account!');
     }
     setLoading(false);
   };
@@ -50,7 +50,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-md w-96">
-        <h1 className="text-2xl font-bold mb-6">Connexion</h1>
+        <h1 className="text-2xl font-bold mb-6">Login</h1>
         
         {error && (
           <div className="bg-red-100 text-red-700 p-3 rounded mb-4">
@@ -72,7 +72,7 @@ export default function LoginPage() {
 
           <div className="mb-6">
             <label className="block text-sm font-medium mb-2">
-              Mot de passe
+              Password
             </label>
             <input
               type="password"
@@ -88,7 +88,7 @@ export default function LoginPage() {
             disabled={loading}
             className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:opacity-50"
           >
-            {loading ? 'Chargement...' : 'Se connecter'}
+            {loading ? 'Loading...' : 'Log in'}
           </button>
         </form>
 
@@ -97,7 +97,7 @@ export default function LoginPage() {
           disabled={loading}
           className="w-full mt-2 border border-blue-600 text-blue-600 py-2 rounded hover:bg-blue-50"
         >
-          Créer un compte
+          Create an account
         </button>
       </div>
     </div>

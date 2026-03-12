@@ -46,3 +46,6 @@ next-env.d.ts
 /PRDs
 /Kozan - Agents project
 /User-Stories
+/Launch*
+/decks*
+/app/archives

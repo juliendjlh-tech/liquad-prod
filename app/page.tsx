@@ -1,303 +1,342 @@
 import Link from "next/link";
 
 // ╔══════════════════════════════════════════════════════════════════════╗
-// ║           CONTENU DE LA HOMEPAGE — MODIFIABLE ICI                   ║
-// ║  Pas besoin de connaissances techniques pour éditer ces blocs.      ║
-// ║  Chaque section est clairement délimitée et commentée.              ║
+// ║  LIQUAD LANDING PAGE v4 — Conversion-Optimized (English)            ║
+// ║  Based on: Strategic Launch Analysis Phases 1-6                     ║
+// ║  Positioning: "Big Fish, Small Pond" — EU mid-size publishers       ║
+// ║  Messaging Architecture: See, Control, Earn                         ║
+// ║  Each section maps to a conversion psychology principle.            ║
 // ╚══════════════════════════════════════════════════════════════════════╝
 
-// ── SECTION HERO ──────────────────────────────────────────────────────
+// ── HERO — Outcome-first, single clear CTA ──────────────────────────
 const HERO = {
-  badge: "Accès anticipé — places limitées",
-  // OUTCOME-FIRST : ce que le visiteur obtient, pas ce qu'il perd
-  headline_line1: "Votre contenu alimente des milliards de requêtes IA.",
-  headline_line2: "Transformez chaque accès en revenu récurrent.",
+  badge: "Early Access — Limited spots",
+  headline_line1: "AI bots consume your content daily.",
+  headline_line2: "Start getting paid for it.",
   subheadline:
-    "Liquad connecte votre expertise aux services IA qui acceptent de la rémunérer. Visibilité sur chaque accès. Contrôle sur chaque règle. Revenus sur chaque intégration.",
-  cta_primary: { label: "Demander l'accès", href: "/login" },
-  cta_secondary: { label: "Voir comment ça marche", href: "#how-it-works" },
-  // Stats — chiffres vérifiés, sources indiquées dans stats_note
+    "Liquad gives European publishers visibility into AI bot traffic, granular licensing rules, and built-in payments — in a self-serve platform you can deploy in 30 minutes.",
+  cta_primary: { label: "Request Early Access", href: "/login" },
+  cta_secondary: { label: "See how it works", href: "#how-it-works" },
   stats: [
-    { value: "-33%", label: "De trafic Search chez les éditeurs en 2025*" },
-    { value: "2,5 Mrd", label: "Requêtes IA traitées chaque jour†" },
-    { value: "1 API", label: "Pour accéder à tous les services IA du réseau" },
+    { value: "-25%", label: "Search volume decline by 2026 due to AI" },
+    { value: "2.5B", label: "AI prompts processed every day" },
+    { value: "<5ms", label: "SDK latency impact on your site" },
   ],
   stats_note:
-    "* Chartbeat / Reuters Institute Trends Report, janv. 2026  †OpenAI via TechCrunch, juil. 2025",
+    "Gartner Feb 2024 · OpenAI via TechCrunch Jul 2025 · Internal benchmark",
 };
 
-// ── SECTION URGENCE : CE QUI ARRIVE À VOTRE MODÈLE ÉCONOMIQUE ─────────
-// Chiffres vérifiés — sources indiquées sur chaque stat
-const PUBLISHER_IMPACT = {
-  eyebrow: "Ce qui arrive à votre modèle économique",
-  // Stat principale — source : Gartner, fév. 2024
+// ── PROBLEM — Three converging pain signals ─────────────────────────
+const PROBLEM = {
+  eyebrow: "The problem",
   stat_headline: "-25%",
   stat_desc:
-    "de volume de recherche traditionnelle attendu d'ici 2026, à mesure que les utilisateurs migrent vers les agents IA et les assistants conversationnels.",
-  stat_source: "Gartner, février 2024",
+    "of traditional search volume expected by 2026 as users migrate to AI chatbots and virtual agents.",
+  stat_source: "Gartner, February 2024",
   stat_source_url:
     "https://www.gartner.com/en/newsroom/press-releases/2024-02-19-gartner-predicts-search-engine-volume-will-drop-25-percent-by-2026-due-to-ai-chatbots-and-other-virtual-agents",
-  headline: "Trois signaux qui convergent. Une seule issue.",
+  headline: "Three signals converging. One outcome.",
   pains: [
     {
       icon: "📉",
-      // Stat : AdExchanger 2025 / DCN study Digiday août 2025
       stat: "-65%",
-      stat_context: "de revenus publicitaires",
-      title: "Vos revenus publicitaires s'érodent",
-      desc: "Moins de visites, moins d'impressions, moins de demande annonceurs. Certains éditeurs ont déjà enregistré des baisses de revenus display allant jusqu'à 65% après l'effondrement de leur trafic Search.",
+      stat_context: "ad revenue loss",
+      title: "Your ad revenue is eroding",
+      desc: "Fewer visits, fewer impressions, lower advertiser demand. Some publishers have already seen display revenue drops of up to 65% after their search traffic collapsed.",
       source: "AdExchanger, 2025",
       source_url:
         "https://www.adexchanger.com/publishers/the-ai-search-reckoning-is-dismantling-open-web-traffic-and-publishers-may-never-recover/",
     },
     {
       icon: "🧭",
-      // Stat : Similarweb via SE Roundtable, juil. 2025
       stat: "69%",
-      stat_context: "des recherches Google sans clic",
-      title: "Vos leviers d'acquisition ne fonctionnent plus",
-      desc: "69% des recherches Google ne génèrent plus aucun clic vers un site — contre 56% il y a un an. SEO, campagnes payantes, newsletters : l'IA capte le haut du funnel avant vous.",
-      source: "Similarweb / SE Roundtable, juil. 2025",
+      stat_context: "of Google searches with zero clicks",
+      title: "Your acquisition channels are broken",
+      desc: "69% of Google searches generate zero clicks to any website — up from 56% a year ago. SEO, paid campaigns, newsletters: AI captures the top of funnel before you do.",
+      source: "Similarweb / SE Roundtable, Jul 2025",
       source_url:
         "https://www.seroundtable.com/similarweb-google-zero-click-search-growth-39706.html",
     },
     {
       icon: "🧬",
-      // Stat : Reuters Institute Trends Report 2026, janv. 2026 — 280 dirigeants médias, 51 pays
       stat: "-43%",
-      stat_context: "de trafic Search attendu d'ici 2029",
-      title: "Vous perdez vos données audience",
-      desc: "280 dirigeants médias issus de 51 pays anticipent une chute de 43% des référencements Search d'ici 2029. Sans trafic on-site, vos données comportementales s'évaporent. Segmentation, personnalisation, rétention : tout s'affaiblit.",
-      source: "Reuters Institute Trends Report, janv. 2026",
+      stat_context: "search traffic decline by 2029",
+      title: "You're losing your audience data",
+      desc: "280 media executives from 51 countries expect a 43% decline in search referrals by 2029. Without on-site traffic, your behavioral data evaporates — segmentation, personalization, retention all weaken.",
+      source: "Reuters Institute Trends Report, Jan 2026",
       source_url:
         "https://reutersinstitute.politics.ox.ac.uk/journalism-media-and-technology-trends-and-predictions-2026",
     },
   ],
 };
 
-// ── SECTION REFRAME ────────────────────────────────────────────────────
+// ── REFRAME — Shift from threat to opportunity ──────────────────────
 const REFRAME = {
   question:
-    "Et si les services IA qui consomment votre contenu devenaient vos meilleurs clients ?",
+    "What if the AI services consuming your content became your best customers?",
   context:
-    "Aujourd'hui ils accèdent à vos contenus sans vous demander. Demain, ils ont besoin de sources fiables, traçables, à jour — que leurs agents peuvent intégrer légalement. Ce passage de l'accès gratuit à la licence rémunérée est déjà en cours. Liquad en est le pont.",
+    "Today they access your content without asking. Tomorrow they need reliable, traceable, up-to-date sources their agents can integrate legally. The shift from free access to paid licensing is already underway. Liquad is the bridge.",
 };
 
-// ── SECTION SOLUTION : LES 3 PILIERS ──────────────────────────────────
+// ── SOLUTION — Three value pillars (from Phase 6 Message House) ─────
 const SOLUTION = {
-  eyebrow: "La plateforme",
-  headline: "Le pont entre votre expertise et les milliards de requêtes IA.",
+  eyebrow: "The platform",
+  headline: "See. Control. Earn.",
   subheadline:
-    "Liquad est la plateforme qui connecte votre contenu aux services IA qui acceptent de le rémunérer — avec les règles que vous définissez.",
+    "Liquad is the AI content licensing platform that connects your content to AI services willing to pay — on terms you define.",
   pillars: [
     {
       number: "1",
-      title: "Vos règles d'accès. Votre contenu.",
-      desc: "Définissez précisément quels services IA peuvent accéder à quoi, dans quelles conditions et à quel prix. Bloquez l'extraction non autorisée. Ouvrez la porte aux partenaires licenciés — un contenu à la fois.",
+      title: "See your AI traffic",
+      desc: "Know exactly which AI bots access your content, how often, and what they read most. Real-time dashboard from day one of deployment.",
+      detail: "Tracks GPTBot, ClaudeBot, PerplexityBot, Google-Extended, Bytespider + custom bots",
     },
     {
       number: "2",
-      title: "Votre contenu, prêt à être intégré par les IA",
-      desc: "Nous structurons votre base de contenus pour qu'elle soit directement utilisable dans les workflows IA : recherche sémantique, RAG, agents autonomes. Chaque accès est tracé, sourcé et attribué à votre marque.",
+      title: "Set your own terms",
+      desc: "Define precisely which AI services can access what content, under which conditions, and at what price. Per article, per bot, per catalog.",
+      detail: "Content-level granularity — not domain-level like CDN solutions",
     },
     {
       number: "3",
-      title: "Un moteur de revenus et d'intelligence",
-      desc: "Statistiques d'utilisation en temps réel, recommandations de prix selon les benchmarks du marché, signaux de demande par thématique. Adaptez votre stratégie de contenu à l'ère IA — et maximisez chaque distribution.",
+      title: "Earn revenue per access",
+      desc: "Built-in EUR credit system with micro-pricing. Every AI access is tracked, billed, and paid. Revenue arrives monthly with full analytics.",
+      detail: "Zero double-billing — atomic PostgreSQL transactions with dedup cache",
     },
   ],
 };
 
-// ── SECTION NETWORK EFFECT + MODÈLE ÉCONOMIQUE (fusionnés) ────────────
-// Sources : OpenAI/TechCrunch juil. 2025, Gartner août 2025, Grand View Research 2024
-const NETWORK = {
-  eyebrow: "Le network effect",
-  headline: "Plus le réseau grandit, plus votre contenu vaut cher.",
-  subheadline:
-    "Une seule API d'authentification. Deux côtés du marché. Une boucle qui se renforce à chaque requête.",
+// ── TECHNICAL PROOF — For the CTO persona ───────────────────────────
+const TECH_PROOF = {
+  eyebrow: "Built for production",
+  headline: "Your site stays fast. We guarantee it.",
+  stats: [
+    {
+      value: "0.01ms",
+      label: "Token verification",
+      desc: "JWT verified locally using HS256 — zero network calls on the hot path",
+    },
+    {
+      value: "3 lines",
+      label: "Integration code",
+      desc: "Zero-dependency Node.js middleware. npm install, add middleware, deploy",
+    },
+    {
+      value: "5 min",
+      label: "Rule cache TTL",
+      desc: "Rules cached locally — no API calls for every request. Events batched async",
+    },
+    {
+      value: "0",
+      label: "Downtime risk",
+      desc: "If the SDK encounters an error, it fails open. Your site is never impacted",
+    },
+  ],
+  code_snippet: `import { liquad } from '@liquad/sdk';
 
-  // Côté éditeurs
-  side_publishers: {
-    icon: "📢",
-    title: "Un réseau sélectif d'éditeurs",
-    desc: "Une alliance d'éditeurs, d'institutions expertes et de producteurs de contenu — qui apportent ce que l'IA ne peut pas créer seule : expertise sectorielle, contenus structurés, bases de connaissances construites sur des années.",
-    // Modèle éco côté éditeurs
-    model_title: "Comment vous gagnez",
-    model_items: [
-      "Abonnement fixe pour rejoindre le réseau",
-      "Partage des revenus sur chaque récupération de contenu",
-      "Benchmarks et recommandations de prix inclus",
-    ],
-  },
-
-  // Centre — la boucle + les chiffres du marché (pas de Liquad, mais du marché)
-  loop: {
-    title: "Une couche d'intelligence continue",
-    desc: "Chaque accès, chaque requête, chaque intégration génère de nouveaux signaux : demande par thématique, lacunes de contenu, opportunités de prix. Ces signaux reviennent à vos équipes éditoriales pour renforcer votre autorité là où ça compte.",
-    network_argument:
-      "Plus d'éditeurs → meilleure couverture → plus de services IA → plus de revenus redistribués → plus d'éditeurs.",
-    // Chiffres de marché vérifiés — ils illustrent la taille de l'opportunité, pas la traction Liquad
-    market_stats: [
-      {
-        value: "2,5 Mrd",
-        label: "requêtes ChatGPT par jour",
-        source: "OpenAI, juil. 2025",
-        source_url: "https://techcrunch.com/2025/07/21/chatgpt-users-send-2-5-billion-prompts-a-day/",
-      },
-      {
-        value: "+357%",
-        label: "de croissance du trafic IA en 1 an",
-        source: "SE Ranking, 2025",
-        source_url: "https://seranking.com/blog/ai-traffic-research-study/",
-      },
-      {
-        value: "40%",
-        label: "des apps enterprise avec agents IA en 2026",
-        source: "Gartner, août 2025",
-        source_url:
-          "https://www.gartner.com/en/newsroom/press-releases/2025-08-26-gartner-predicts-40-percent-of-enterprise-apps-will-feature-task-specific-ai-agents-by-2026-up-from-less-than-5-percent-in-2025",
-      },
-    ],
-  },
-
-  // Côté services IA
-  side_ai: {
-    icon: "🔍",
-    title: "Un univers de services IA en expansion",
-    desc: "Startups agentiques, copilotes métier, assistants personnels, workflows autonomes — tous ont besoin de sources fiables pour éviter les hallucinations et différencier leurs produits. Le marché RAG atteindra 11 milliards $ en 2030.",
-    source: "Grand View Research, 2024",
-    source_url:
-      "https://www.grandviewresearch.com/industry-analysis/retrieval-augmented-generation-rag-market-report",
-    model_title: "Ce qu'ils paient pour obtenir",
-    model_items: [
-      "Accès légal à des contenus de référence",
-      "Sources traçables et attribuées (anti-hallucinations)",
-      "Couverture thématique mise à jour en continu",
-    ],
-  },
-
-  // Note de transparence sur le modèle économique
-  model_note:
-    "Vous ne payez pas pour une promesse. Vous rejoignez un réseau aligné sur vos intérêts : nous gagnons quand vous distribuez, pas avant.",
+app.use(liquad({
+  apiKey: process.env.LIQUAD_API_KEY
+}));
+// That's it. Deploy.`,
 };
 
-// ── SECTION COMMENT ÇA MARCHE (3 étapes, compressé) ──────────────────
+// ── HOW IT WORKS — 3 steps ──────────────────────────────────────────
 const HOW_IT_WORKS = {
-  eyebrow: "Comment ça marche",
-  headline: "Opérationnel en 3 étapes.",
+  eyebrow: "How it works",
+  headline: "Live in 30 minutes. Three steps.",
   steps: [
     {
       number: "01",
-      title: "Connectez votre catalogue",
-      desc: "Importez vos contenus via sitemap ou API. Liquad indexe et structure automatiquement votre base de connaissances — aucune saisie manuelle.",
+      title: "Connect your catalog",
+      desc: "Import your content via sitemap or API. Liquad indexes and structures your knowledge base automatically — no manual entry.",
     },
     {
       number: "02",
-      title: "Définissez vos règles et vos prix",
-      desc: "Choisissez quels services IA accèdent à quoi, dans quelles conditions et à quel tarif. Un contenu à la fois, un partenaire à la fois, à votre rythme.",
+      title: "Define your rules and pricing",
+      desc: "Choose which AI services access what, under which conditions, and at what rate. One article at a time, one partner at a time, at your pace.",
     },
     {
       number: "03",
-      title: "Distribuez, pilotez, encaissez",
-      desc: "Les services IA du réseau s'authentifient via une API unique. Chaque accès est tracé et monétisé. Vos revenus arrivent chaque mois, avec les statistiques associées.",
+      title: "Deploy, monitor, earn",
+      desc: "AI services in the network authenticate via a single API. Every access is tracked and monetized. Revenue arrives monthly with full analytics.",
     },
   ],
 };
 
-// ── SECTION PREUVE MARCHÉ ─────────────────────────────────────────────
+// ── EU ADVANTAGE — Positioning pillar 3 ─────────────────────────────
+const EU_ADVANTAGE = {
+  eyebrow: "Built for Europe",
+  headline: "The only AI licensing platform designed for European publishers.",
+  points: [
+    {
+      title: "GDPR-native by design",
+      desc: "No personal data collected — only bot identifiers (user-agent strings) and URLs. No US data transfers.",
+    },
+    {
+      title: "EU Copyright Directive aligned",
+      desc: "Designed around Article 15 — publisher rights for AI content usage. Exercise your legal leverage with the right infrastructure.",
+    },
+    {
+      title: "Deploy without legal review",
+      desc: "EU-hosted infrastructure, transparent data handling, no consent complexity. Your legal team will thank you.",
+    },
+  ],
+};
+
+// ── MARKET PROOF — Deals already happening ──────────────────────────
 const MARKET_PROOF = {
-  eyebrow: "Le marché existe déjà",
-  headline: "Les grands éditeurs ont déjà négocié.\nVous pouvez faire pareil.",
-  note: "Ces deals ont été rendus publics. Des centaines d'autres sont en cours de négociation.",
+  eyebrow: "The market already exists",
+  headline: "Major publishers have already negotiated.\nNow it's your turn.",
+  note: "These deals were made public. Hundreds more are in negotiation.",
   deals: [
     {
       publisher: "News Corp",
       partner: "OpenAI",
-      amount: "250 M$",
-      detail: "Wall Street Journal, NY Post, MarketWatch — sur 5 ans",
+      amount: "$250M",
+      detail: "Wall Street Journal, NY Post, MarketWatch — over 5 years",
     },
     {
       publisher: "Reuters",
       partner: "Meta",
-      amount: "65 M$",
-      detail: "Accès à l'archive Reuters",
+      amount: "$65M",
+      detail: "Access to the Reuters archive",
     },
     {
       publisher: "Axel Springer",
       partner: "OpenAI",
-      amount: "50 M$",
+      amount: "$50M",
       detail: "Bild, Politico, Business Insider",
     },
   ],
-  cta_label: "Rejoindre le réseau et entrer dans ces négociations →",
+  bottom_line:
+    "These publishers had legal teams and leverage. Liquad gives you the same tools — without the overhead.",
   disclaimer:
-    "Sources : Press Gazette, Media and the Machine Substack (2024–2025). Liquad n'est pas affilié à ces éditeurs.",
+    "Sources: Press Gazette, Media and the Machine Substack (2024–2025). Liquad is not affiliated with these publishers.",
 };
 
-// ── SECTION FAQ ───────────────────────────────────────────────────────
+// ── COMPETITIVE COMPARISON — Differentiation at a glance ────────────
+const COMPARISON = {
+  eyebrow: "Why Liquad",
+  headline: "Not a better mousetrap. A different approach.",
+  competitors: [
+    {
+      name: "robots.txt",
+      verdict: "Binary. Block or allow, no revenue.",
+      limitations: ["No monetization", "No analytics", "No granularity", "Ignored by some bots"],
+    },
+    /**{
+      name: "Enterprise solutions",
+      verdict: "Built for the biggest publishers.",
+      limitations: ["Enterprise sales cycles", "Usage-based pricing", "US-centric", "No self-serve"],
+    },*/
+    {
+      name: "CDN-level tools",
+      verdict: "Domain-wide. Not content-level.",
+      limitations: ["Domain-level control only", "CDN lock-in required", "No content marketplace", "No credit system"],
+    },
+  ],
+  liquad: {
+    name: "Liquad",
+    points: [
+      "Content-level granularity (per URL, per bot, per price)",
+      "Self-serve, deploy in 30 minutes",
+      "Flat fee — predictable, affordable",
+      "EU-native, GDPR-compliant by design",
+      "Built-in EUR credit system",
+      "Bidirectional marketplace",
+    ],
+  },
+};
+
+// ── PRICING — Clear, simple, flat fee ───────────────────────────────
+const PRICING = {
+  eyebrow: "Pricing",
+  headline: "Flat fee. No surprises.",
+  subheadline: "We don't charge per pageview or per bot. You pay a predictable monthly fee to join the network.",
+  plan: {
+    name: "Early Access",
+    price: "Free during beta",
+    price_note: "Flat monthly fee after public launch",
+    features: [
+      "Full dashboard & AI bot analytics",
+      "Unlimited content catalog imports",
+      "Granular licensing rules (per URL, per bot)",
+      "Built-in EUR credit system",
+      "Node.js SDK with zero dependencies",
+      "EU-hosted, GDPR-compliant",
+    ],
+    cta: { label: "Request Early Access", href: "/login" },
+  },
+  model_note:
+    "Our model is aligned with yours: we earn when you distribute, not before.",
+};
+
+// ── FAQ — Objection handling (from persona analysis) ────────────────
 const FAQ = {
-  eyebrow: "Questions fréquentes",
-  headline: "Tout ce que vous voulez savoir",
+  eyebrow: "FAQ",
+  headline: "Everything you want to know",
   items: [
-    // Questions existantes
     {
-      q: "Comment Liquad m'aide concrètement à remplacer des revenus publicitaires perdus ?",
-      a: "En créant un canal de revenus directs indépendant du trafic : les services IA paient pour accéder à votre contenu via le réseau Liquad. Plus votre contenu est spécialisé et à jour, plus il est valorisé. C'est un revenu récurrent qui ne dépend pas du volume de visiteurs sur votre site.",
+      q: "Will this affect my SEO?",
+      a: "No. Liquad only manages AI bot access — Googlebot, Bingbot, and all search engine crawlers are never affected. Your organic search rankings remain fully intact.",
     },
     {
-      q: "Qu'est-ce que l'API unique d'authentification ?",
-      a: "Plutôt que de négocier un accord séparé avec chaque service IA — ce qui nécessiterait des mois de discussions juridiques — Liquad propose une API commune. Les services IA s'authentifient une fois et accèdent à l'ensemble des éditeurs partenaires selon leurs règles. C'est ce qui crée l'effet réseau : votre contenu devient accessible à tous les partenaires en un seul déploiement.",
+      q: "How does Liquad help me replace lost ad revenue?",
+      a: "By creating a direct revenue channel independent of traffic. AI services pay to access your content through the Liquad network. The more specialized and current your content, the more it's valued. It's recurring revenue that doesn't depend on visitor volume.",
     },
     {
-      q: "Mon référencement naturel est-il affecté ?",
-      a: "Non. Liquad opère uniquement sur les accès des agents IA déclarés dans le réseau. Googlebot, Bingbot et tous les robots d'indexation SEO ne sont jamais concernés. Votre référencement naturel est totalement préservé.",
+      q: "What is the single-API authentication?",
+      a: "Instead of negotiating separate agreements with each AI service — requiring months of legal discussions — Liquad provides a shared API. AI services authenticate once and access all partner publishers according to their rules. This creates the network effect: your content becomes accessible to all partners in one deployment.",
     },
     {
-      q: "Qui peut rejoindre le réseau ?",
-      a: "Tout éditeur de contenu : médias, presse spécialisée, institutions académiques, cabinets d'expertise, plateformes de données professionnelles. La sélection garantit la qualité du réseau — ce qui protège la valeur de votre contenu pour les partenaires IA.",
+      q: "Who can join the network?",
+      a: "Any content publisher: media outlets, trade press, academic institutions, expert firms, professional data platforms. The selection process ensures network quality — which protects the value of your content for AI partners.",
     },
     {
-      q: "Quand est-ce que je commence à générer des revenus ?",
-      a: "Dès que votre contenu est accessible dans le réseau et qu'un service IA partenaire y accède. Les revenus sont calculés à chaque récupération et reversés chaque mois selon le modèle abonnement + partage des revenus.",
-    },
-    // Questions ajoutées — objections réelles identifiées
-    {
-      q: "Combien de services IA sont déjà connectés au réseau ?",
-      a: "Liquad est en accès anticipé. Le réseau est en cours de déploiement avec des partenaires sélectionnés. Rejoindre maintenant signifie être intégré en priorité lors des premières connexions avec les services IA partenaires — et bénéficier de conditions d'entrée préférentielles.",
+      q: "When do I start generating revenue?",
+      a: "As soon as your content is accessible in the network and an AI partner service accesses it. Revenue is calculated per retrieval and paid out monthly under the subscription + revenue share model.",
     },
     {
-      q: "Quel est mon partage des revenus ? Combien est-ce que je touche réellement ?",
-      a: "Une part significative de chaque transaction revient directement à l'éditeur d'origine. Les conditions précises dépendent du type de contenu, de la fréquence d'accès et du volume distribué. Nous les définissons ensemble lors de l'onboarding. Notre modèle est aligné sur le vôtre : nous ne gagnons que si vous distribuez.",
+      q: "How many AI services are already connected?",
+      a: "Liquad is in early access. The network is being deployed with selected partners. Joining now means being integrated first when AI service connections launch — with preferential entry conditions.",
+    },
+    {
+      q: "What's my revenue share? How much do I actually earn?",
+      a: "A significant portion of each transaction goes directly to the originating publisher. Exact terms depend on content type, access frequency, and distribution volume. We define them together during onboarding. Our model is aligned with yours — we only earn when you distribute.",
+    },
+    {
+      q: "What if the SDK adds latency to my site?",
+      a: "The SDK adds less than 5ms of latency. Token verification is done locally in 0.01ms using JWT — zero network calls on the hot path. Rules are cached locally. If anything fails, the SDK fails open — your site is never impacted.",
     },
   ],
 };
 
-// ── SECTION CTA FINAL ─────────────────────────────────────────────────
+// ── FINAL CTA ───────────────────────────────────────────────────────
 const CTA_FINAL = {
-  headline: "Le trafic Search se redistribue vers l'IA.\nVotre place dans cet écosystème, vous la choisissez.",
+  headline: "Every day without Liquad, your content serves AI for free.",
   subheadline:
-    "Chaque jour sans Liquad, vos contenus servent les agents IA gratuitement. Rejoignez le réseau et transformez cette valeur en revenus récurrents.",
-  cta_primary: { label: "Demander l'accès", href: "/login" },
-  cta_secondary: { label: "Voir comment ça marche", href: "#how-it-works" },
+    "Join the network. See your AI traffic. Set your terms. Start earning.",
+  cta_primary: { label: "Request Early Access", href: "/login" },
+  cta_secondary: { label: "See how it works", href: "#how-it-works" },
 };
 
-// ── FOOTER ────────────────────────────────────────────────────────────
+// ── FOOTER ──────────────────────────────────────────────────────────
 const FOOTER = {
   links: [
-    { label: "La plateforme", href: "#features" },
-    { label: "Network effect", href: "#network" },
-    { label: "Comment ça marche", href: "#how-it-works" },
+    { label: "Platform", href: "#features" },
+    { label: "How it works", href: "#how-it-works" },
+    { label: "Pricing", href: "#pricing" },
     { label: "FAQ", href: "#faq" },
-    { label: "Se connecter", href: "/login" },
+    { label: "Sign in", href: "/login" },
   ],
-  copyright: "© 2025 Liquad. Tous droits réservés.",
+  copyright: "© 2025 Liquad. All rights reserved.",
 };
 
 // ╔══════════════════════════════════════════════════════════════════════╗
-// ║              COMPOSANT PAGE — Ne pas modifier en dessous            ║
+// ║                        PAGE COMPONENT                               ║
 // ╚══════════════════════════════════════════════════════════════════════╝
 
-export default function Home() {
+export default function LandingPage() {
   return (
     <div className="min-h-screen bg-white">
 
@@ -347,40 +386,38 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ─── URGENCE ÉDITEURS ─────────────────────────────────────── */}
+      {/* ─── PROBLEM ──────────────────────────────────────────────── */}
       <section className="bg-gray-950 py-20">
         <div className="mx-auto max-w-5xl px-6">
           <p className="text-xs font-semibold uppercase tracking-widest text-blue-400 mb-8 text-center">
-            {PUBLISHER_IMPACT.eyebrow}
+            {PROBLEM.eyebrow}
           </p>
 
-          {/* Stat Gartner centrale */}
           <div className="flex flex-col sm:flex-row items-center gap-6 mb-14 max-w-3xl mx-auto">
             <div className="text-8xl font-black text-blue-400 shrink-0 leading-none">
-              {PUBLISHER_IMPACT.stat_headline}
+              {PROBLEM.stat_headline}
             </div>
             <div>
               <p className="text-lg text-gray-300 leading-relaxed mb-2">
-                {PUBLISHER_IMPACT.stat_desc}
+                {PROBLEM.stat_desc}
               </p>
               <a
-                href={PUBLISHER_IMPACT.stat_source_url}
+                href={PROBLEM.stat_source_url}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
               >
-                — {PUBLISHER_IMPACT.stat_source} ↗
+                — {PROBLEM.stat_source} ↗
               </a>
             </div>
           </div>
 
           <h2 className="text-2xl font-bold text-white text-center mb-10">
-            {PUBLISHER_IMPACT.headline}
+            {PROBLEM.headline}
           </h2>
 
-          {/* 3 douleurs avec stats sourçées */}
           <div className="grid gap-6 sm:grid-cols-3">
-            {PUBLISHER_IMPACT.pains.map((pain) => (
+            {PROBLEM.pains.map((pain) => (
               <div key={pain.title} className="rounded-2xl border border-gray-800 bg-gray-900 p-6">
                 <div className="text-3xl mb-3">{pain.icon}</div>
                 <div className="flex items-baseline gap-2 mb-1">
@@ -415,7 +452,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ─── SOLUTION : 3 PILIERS ─────────────────────────────────── */}
+      {/* ─── SOLUTION: 3 VALUE PILLARS ────────────────────────────── */}
       <section className="py-24 bg-gray-50" id="features">
         <div className="mx-auto max-w-7xl px-6">
           <div className="text-center mb-6">
@@ -440,132 +477,56 @@ export default function Home() {
                   {pillar.number}
                 </div>
                 <h3 className="text-base font-semibold text-gray-900 mb-3">{pillar.title}</h3>
-                <p className="text-sm text-gray-600 leading-relaxed">{pillar.desc}</p>
+                <p className="text-sm text-gray-600 leading-relaxed mb-4">{pillar.desc}</p>
+                <p className="text-xs text-blue-600 font-medium">{pillar.detail}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ─── NETWORK EFFECT + MODÈLE ÉCO (fusionnés) ─────────────── */}
-      <section className="py-24 bg-white" id="network">
+      {/* ─── TECHNICAL PROOF (CTO persona) ────────────────────────── */}
+      <section className="py-24 bg-gray-950" id="tech">
         <div className="mx-auto max-w-6xl px-6">
           <div className="text-center mb-16">
-            <p className="text-xs font-semibold uppercase tracking-widest text-blue-600 mb-4">
-              {NETWORK.eyebrow}
+            <p className="text-xs font-semibold uppercase tracking-widest text-blue-400 mb-4">
+              {TECH_PROOF.eyebrow}
             </p>
-            <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl mb-4">
-              {NETWORK.headline}
+            <h2 className="text-3xl font-bold text-white sm:text-4xl">
+              {TECH_PROOF.headline}
             </h2>
-            <p className="mx-auto max-w-2xl text-base text-gray-500 leading-relaxed">
-              {NETWORK.subheadline}
-            </p>
           </div>
 
-          {/* Diagramme réseau */}
-          <div className="grid gap-6 lg:grid-cols-3 items-start mb-10">
-
-            {/* Côté éditeurs */}
-            <div className="rounded-2xl border border-gray-100 bg-gray-50 p-8">
-              <div className="text-3xl mb-4">{NETWORK.side_publishers.icon}</div>
-              <h3 className="text-base font-semibold text-gray-900 mb-3">
-                {NETWORK.side_publishers.title}
-              </h3>
-              <p className="text-sm text-gray-600 leading-relaxed mb-6">
-                {NETWORK.side_publishers.desc}
-              </p>
-              <div className="border-t border-gray-200 pt-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                  {NETWORK.side_publishers.model_title}
-                </p>
-                <ul className="space-y-2">
-                  {NETWORK.side_publishers.model_items.map((item) => (
-                    <li key={item} className="flex items-start gap-2 text-xs text-gray-600">
-                      <span className="text-blue-500 mt-0.5 shrink-0">✓</span>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
+          <div className="grid gap-8 lg:grid-cols-2 items-start">
+            {/* Performance stats */}
+            <div className="grid grid-cols-2 gap-4">
+              {TECH_PROOF.stats.map((stat) => (
+                <div key={stat.label} className="rounded-2xl border border-gray-800 bg-gray-900 p-6">
+                  <div className="text-3xl font-black text-blue-400 mb-1">{stat.value}</div>
+                  <div className="text-sm font-semibold text-white mb-2">{stat.label}</div>
+                  <p className="text-xs text-gray-500 leading-relaxed">{stat.desc}</p>
+                </div>
+              ))}
             </div>
 
-            {/* Centre : boucle + chiffres marché */}
-            <div className="rounded-2xl border-2 border-blue-200 bg-blue-50 p-8 text-center lg:mt-6">
-              <div className="flex items-center justify-center gap-2 mb-1 text-blue-500 text-xs font-mono font-semibold">
-                <span>Contenus →</span>
+            {/* Code snippet */}
+            <div className="rounded-2xl border border-gray-800 bg-gray-900 p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="h-3 w-3 rounded-full bg-red-500/60" />
+                <div className="h-3 w-3 rounded-full bg-yellow-500/60" />
+                <div className="h-3 w-3 rounded-full bg-green-500/60" />
+                <span className="ml-2 text-xs text-gray-600 font-mono">server.js</span>
               </div>
-              <div className="h-px bg-blue-200 mb-1" />
-              <div className="flex items-center justify-center gap-2 mb-5 text-blue-500 text-xs font-mono font-semibold">
-                <span>← Revenus</span>
-              </div>
-              <h3 className="text-sm font-bold text-blue-900 mb-2">{NETWORK.loop.title}</h3>
-              <p className="text-xs text-blue-700 leading-relaxed mb-5">{NETWORK.loop.desc}</p>
-              <div className="rounded-xl bg-white border border-blue-200 px-4 py-3 mb-5">
-                <p className="text-xs text-gray-700 leading-relaxed font-medium">
-                  {NETWORK.loop.network_argument}
-                </p>
-              </div>
-              {/* Chiffres de marché — taille de l'opportunité */}
-              <div className="space-y-3">
-                {NETWORK.loop.market_stats.map((stat) => (
-                  <div key={stat.value} className="rounded-lg bg-blue-100 border border-blue-200 px-3 py-2">
-                    <div className="font-bold text-blue-800 text-sm">{stat.value}</div>
-                    <div className="text-xs text-blue-700 leading-tight">{stat.label}</div>
-                    <a
-                      href={stat.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-xs text-blue-400 hover:text-blue-600 transition-colors"
-                    >
-                      {stat.source} ↗
-                    </a>
-                  </div>
-                ))}
-              </div>
+              <pre className="text-sm text-gray-300 font-mono leading-relaxed overflow-x-auto">
+                <code>{TECH_PROOF.code_snippet}</code>
+              </pre>
             </div>
-
-            {/* Côté services IA */}
-            <div className="rounded-2xl border border-gray-100 bg-gray-50 p-8">
-              <div className="text-3xl mb-4">{NETWORK.side_ai.icon}</div>
-              <h3 className="text-base font-semibold text-gray-900 mb-3">
-                {NETWORK.side_ai.title}
-              </h3>
-              <p className="text-sm text-gray-600 leading-relaxed mb-2">
-                {NETWORK.side_ai.desc}
-              </p>
-              <a
-                href={NETWORK.side_ai.source_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-gray-400 hover:text-gray-600 transition-colors mb-5 block"
-              >
-                — {NETWORK.side_ai.source} ↗
-              </a>
-              <div className="border-t border-gray-200 pt-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                  {NETWORK.side_ai.model_title}
-                </p>
-                <ul className="space-y-2">
-                  {NETWORK.side_ai.model_items.map((item) => (
-                    <li key={item} className="flex items-start gap-2 text-xs text-gray-600">
-                      <span className="text-blue-500 mt-0.5 shrink-0">✓</span>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          {/* Note modèle éco */}
-          <div className="rounded-2xl border border-blue-100 bg-blue-50 px-8 py-5 text-center">
-            <p className="text-sm font-medium text-blue-800">{NETWORK.model_note}</p>
           </div>
         </div>
       </section>
 
-      {/* ─── COMMENT ÇA MARCHE (3 étapes) ────────────────────────── */}
-      <section className="py-24 bg-gray-50" id="how-it-works">
+      {/* ─── HOW IT WORKS (3 steps) ───────────────────────────────── */}
+      <section className="py-24 bg-white" id="how-it-works">
         <div className="mx-auto max-w-5xl px-6">
           <div className="text-center mb-16">
             <p className="text-xs font-semibold uppercase tracking-widest text-blue-600 mb-4">
@@ -594,7 +555,32 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ─── PREUVE MARCHÉ ────────────────────────────────────────── */}
+      {/* ─── EU ADVANTAGE ─────────────────────────────────────────── */}
+      <section className="py-24 bg-blue-50">
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="text-center mb-14">
+            <p className="text-xs font-semibold uppercase tracking-widest text-blue-600 mb-4">
+              {EU_ADVANTAGE.eyebrow}
+            </p>
+            <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl max-w-3xl mx-auto">
+              {EU_ADVANTAGE.headline}
+            </h2>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-3">
+            {EU_ADVANTAGE.points.map((point) => (
+              <div
+                key={point.title}
+                className="rounded-2xl bg-white border border-blue-100 p-8"
+              >
+                <h3 className="text-base font-semibold text-gray-900 mb-3">{point.title}</h3>
+                <p className="text-sm text-gray-600 leading-relaxed">{point.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── MARKET PROOF ─────────────────────────────────────────── */}
       <section className="py-24 bg-white">
         <div className="mx-auto max-w-4xl px-6">
           <div className="text-center mb-12">
@@ -613,7 +599,7 @@ export default function Home() {
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <div className="font-bold text-gray-900">{deal.publisher}</div>
-                    <div className="text-xs text-gray-500">× {deal.partner}</div>
+                    <div className="text-xs text-gray-500">x {deal.partner}</div>
                   </div>
                   <div className="text-xl font-black text-blue-600">{deal.amount}</div>
                 </div>
@@ -623,11 +609,94 @@ export default function Home() {
           </div>
 
           <div className="text-center">
-            <Link href="/login" className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors">
-              {MARKET_PROOF.cta_label}
-            </Link>
-            <p className="mt-4 text-xs text-gray-400">{MARKET_PROOF.disclaimer}</p>
+            <p className="text-sm font-medium text-gray-700 mb-2">{MARKET_PROOF.bottom_line}</p>
+            <p className="text-xs text-gray-400">{MARKET_PROOF.disclaimer}</p>
           </div>
+        </div>
+      </section>
+
+      {/* ─── COMPETITIVE COMPARISON ───────────────────────────────── */}
+      <section className="py-24 bg-gray-50">
+        <div className="mx-auto max-w-6xl px-6">
+          <div className="text-center mb-14">
+            <p className="text-xs font-semibold uppercase tracking-widest text-blue-600 mb-4">
+              {COMPARISON.eyebrow}
+            </p>
+            <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl">
+              {COMPARISON.headline}
+            </h2>
+          </div>
+
+          <div className="grid gap-6 lg:grid-cols-4">
+            {/* Competitor columns */}
+            {COMPARISON.competitors.map((comp) => (
+              <div key={comp.name} className="rounded-2xl border border-gray-200 bg-white p-6">
+                <h3 className="font-semibold text-gray-900 mb-2">{comp.name}</h3>
+                <p className="text-xs text-gray-500 mb-4">{comp.verdict}</p>
+                <ul className="space-y-2">
+                  {comp.limitations.map((lim) => (
+                    <li key={lim} className="flex items-start gap-2 text-xs text-gray-500">
+                      <span className="text-gray-300 mt-0.5 shrink-0">✗</span>
+                      {lim}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+
+            {/* Liquad column — highlighted */}
+            <div className="rounded-2xl border-2 border-blue-200 bg-blue-50 p-6">
+              <h3 className="font-semibold text-blue-900 mb-2">{COMPARISON.liquad.name}</h3>
+              <p className="text-xs text-blue-700 mb-4">Built for your segment.</p>
+              <ul className="space-y-2">
+                {COMPARISON.liquad.points.map((point) => (
+                  <li key={point} className="flex items-start gap-2 text-xs text-blue-800">
+                    <span className="text-blue-500 mt-0.5 shrink-0">✓</span>
+                    {point}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── PRICING ──────────────────────────────────────────────── */}
+      <section className="py-24 bg-white" id="pricing">
+        <div className="mx-auto max-w-3xl px-6 text-center">
+          <p className="text-xs font-semibold uppercase tracking-widest text-blue-600 mb-4">
+            {PRICING.eyebrow}
+          </p>
+          <h2 className="text-3xl font-bold text-gray-900 sm:text-4xl mb-4">
+            {PRICING.headline}
+          </h2>
+          <p className="text-base text-gray-500 leading-relaxed mb-12">
+            {PRICING.subheadline}
+          </p>
+
+          <div className="rounded-2xl border-2 border-blue-200 bg-blue-50 p-10 max-w-md mx-auto text-left">
+            <div className="text-center mb-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-1">{PRICING.plan.name}</h3>
+              <div className="text-3xl font-black text-blue-600">{PRICING.plan.price}</div>
+              <p className="text-xs text-gray-500 mt-1">{PRICING.plan.price_note}</p>
+            </div>
+            <ul className="space-y-3 mb-8">
+              {PRICING.plan.features.map((feature) => (
+                <li key={feature} className="flex items-start gap-2 text-sm text-gray-700">
+                  <span className="text-blue-500 mt-0.5 shrink-0">✓</span>
+                  {feature}
+                </li>
+              ))}
+            </ul>
+            <Link
+              href={PRICING.plan.cta.href}
+              className="block w-full text-center rounded-xl bg-blue-600 px-8 py-3.5 text-sm font-semibold text-white shadow-lg shadow-blue-600/30 hover:bg-blue-700 transition-all hover:-translate-y-0.5 active:translate-y-0"
+            >
+              {PRICING.plan.cta.label} →
+            </Link>
+          </div>
+
+          <p className="mt-6 text-sm text-gray-500">{PRICING.model_note}</p>
         </div>
       </section>
 
@@ -653,11 +722,11 @@ export default function Home() {
         </div>
       </section>
 
-      {/* ─── CTA FINAL ────────────────────────────────────────────── */}
+      {/* ─── FINAL CTA ────────────────────────────────────────────── */}
       <section className="relative overflow-hidden bg-blue-600 py-24">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.03)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.03)_1px,transparent_1px)] bg-[size:3rem_3rem]" />
         <div className="relative mx-auto max-w-3xl px-6 text-center">
-          <h2 className="text-3xl font-bold text-white sm:text-4xl leading-tight whitespace-pre-line">
+          <h2 className="text-3xl font-bold text-white sm:text-4xl leading-tight">
             {CTA_FINAL.headline}
           </h2>
           <p className="mx-auto mt-4 max-w-xl text-blue-100 leading-relaxed">

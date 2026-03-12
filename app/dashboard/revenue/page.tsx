@@ -55,7 +55,7 @@ export default function RevenuePage() {
                   : "text-gray-600 hover:bg-gray-50"
               }`}
             >
-              {p === "7d" ? "7 jours" : p === "30d" ? "30 jours" : "90 jours"}
+              {p === "7d" ? "7 days" : p === "30d" ? "30 days" : "90 days"}
             </button>
           ))}
         </div>
@@ -64,13 +64,13 @@ export default function RevenuePage() {
       {/* Summary Cards */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <p className="text-sm text-gray-500">Total revenus</p>
+          <p className="text-sm text-gray-500">Total revenue</p>
           <p className="mt-1 text-3xl font-bold text-gray-900">
             {data?.total_revenue_eur?.toFixed(2) ?? "0.00"} EUR
           </p>
         </div>
         <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <p className="text-sm text-gray-500">Acces payants</p>
+          <p className="text-sm text-gray-500">Paid accesses</p>
           <p className="mt-1 text-3xl font-bold text-gray-900">
             {data?.total_paid_accesses ?? 0}
           </p>
@@ -78,15 +78,14 @@ export default function RevenuePage() {
       </div>
 
       <p className="text-xs text-gray-400">
-        Revenus traces. Reversement manuel.
+        Tracked revenue. Manual payout.
       </p>
 
       {data?.total_paid_accesses === 0 ? (
         <div className="rounded-lg border border-gray-200 bg-white p-8 text-center">
-          <p className="text-gray-500">Aucun revenu pour le moment</p>
+          <p className="text-gray-500">No revenue yet</p>
           <p className="mt-1 text-sm text-gray-400">
-            Les revenus apparaitront ici quand des bots IA accederont a votre
-            contenu payant.
+            Revenue will appear here when AI bots access your paid content.
           </p>
         </div>
       ) : (
@@ -94,7 +93,7 @@ export default function RevenuePage() {
           {/* Top Contents */}
           <section className="rounded-lg border border-gray-200 bg-white p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">
-              Top contenus
+              Top contents
             </h2>
             {data?.top_contents && data.top_contents.length > 0 ? (
               <div className="overflow-x-auto">
@@ -102,7 +101,7 @@ export default function RevenuePage() {
                   <thead>
                     <tr className="border-b border-gray-100 text-left text-gray-500">
                       <th className="pb-2 font-medium">URL</th>
-                      <th className="pb-2 font-medium text-right">Acces</th>
+                      <th className="pb-2 font-medium text-right">Accesses</th>
                       <th className="pb-2 font-medium text-right">
                         Total EUR
                       </th>
@@ -129,7 +128,7 @@ export default function RevenuePage() {
                 </table>
               </div>
             ) : (
-              <p className="text-sm text-gray-500">Aucune donnee.</p>
+              <p className="text-sm text-gray-500">No data.</p>
             )}
           </section>
 
@@ -167,7 +166,7 @@ export default function RevenuePage() {
                 </table>
               </div>
             ) : (
-              <p className="text-sm text-gray-500">Aucune donnee.</p>
+              <p className="text-sm text-gray-500">No data.</p>
             )}
           </section>
         </>
