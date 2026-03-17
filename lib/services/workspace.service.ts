@@ -224,7 +224,7 @@ export async function getUserWorkspaces(
       return {
         id: ws.id,
         name: ws.name,
-        role: row.role,
+        role: row.role ?? "viewer",
         created_at: ws.created_at,
       };
     });
@@ -297,7 +297,7 @@ export async function getWorkspaceById(
   return {
     id: workspace.id,
     name: workspace.name,
-    role: membership.role,
+    role: membership.role ?? "viewer",
     created_at: workspace.created_at!,
     domain_count: domainCount ?? 0,
     member_count: memberCount ?? 0,
@@ -454,7 +454,7 @@ export async function getWorkspaceMembers(
       return {
         user_id: member.user_id!,
         email: user?.email ?? "unknown",
-        role: member.role,
+        role: member.role ?? "viewer",
         invited_at: member.invited_at!,
         accepted_at: member.accepted_at,
       };
@@ -568,7 +568,7 @@ export async function inviteMember(
 
   return {
     user_id: newMember.user_id!,
-    role: newMember.role,
+    role: newMember.role ?? "viewer",
     invited_at: newMember.invited_at!,
   };
 }
