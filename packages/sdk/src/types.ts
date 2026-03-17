@@ -49,3 +49,28 @@ export type LiquadMiddleware = (
   res: ServerResponse,
   next: () => void
 ) => void;
+
+// ---------------------------------------------------------------------------
+// Identity Check Types (used by rules-cache and identity-check modules)
+// ---------------------------------------------------------------------------
+
+/**
+ * Identity Check configuration received from the server as part of workspace rules.
+ *
+ * Provides recommended settings for DNS verification behavior.
+ * IC is always active — the per-bot `dns_patterns` array controls whether
+ * a specific bot is verified (empty array = IC skipped for that bot).
+ */
+export interface IdentityCheckRulesConfig {
+  /**
+   * How long to cache DNS verification results (in milliseconds).
+   * Default from server: 3,600,000 (1 hour).
+   */
+  cache_ttl_ms: number;
+
+  /**
+   * Maximum time to wait for a DNS lookup (in milliseconds).
+   * Default from server: 500.
+   */
+  dns_timeout_ms: number;
+}

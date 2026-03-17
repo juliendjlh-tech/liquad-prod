@@ -16,15 +16,27 @@ const DOMAIN_STALE_DAYS = 30;
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * The complete rules payload sent to the SDK.
+ *
+ * The SDK caches this object and uses it to make local decisions about
+ * incoming requests (bot matching, catalog matching, IC verification).
+ * This shape must stay backward-compatible — new fields are additive.
+ */
 export interface SdkRules {
   workspace_id: string;
   jwt_signing_secret: string;
   verified_domains: string[];
+
+  /** Active user-agents (bots) for this workspace */
   user_agents: Array<{
     id: string;
     name: string;
     ua_pattern: string;
+    /** DNS hostname globs for Identity Check. Empty = IC skipped for this bot. */
+    dns_patterns: string[];
   }>;
+
   catalogs: Array<{
     id: string;
     name: string;
@@ -32,6 +44,20 @@ export interface SdkRules {
     price_eur: number;
     agent_ids: string[];
   }>;
+
+  /**
+   * Identity Check configuration for this workspace.
+   * Added by US-IC-02. Older SDKs that don't know about this field
+   * will simply ignore it (additive / backward compatible).
+   *
+   * IC is always active — per-bot `dns_patterns` controls verification.
+   */
+  identity_check: {
+    /** Recommended cache TTL for DNS results (in ms). Default: 3,600,000 (1 hour) */
+    cache_ttl_ms: number;
+    /** Recommended DNS lookup timeout (in ms). Default: 500 */
+    dns_timeout_ms: number;
+  };
 }
 
 export interface IngestResult {
@@ -57,7 +83,7 @@ export async function getWorkspaceRules(
 ): Promise<SdkRules> {
   const supabase = await createServerClient();
 
-  // 0. Workspace jwt_signing_secret
+  // 0. Workspace settings: jwt_signing_secret
   const { data: workspace } = await supabase
     .from("workspaces")
     .select("jwt_signing_secret")
@@ -71,10 +97,10 @@ export async function getWorkspaceRules(
     .eq("workspace_id", workspaceId)
     .eq("status", "verified");
 
-  // 2. Active user-agents
+  // 2. Active user-agents (including dns_patterns for Identity Check)
   const { data: agents } = await supabase
     .from("user_agents")
-    .select("id, name, ua_pattern")
+    .select("id, name, ua_pattern, dns_patterns")
     .eq("workspace_id", workspaceId)
     .eq("is_active", true);
 
@@ -112,8 +138,15 @@ export async function getWorkspaceRules(
       id: a.id,
       name: a.name,
       ua_pattern: a.ua_pattern,
+      dns_patterns: (a.dns_patterns as string[]) ?? [],
     })),
     catalogs: catalogsWithAgents,
+    // Identity Check configuration — DNS verification settings.
+    // IC is always active; per-bot dns_patterns controls verification.
+    identity_check: {
+      cache_ttl_ms: 3_600_000, // 1 hour (server-recommended default)
+      dns_timeout_ms: 500,     // 500ms (server-recommended default)
+    },
   };
 }
 
@@ -165,6 +198,13 @@ export async function ingestEvents(
       price_applied: e.price_applied ?? null,
       consumer_workspace_id: e.consumer_workspace_id ?? null,
       timestamp: e.timestamp,
+      // Identity Check metadata (US-IC-07)
+      // These columns are nullable — older SDKs that don't send IC data
+      // will simply insert NULL for these fields (backward compatible).
+      source_ip: e.source_ip ?? null,
+      ic_verified: e.ic_verified ?? null,
+      ic_hostname: e.ic_hostname ?? null,
+      ic_duration_ms: e.ic_duration_ms ?? null,
     }));
 
     const { error } = await supabase.from("sdk_events").insert(rows);
@@ -285,6 +325,24 @@ export interface DashboardMetrics {
   topCatalogs: Array<{ id: string; name: string; eventCount: number }>;
   topContents: Array<{ sourceUrl: string; eventCount: number }>;
   topAgents: Array<{ name: string; eventCount: number }>;
+
+  /**
+   * Identity Check metrics (US-IC-07).
+   *
+   * Shows how many bots were blocked by IC, verified/unverified breakdown,
+   * and which agents failed IC most often (potential spoofers).
+   * Only meaningful when Identity Check is enabled for the workspace.
+   */
+  identityCheck: {
+    /** Number of events with decision = "denied_identity_check" in the period */
+    blockedCount: number;
+    /** Number of events where ic_verified = true in the period */
+    verifiedCount: number;
+    /** Number of events where ic_verified = false in the period */
+    unverifiedCount: number;
+    /** Top agents by IC failure count — potential spoofing targets */
+    topFailedAgents: Array<{ name: string; failCount: number }>;
+  };
 }
 
 /**
@@ -442,12 +500,71 @@ export async function getDashboardMetrics(
     .slice(0, 10)
     .map(([name, count]) => ({ name, eventCount: count }));
 
+  // -------------------------------------------------------------------------
+  // 7. Identity Check metrics (US-IC-07)
+  // -------------------------------------------------------------------------
+
+  // 7a. Count events with decision = "denied_identity_check" (blocked by IC)
+  const { count: icBlockedCount } = await supabase
+    .from("sdk_events")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .eq("decision", "denied_identity_check")
+    .gte("timestamp", periodStart);
+
+  // 7b. Count events where ic_verified = true (bot identity confirmed)
+  const { count: icVerifiedCount } = await supabase
+    .from("sdk_events")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .eq("ic_verified", true)
+    .gte("timestamp", periodStart);
+
+  // 7c. Count events where ic_verified = false (bot identity NOT confirmed)
+  const { count: icUnverifiedCount } = await supabase
+    .from("sdk_events")
+    .select("id", { count: "exact", head: true })
+    .eq("workspace_id", workspaceId)
+    .eq("ic_verified", false)
+    .gte("timestamp", periodStart);
+
+  // 7d. Top agents by IC failure count (potential spoofers)
+  // Fetch all denied_identity_check events with their agent names
+  const { data: icFailedEvents } = await supabase
+    .from("sdk_events")
+    .select("user_agent_name")
+    .eq("workspace_id", workspaceId)
+    .eq("decision", "denied_identity_check")
+    .gte("timestamp", periodStart)
+    .not("user_agent_name", "is", null);
+
+  const icFailCounts = new Map<string, number>();
+  for (const e of icFailedEvents ?? []) {
+    if (e.user_agent_name) {
+      icFailCounts.set(
+        e.user_agent_name,
+        (icFailCounts.get(e.user_agent_name) ?? 0) + 1
+      );
+    }
+  }
+
+  const topFailedAgents = [...icFailCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([name, count]) => ({ name, failCount: count }));
+
   return {
     contentAccessible,
     contentScraped,
     topCatalogs,
     topContents,
     topAgents,
+    identityCheck: {
+      blockedCount: icBlockedCount ?? 0,
+      verifiedCount: icVerifiedCount ?? 0,
+      unverifiedCount: icUnverifiedCount ?? 0,
+      topFailedAgents,
+    },
   };
 }
 

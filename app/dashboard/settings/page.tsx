@@ -3,6 +3,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
 
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
 interface Member {
   user_id: string;
   email: string;
@@ -21,9 +25,22 @@ interface WorkspaceInfo {
   name: string;
   created_at: string;
   balance_eur?: number;
-  initial_credit_eur?: number;
 }
 
+// ---------------------------------------------------------------------------
+// Settings Page Component
+// ---------------------------------------------------------------------------
+
+/**
+ * Dashboard Settings Page
+ *
+ * Displays and manages workspace settings:
+ * - Workspace info (name, creation date)
+ * - Credits balance
+ * - API key management (regenerate)
+ * - Domain list
+ * - Member management (invite, remove, change role)
+ */
 export default function SettingsPage() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -55,7 +72,6 @@ export default function SettingsPage() {
       if (wsRes.ok) {
         const wsData = await wsRes.json();
         setWorkspace(wsData);
-        // Domains from workspace data or separate query
         if (wsData.domains) setDomains(wsData.domains);
       }
       if (membersRes.ok) setMembers(await membersRes.json());
@@ -67,6 +83,10 @@ export default function SettingsPage() {
   useEffect(() => {
     void fetchData();
   }, [fetchData]);
+
+  // ---------------------------------------------------------------------------
+  // API Key
+  // ---------------------------------------------------------------------------
 
   const regenerateKey = async () => {
     if (
@@ -94,6 +114,10 @@ export default function SettingsPage() {
     void navigator.clipboard.writeText(text);
     showToast("Copied to clipboard", "success");
   };
+
+  // ---------------------------------------------------------------------------
+  // Members
+  // ---------------------------------------------------------------------------
 
   const inviteMember = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,10 +154,7 @@ export default function SettingsPage() {
     }
   };
 
-  const changeRole = async (
-    userId: string,
-    newRole: "admin" | "viewer"
-  ) => {
+  const changeRole = async (userId: string, newRole: "admin" | "viewer") => {
     const res = await fetch(
       `/api/workspaces/${workspaceId}/members/${userId}`,
       {
@@ -151,6 +172,10 @@ export default function SettingsPage() {
       showToast(json.error ?? "Failed to update role", "error");
     }
   };
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   if (loading) {
     return <div className="text-center py-12 text-gray-500">Loading...</div>;
@@ -191,19 +216,11 @@ export default function SettingsPage() {
       {/* Credits */}
       <section className="rounded-lg border border-gray-200 bg-white p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Credits</h2>
-        <div className="flex gap-8">
-          <div>
-            <p className="text-sm text-gray-500">Current balance</p>
-            <p className="text-2xl font-bold text-gray-900">
-              {workspace?.balance_eur?.toFixed(2) ?? "0.00"} EUR
-            </p>
-          </div>
-          <div>
-            <p className="text-sm text-gray-500">Initial credit</p>
-            <p className="text-lg text-gray-600">
-              {workspace?.initial_credit_eur?.toFixed(2) ?? "10.00"} EUR
-            </p>
-          </div>
+        <div>
+          <p className="text-sm text-gray-500">Current balance</p>
+          <p className="text-2xl font-bold text-gray-900">
+            {workspace?.balance_eur?.toFixed(2) ?? "0.00"} EUR
+          </p>
         </div>
         {workspace?.balance_eur === 0 && (
           <p className="mt-2 text-sm text-amber-600">

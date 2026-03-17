@@ -16,36 +16,43 @@ export type Database = {
     Tables: {
       access_grants: {
         Row: {
-          id: string
+          catalog_id: string
           consumer_workspace_id: string
+          created_at: string | null
+          expires_at: string
+          id: string
+          price_eur: number
           publisher_workspace_id: string
           url: string
-          catalog_id: string
-          price_eur: number
-          expires_at: string
-          created_at: string | null
         }
         Insert: {
-          id?: string
+          catalog_id: string
           consumer_workspace_id: string
+          created_at?: string | null
+          expires_at: string
+          id?: string
+          price_eur: number
           publisher_workspace_id: string
           url: string
-          catalog_id: string
-          price_eur: number
-          expires_at: string
-          created_at?: string | null
         }
         Update: {
-          id?: string
+          catalog_id?: string
           consumer_workspace_id?: string
+          created_at?: string | null
+          expires_at?: string
+          id?: string
+          price_eur?: number
           publisher_workspace_id?: string
           url?: string
-          catalog_id?: string
-          price_eur?: number
-          expires_at?: string
-          created_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "access_grants_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "catalogs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "access_grants_consumer_workspace_id_fkey"
             columns: ["consumer_workspace_id"]
@@ -58,13 +65,6 @@ export type Database = {
             columns: ["publisher_workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "access_grants_catalog_id_fkey"
-            columns: ["catalog_id"]
-            isOneToOne: false
-            referencedRelation: "catalogs"
             referencedColumns: ["id"]
           },
         ]
@@ -180,42 +180,49 @@ export type Database = {
       }
       credit_transactions: {
         Row: {
-          id: string
+          amount_eur: number
+          catalog_id: string | null
           consumer_workspace_id: string
+          content_url: string | null
+          created_at: string | null
+          description: string | null
+          grant_id: string | null
+          id: string
           publisher_workspace_id: string
           type: string
-          amount_eur: number
-          content_url: string | null
-          catalog_id: string | null
-          grant_id: string | null
-          description: string | null
-          created_at: string | null
         }
         Insert: {
-          id?: string
+          amount_eur: number
+          catalog_id?: string | null
           consumer_workspace_id: string
+          content_url?: string | null
+          created_at?: string | null
+          description?: string | null
+          grant_id?: string | null
+          id?: string
           publisher_workspace_id: string
           type: string
-          amount_eur: number
-          content_url?: string | null
-          catalog_id?: string | null
-          grant_id?: string | null
-          description?: string | null
-          created_at?: string | null
         }
         Update: {
-          id?: string
+          amount_eur?: number
+          catalog_id?: string | null
           consumer_workspace_id?: string
+          content_url?: string | null
+          created_at?: string | null
+          description?: string | null
+          grant_id?: string | null
+          id?: string
           publisher_workspace_id?: string
           type?: string
-          amount_eur?: number
-          content_url?: string | null
-          catalog_id?: string | null
-          grant_id?: string | null
-          description?: string | null
-          created_at?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "credit_transactions_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "catalogs"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "credit_transactions_consumer_workspace_id_fkey"
             columns: ["consumer_workspace_id"]
@@ -228,13 +235,6 @@ export type Database = {
             columns: ["publisher_workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "credit_transactions_catalog_id_fkey"
-            columns: ["catalog_id"]
-            isOneToOne: false
-            referencedRelation: "catalogs"
             referencedColumns: ["id"]
           },
         ]
@@ -282,10 +282,14 @@ export type Database = {
           consumer_workspace_id: string | null
           decision: string
           domain: string
+          ic_duration_ms: number | null
+          ic_hostname: string | null
+          ic_verified: boolean | null
           id: string
           matched_catalog_id: string | null
           price_applied: number | null
           request_url: string
+          source_ip: string | null
           timestamp: string
           user_agent_name: string | null
           user_agent_raw: string | null
@@ -295,10 +299,14 @@ export type Database = {
           consumer_workspace_id?: string | null
           decision: string
           domain: string
+          ic_duration_ms?: number | null
+          ic_hostname?: string | null
+          ic_verified?: boolean | null
           id?: string
           matched_catalog_id?: string | null
           price_applied?: number | null
           request_url: string
+          source_ip?: string | null
           timestamp?: string
           user_agent_name?: string | null
           user_agent_raw?: string | null
@@ -308,16 +316,27 @@ export type Database = {
           consumer_workspace_id?: string | null
           decision?: string
           domain?: string
+          ic_duration_ms?: number | null
+          ic_hostname?: string | null
+          ic_verified?: boolean | null
           id?: string
           matched_catalog_id?: string | null
           price_applied?: number | null
           request_url?: string
+          source_ip?: string | null
           timestamp?: string
           user_agent_name?: string | null
           user_agent_raw?: string | null
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "sdk_events_consumer_workspace_id_fkey"
+            columns: ["consumer_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "sdk_events_matched_catalog_id_fkey"
             columns: ["matched_catalog_id"]
@@ -337,6 +356,7 @@ export type Database = {
       user_agents: {
         Row: {
           created_at: string | null
+          dns_patterns: string[]
           id: string
           is_active: boolean | null
           is_preset: boolean | null
@@ -346,6 +366,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          dns_patterns?: string[]
           id?: string
           is_active?: boolean | null
           is_preset?: boolean | null
@@ -355,6 +376,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          dns_patterns?: string[]
           id?: string
           is_active?: boolean | null
           is_preset?: boolean | null
@@ -377,7 +399,7 @@ export type Database = {
           accepted_at: string | null
           id: string
           invited_at: string | null
-          role: string
+          role: string | null
           user_id: string | null
           workspace_id: string | null
         }
@@ -385,7 +407,7 @@ export type Database = {
           accepted_at?: string | null
           id?: string
           invited_at?: string | null
-          role?: string
+          role?: string | null
           user_id?: string | null
           workspace_id?: string | null
         }
@@ -393,7 +415,7 @@ export type Database = {
           accepted_at?: string | null
           id?: string
           invited_at?: string | null
-          role?: string
+          role?: string | null
           user_id?: string | null
           workspace_id?: string | null
         }
@@ -414,7 +436,6 @@ export type Database = {
           balance_eur: number
           created_at: string | null
           id: string
-          initial_credit_eur: number
           jwt_signing_secret: string
           name: string
           updated_at: string | null
@@ -425,7 +446,6 @@ export type Database = {
           balance_eur?: number
           created_at?: string | null
           id?: string
-          initial_credit_eur?: number
           jwt_signing_secret?: string
           name: string
           updated_at?: string | null
@@ -436,7 +456,6 @@ export type Database = {
           balance_eur?: number
           created_at?: string | null
           id?: string
-          initial_credit_eur?: number
           jwt_signing_secret?: string
           name?: string
           updated_at?: string | null
@@ -450,12 +469,12 @@ export type Database = {
     Functions: {
       check_cache_and_debit: {
         Args: {
-          p_consumer_id: string
-          p_publisher_id: string
-          p_url: string
           p_catalog_id: string
+          p_consumer_id: string
           p_price_eur: number
+          p_publisher_id: string
           p_ttl_minutes?: number
+          p_url: string
         }
         Returns: Json
       }

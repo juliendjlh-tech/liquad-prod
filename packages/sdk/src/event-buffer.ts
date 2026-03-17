@@ -2,6 +2,12 @@ import type { LiquadConfig } from "./types";
 
 /**
  * An SDK event to be sent to the Liquad API.
+ *
+ * Each event represents a single request processed by the SDK middleware.
+ * Events are buffered in memory and sent in batches to POST /api/sdk/events.
+ *
+ * The Identity Check (IC) metadata fields are optional — they are only
+ * populated when IC is enabled and a DNS verification was performed.
  */
 export interface SdkEvent {
   domain: string;
@@ -15,10 +21,25 @@ export interface SdkEvent {
     | "blocked_no_catalog"
     | "authorized_paid"
     | "denied_authorization_required"
-    | "denied_invalid_token";
+    | "denied_invalid_token"
+    | "denied_identity_check";
   price_applied: number | null;
   consumer_workspace_id: string | null;
   timestamp: string; // ISO 8601
+
+  // --- Identity Check metadata (optional, added by US-IC-04) ---
+
+  /** Bot's IP address (from req.socket.remoteAddress). Null if IC not performed. */
+  source_ip?: string | null;
+
+  /** Whether the bot passed DNS verification. Null/undefined if IC not performed. */
+  ic_verified?: boolean | null;
+
+  /** Hostname from rDNS lookup. Null if rDNS failed or IC not performed. */
+  ic_hostname?: string | null;
+
+  /** DNS verification duration in milliseconds. Null if IC not performed. */
+  ic_duration_ms?: number | null;
 }
 
 const MAX_BUFFER_CAPACITY = 10_000;

@@ -1,17 +1,34 @@
-import type { LiquadConfig } from "./types";
+import type { LiquadConfig, IdentityCheckRulesConfig } from "./types";
 
 /**
  * Cached rules structure (mirrors SdkRules from the API).
+ *
+ * This interface represents the workspace rules fetched from
+ * GET /api/sdk/rules and cached locally by the SDK. It includes
+ * all information needed for the SDK to make local decisions:
+ * - Domain verification status
+ * - Bot matching patterns
+ * - Catalog pricing rules
+ * - Identity Check configuration (new in IC feature)
  */
 export interface CachedRules {
   workspace_id: string;
   jwt_signing_secret: string;
   verified_domains: string[];
+
+  /** Active user-agents with dns_patterns for Identity Check */
   user_agents: Array<{
     id: string;
     name: string;
     ua_pattern: string;
+    /**
+     * DNS hostname glob patterns for Identity Check.
+     * Example: ["*.openai.com"]
+     * Empty array = Identity Check skipped for this bot.
+     */
+    dns_patterns: string[];
   }>;
+
   catalogs: Array<{
     id: string;
     name: string;
@@ -19,6 +36,17 @@ export interface CachedRules {
     price_eur: number;
     agent_ids: string[];
   }>;
+
+  /**
+   * Identity Check configuration for this workspace.
+   *
+   * Provides DNS verification timeout/cache settings.
+   * IC is always active — per-bot `dns_patterns` controls verification.
+   *
+   * This field may be absent in rules fetched from older API versions.
+   * The SDK uses sensible defaults if missing.
+   */
+  identity_check?: IdentityCheckRulesConfig;
 }
 
 const MIN_REFRESH_INTERVAL = 10_000; // 10s minimum
@@ -115,6 +143,19 @@ export function createRulesCache(config: LiquadConfig) {
 
     getJwtSecret(): string | null {
       return rules?.jwt_signing_secret ?? null;
+    },
+
+    /**
+     * Get the Identity Check configuration from cached rules.
+     *
+     * Returns null if no rules have been fetched yet or if the
+     * API response doesn't include IC config (older API version).
+     * The SDK uses sensible defaults when null.
+     *
+     * @returns IC config or null
+     */
+    getIdentityCheckConfig(): IdentityCheckRulesConfig | null {
+      return rules?.identity_check ?? null;
     },
 
     async refresh(): Promise<void> {

@@ -1,28 +1,150 @@
 import { createServerClient } from "@/lib/db/supabase-server";
 
 // ---------------------------------------------------------------------------
-// AI Bot Presets (PRD Appendix A)
+// AI Bot Presets (PRD Appendix A + Identity Check extension)
 // ---------------------------------------------------------------------------
+// Each preset represents a well-known AI bot with its:
+//   - name: Human-readable identifier (shown in dashboard)
+//   - ua_pattern: Substring to match in the User-Agent header (case-insensitive)
+//   - operator: Company that operates this bot
+//   - dns_patterns: DNS hostname globs for Identity Check verification
+//
+// dns_patterns are used by the SDK's Identity Check module to verify that
+// a bot's IP address actually belongs to the claimed operator via rDNS/fDNS.
+// Example: GPTBot should resolve to *.openai.com. If it doesn't, it's spoofed.
+//
+// Sources for DNS patterns:
+//   - Google: https://developers.google.com/search/docs/crawling-indexing/verifying-googlebot
+//   - Bing: https://www.bing.com/webmasters/help/how-to-verify-bingbot-3905dc26
+//   - OpenAI: https://platform.openai.com/docs/bots
+//   - Each operator's official documentation
 
 export const AI_BOT_PRESETS: Array<{
   name: string;
   ua_pattern: string;
   operator: string;
+  dns_patterns: string[];
 }> = [
-  { name: "GPTBot", ua_pattern: "GPTBot", operator: "OpenAI" },
-  { name: "ChatGPT-User", ua_pattern: "ChatGPT-User", operator: "OpenAI" },
-  { name: "ClaudeBot", ua_pattern: "ClaudeBot", operator: "Anthropic" },
-  { name: "PerplexityBot", ua_pattern: "PerplexityBot", operator: "Perplexity" },
-  { name: "Google-Extended", ua_pattern: "Google-Extended", operator: "Google" },
-  { name: "Bytespider", ua_pattern: "Bytespider", operator: "ByteDance" },
-  { name: "CCBot", ua_pattern: "CCBot", operator: "Common Crawl" },
-  { name: "Amazonbot", ua_pattern: "Amazonbot", operator: "Amazon" },
+  // --- OpenAI bots ---
+  {
+    name: "GPTBot",
+    ua_pattern: "GPTBot",
+    operator: "OpenAI",
+    dns_patterns: ["*.openai.com"],
+  },
+  {
+    name: "ChatGPT-User",
+    ua_pattern: "ChatGPT-User",
+    operator: "OpenAI",
+    dns_patterns: ["*.openai.com"],
+  },
+
+  // --- Anthropic ---
+  {
+    name: "ClaudeBot",
+    ua_pattern: "ClaudeBot",
+    operator: "Anthropic",
+    dns_patterns: ["*.anthropic.com"],
+  },
+
+  // --- Perplexity ---
+  {
+    name: "PerplexityBot",
+    ua_pattern: "PerplexityBot",
+    operator: "Perplexity",
+    dns_patterns: ["*.perplexity.ai"],
+  },
+
+  // --- Google ---
+  {
+    name: "Google-Extended",
+    ua_pattern: "Google-Extended",
+    operator: "Google",
+    dns_patterns: ["*.googlebot.com", "*.google.com"],
+  },
+  {
+    name: "Googlebot",
+    ua_pattern: "Googlebot",
+    operator: "Google",
+    dns_patterns: ["*.googlebot.com", "*.google.com"],
+  },
+
+  // --- Microsoft ---
+  {
+    name: "BingBot",
+    ua_pattern: "bingbot",
+    operator: "Microsoft",
+    dns_patterns: ["*.search.msn.com"],
+  },
+
+  // --- ByteDance ---
+  {
+    name: "Bytespider",
+    ua_pattern: "Bytespider",
+    operator: "ByteDance",
+    dns_patterns: ["*.bytedance.com"],
+  },
+
+  // --- Common Crawl ---
+  {
+    name: "CCBot",
+    ua_pattern: "CCBot",
+    operator: "Common Crawl",
+    dns_patterns: ["*.commoncrawl.org"],
+  },
+
+  // --- Amazon ---
+  {
+    name: "Amazonbot",
+    ua_pattern: "Amazonbot",
+    operator: "Amazon",
+    dns_patterns: ["*.amazonaws.com"],
+  },
+
+  // --- Apple ---
+  {
+    name: "Applebot",
+    ua_pattern: "Applebot",
+    operator: "Apple",
+    dns_patterns: ["*.applebot.apple.com"],
+  },
+
+  // --- Yandex ---
+  {
+    name: "YandexBot",
+    ua_pattern: "YandexBot",
+    operator: "Yandex",
+    dns_patterns: ["*.yandex.ru", "*.yandex.net", "*.yandex.com"],
+  },
+
+  // --- DuckDuckGo ---
+  {
+    name: "DuckDuckBot",
+    ua_pattern: "DuckDuckBot",
+    operator: "DuckDuckGo",
+    dns_patterns: ["*.duckduckgo.com"],
+  },
+
+  // --- Meta ---
+  {
+    name: "Meta-ExternalAgent",
+    ua_pattern: "meta-externalagent",
+    operator: "Meta",
+    dns_patterns: ["*.facebook.com", "*.meta.com"],
+  },
 ];
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/**
+ * Shape of a user_agents row as returned by Supabase queries.
+ *
+ * Represents a single bot declaration within a workspace. Each workspace
+ * maintains its own set of user-agents (bots) that the SDK uses for
+ * matching incoming requests and applying licensing rules.
+ */
 export interface UserAgentRow {
   id: string;
   workspace_id: string;
@@ -31,6 +153,18 @@ export interface UserAgentRow {
   is_active: boolean;
   is_preset: boolean;
   created_at: string;
+
+  /**
+   * DNS hostname glob patterns for Identity Check verification.
+   *
+   * Example: ["*.openai.com"] means the bot's IP must resolve to
+   * a hostname ending in .openai.com via reverse DNS.
+   *
+   * Empty array means Identity Check is skipped for this bot.
+   *
+   * @see packages/sdk/src/identity-check.ts for the verification logic
+   */
+  dns_patterns: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -38,15 +172,31 @@ export interface UserAgentRow {
 // ---------------------------------------------------------------------------
 
 /**
+ * The select columns used in all user-agent queries.
+ * Centralized here to ensure dns_patterns is always included.
+ */
+const USER_AGENT_SELECT_COLUMNS =
+  "id, workspace_id, name, ua_pattern, is_active, is_preset, dns_patterns, created_at";
+
+/**
  * Create a new user-agent for a workspace.
  *
  * Checks for duplicate name per workspace before insert.
+ * Accepts an optional `dns_patterns` array for Identity Check support.
  *
+ * @param workspaceId - The workspace to create the bot in
+ * @param data - Bot data including name, ua_pattern, and optional dns_patterns
+ * @returns The created user-agent record
  * @throws Error with "DUPLICATE_NAME" if name already exists in workspace
  */
 export async function createUserAgent(
   workspaceId: string,
-  data: { name: string; ua_pattern: string; is_preset?: boolean }
+  data: {
+    name: string;
+    ua_pattern: string;
+    is_preset?: boolean;
+    dns_patterns?: string[];
+  }
 ): Promise<UserAgentRow> {
   const supabase = await createServerClient();
 
@@ -70,8 +220,9 @@ export async function createUserAgent(
       ua_pattern: data.ua_pattern,
       is_preset: data.is_preset ?? false,
       is_active: true,
+      dns_patterns: data.dns_patterns ?? [],
     })
-    .select("id, workspace_id, name, ua_pattern, is_active, is_preset, created_at")
+    .select(USER_AGENT_SELECT_COLUMNS)
     .single();
 
   if (error || !created) {
@@ -83,7 +234,12 @@ export async function createUserAgent(
 
 /**
  * List all user-agents for a workspace.
- * Ordered by created_at ASC.
+ *
+ * Returns all bots declared in this workspace, ordered by creation date.
+ * Each bot includes its dns_patterns for Identity Check support.
+ *
+ * @param workspaceId - The workspace to list bots from
+ * @returns Array of user-agent records (includes dns_patterns)
  */
 export async function getUserAgents(
   workspaceId: string
@@ -92,7 +248,7 @@ export async function getUserAgents(
 
   const { data, error } = await supabase
     .from("user_agents")
-    .select("id, workspace_id, name, ua_pattern, is_active, is_preset, created_at")
+    .select(USER_AGENT_SELECT_COLUMNS)
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: true });
 
@@ -106,7 +262,9 @@ export async function getUserAgents(
 /**
  * Get a single user-agent by ID, scoped to workspace.
  *
- * @returns User-agent record or null if not found/wrong workspace
+ * @param userAgentId - The bot's UUID
+ * @param workspaceId - The workspace the bot must belong to
+ * @returns User-agent record (with dns_patterns) or null if not found/wrong workspace
  */
 export async function getUserAgentById(
   userAgentId: string,
@@ -116,7 +274,7 @@ export async function getUserAgentById(
 
   const { data, error } = await supabase
     .from("user_agents")
-    .select("id, workspace_id, name, ua_pattern, is_active, is_preset, created_at")
+    .select(USER_AGENT_SELECT_COLUMNS)
     .eq("id", userAgentId)
     .eq("workspace_id", workspaceId)
     .single();
@@ -130,14 +288,24 @@ export async function getUserAgentById(
 
 /**
  * Update a user-agent (partial update).
- * Supports name, ua_pattern, and is_active fields.
  *
- * @returns Updated record or null if not found/wrong workspace
+ * Supports updating name, ua_pattern, is_active, and dns_patterns fields.
+ * Only provided fields are updated — omitted fields remain unchanged.
+ *
+ * @param userAgentId - The bot's UUID
+ * @param workspaceId - The workspace the bot must belong to
+ * @param data - Partial update payload (any combination of updatable fields)
+ * @returns Updated record (with dns_patterns) or null if not found/wrong workspace
  */
 export async function updateUserAgent(
   userAgentId: string,
   workspaceId: string,
-  data: { name?: string; ua_pattern?: string; is_active?: boolean }
+  data: {
+    name?: string;
+    ua_pattern?: string;
+    is_active?: boolean;
+    dns_patterns?: string[];
+  }
 ): Promise<UserAgentRow | null> {
   const supabase = await createServerClient();
 
@@ -152,7 +320,7 @@ export async function updateUserAgent(
     .update(data)
     .eq("id", userAgentId)
     .eq("workspace_id", workspaceId)
-    .select("id, workspace_id, name, ua_pattern, is_active, is_preset, created_at")
+    .select(USER_AGENT_SELECT_COLUMNS)
     .single();
 
   if (error || !updated) {

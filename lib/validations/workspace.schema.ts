@@ -31,3 +31,4 @@ export const createWorkspaceSchema = z.object({
  * TypeScript type inferred from createWorkspaceSchema.
  */
 export type CreateWorkspaceInput = z.infer<typeof createWorkspaceSchema>;
+
