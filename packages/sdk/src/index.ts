@@ -1,22 +1,22 @@
 /**
- * Liquad SDK — Express/Connect Middleware for AI Content Licensing
+ * Liquad SDK — Universal Handler for AI Content Licensing
  *
- * This is the main entry point for the Liquad SDK. It creates an Express/Connect-
- * compatible middleware that intercepts incoming requests and applies AI content
- * licensing rules, including Identity Check (DNS-based bot verification).
+ * This is the main entry point for the Liquad SDK. It creates a handler
+ * that takes a standard Web API Request and returns a LiquadResult.
+ * Works identically on Node.js 18+, Cloudflare Workers, and Vercel Edge.
  *
- * ## Pipeline Flow (with Identity Check):
+ * ## Pipeline Flow:
  *
  * ```
  * Request arrives
  *   │
- *   ├─ No rules loaded? ──► passthrough (next())
+ *   ├─ No rules loaded? ──► { blocked: false } (passthrough)
  *   │
  *   ├─ Domain not verified? ──► passthrough
  *   │
  *   ├─ User-agent not matched? ──► passthrough
  *   │
- *   ├─ No matching catalog? ──► 403 blocked_no_catalog
+ *   ├─ No matching catalog? ──► { blocked: true, response: 403 }
  *   │
  *   ├─ Price <= defaultPrice ──► "granted" ──┐
  *   │                                        │
@@ -24,23 +24,20 @@
  *                                            │
  *                           ┌────────────────┘
  *                           ▼
- *                    Identity Check gate
+ *                    Identity Check gate (DoH)
  *                           │
- *                    ├─ No dns_patterns? ──► serve content (skip IC)
- *                    └─ Has dns_patterns ──► DNS verify
+ *                    ├─ No dns_patterns? ──► passthrough + event
+ *                    └─ Has dns_patterns ──► DNS verify via DoH
  *                           │
- *                    ├─ Verified ──► serve content + IC metadata in event
- *                    └─ Unverified ──► 403 denied_identity_check
+ *                    ├─ Verified ──► passthrough + event with IC metadata
+ *                    └─ Unverified ──► { blocked: true, response: 403 }
  * ```
  *
  * @module liquad-sdk
  */
 
-import type { IncomingMessage, ServerResponse } from "http";
-import type { LiquadConfig, LiquadMiddleware, JwtPayload } from "./types";
+import type { LiquadConfig, LiquadResult, JwtPayload, SdkEvent } from "./types";
 import { createRulesCache } from "./rules-cache";
-import { createEventBuffer } from "./event-buffer";
-import type { SdkEvent } from "./event-buffer";
 import { matchRequest } from "./matcher";
 import { createIdentityChecker } from "./identity-check";
 import type { VerificationResult } from "./identity-check";
@@ -52,7 +49,6 @@ import { jwtVerify } from "jose";
 
 /**
  * Normalize a URL for JWT claim comparison.
- * Mirrors lib/utils/url-normalize.ts in the main app.
  */
 function normalizeUrlForSdk(rawUrl: string): string {
   try {
@@ -68,78 +64,101 @@ function normalizeUrlForSdk(rawUrl: string): string {
 }
 
 /**
- * Send a JSON error response.
+ * Create a JSON Response.
  */
-function sendJsonResponse(
-  res: ServerResponse,
-  status: number,
-  body: object
-): void {
-  const json = JSON.stringify(body);
-  res.writeHead(status, {
-    "Content-Type": "application/json",
-    "Content-Length": Buffer.byteLength(json),
+function jsonResponse(status: number, body: object): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
   });
-  res.end(json);
 }
 
 /**
- * Extract the client IP address from an incoming request.
- *
- * Strips the `::ffff:` prefix that Node.js adds to IPv4-mapped IPv6 addresses.
- * Example: `::ffff:1.2.3.4` → `1.2.3.4`
- *
- * @param req - The incoming HTTP request
- * @returns The client's IPv4 address, or null if not available
+ * Extract the client IP address from request headers.
+ * Checks CF-Connecting-IP (Cloudflare), then X-Forwarded-For (standard proxy).
  */
-function extractSourceIp(req: IncomingMessage): string | null {
-  const rawIp = req.socket?.remoteAddress ?? null;
-  if (!rawIp) return null;
+function extractSourceIp(request: Request): string | null {
+  const cfIp = request.headers.get("cf-connecting-ip");
+  if (cfIp) return cfIp;
 
-  // Strip IPv4-mapped IPv6 prefix (::ffff:1.2.3.4 → 1.2.3.4)
-  if (rawIp.startsWith("::ffff:")) {
-    return rawIp.slice(7);
+  const xff = request.headers.get("x-forwarded-for");
+  if (xff) {
+    const first = xff.split(",")[0]?.trim();
+    if (first) return first;
   }
 
-  return rawIp;
+  return null;
+}
+
+/**
+ * Send a single event to the Liquad API.
+ * Fire-and-forget or via waitUntil if provided.
+ */
+function sendEvent(config: LiquadConfig, event: SdkEvent): void {
+  const url = `${config.apiBaseUrl ?? "https://liquad.app"}/api/sdk/events`;
+  const promise = fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ events: [event] }),
+  }).catch((err) => {
+    const onError = config.onError ?? (() => {});
+    onError(
+      err instanceof Error ? err : new Error("Event send error")
+    );
+  });
+
+  if (config.waitUntil) {
+    config.waitUntil(promise);
+  }
+  // In Node.js (long-lived process), the promise resolves on its own
 }
 
 // ---------------------------------------------------------------------------
-// Middleware
+// Identity Check Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Create a Liquad middleware that intercepts incoming requests
+ * Add IC metadata to an event, if a verification was performed.
+ */
+function enrichEventWithIcMetadata(
+  event: SdkEvent,
+  sourceIp: string | null,
+  icResult: VerificationResult | null
+): SdkEvent {
+  if (!icResult) return event;
+
+  return {
+    ...event,
+    source_ip: sourceIp,
+    ic_verified: icResult.verified,
+    ic_hostname: icResult.hostname,
+    ic_duration_ms: icResult.durationMs,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a Liquad handler that processes incoming requests
  * and applies AI content licensing rules.
  *
  * Usage:
- *   const middleware = createLiquadMiddleware({ apiKey: 'lq_...' });
- *   app.use(middleware); // Express
- *
- * The middleware:
- * 1. On startup: fetches rules from GET /api/sdk/rules (cached, refreshed periodically)
- * 2. On each request: checks if the user-agent matches a declared bot
- * 3. If undeclared bot or non-bot: calls next() immediately (free access)
- * 4. If declared bot: applies catalog matching logic
- * 5. For paid content (price > defaultPrice):
- *    a. Checks for Authorization: License <JWT> header
- *    b. If valid JWT: serves content (authorized_paid event)
- *    c. If no JWT or invalid: returns 402 with authorize_url instructions
- * 6. **Identity Check**: If the bot has dns_patterns configured,
- *    verifies the bot's IP via DNS before serving content.
- *    Spoofed bots get 403 denied_identity_check.
- * 7. Buffers access events and sends them in batches to POST /api/sdk/events
- *
- * CRITICAL: The middleware NEVER throws errors. All errors are caught and
- * passed to onError callback. The host server must never crash due to the SDK.
+ *   const handler = createLiquadHandler({ apiKey: 'lq_...' });
+ *   const result = await handler(request);
+ *   if (result.blocked) return result.response;
  *
  * @param config - SDK configuration
- * @returns Express/Connect-compatible middleware function
+ * @returns An async function: Request → LiquadResult
  * @throws Error only if apiKey is missing (at creation time, not at runtime)
  */
-export function createLiquadMiddleware(
+export function createLiquadHandler(
   config: LiquadConfig
-): LiquadMiddleware {
+): (request: Request) => Promise<LiquadResult> {
   if (!config.apiKey) {
     throw new Error("apiKey is required");
   }
@@ -150,48 +169,19 @@ export function createLiquadMiddleware(
 
   // Initialize subsystems
   const rulesCache = createRulesCache(config);
-  const eventBuffer = createEventBuffer(config);
-
-  // Initialize Identity Checker with default config.
-  // The actual IC config (TTL, timeout) comes from the rules cache
-  // at runtime. We create the checker with defaults here.
-  const identityChecker = createIdentityChecker({
-    onError,
-  });
-
-  // Start cache, buffer, and IC cleanup timer (non-blocking)
-  void rulesCache.start();
-  eventBuffer.start();
-  identityChecker.start();
+  const identityChecker = createIdentityChecker({ onError });
 
   // ---------------------------------------------------------------------------
-  // Identity Check Helper
+  // IC Helper
   // ---------------------------------------------------------------------------
 
-  /**
-   * Perform Identity Check on a bot request, if applicable.
-   *
-   * IC is always active — the per-bot `dns_patterns` array controls
-   * whether a specific bot is verified:
-   * - If bot has no dns_patterns → skip (return null)
-   * - Otherwise → perform DNS verification
-   *
-   * @param ip - Bot's IP address
-   * @param botId - Bot's UUID from the matched user_agent
-   * @param dnsPatterns - Bot's expected DNS patterns
-   * @returns VerificationResult if IC was performed, null if skipped
-   */
   async function performIdentityCheck(
     ip: string | null,
     botId: string,
     dnsPatterns: string[]
   ): Promise<VerificationResult | null> {
-    // Bot has no dns_patterns → skip IC for this bot
-    if (!dnsPatterns || dnsPatterns.length === 0) {
-      return null;
-    }
+    if (!dnsPatterns || dnsPatterns.length === 0) return null;
 
-    // No IP available → can't perform DNS verification
     if (!ip) {
       return {
         verified: false,
@@ -201,80 +191,42 @@ export function createLiquadMiddleware(
       };
     }
 
-    // Perform DNS verification
     return identityChecker.verify(ip, botId, dnsPatterns);
   }
 
-  /**
-   * Add IC metadata to an event, if a verification was performed.
-   *
-   * @param event - The base SDK event
-   * @param sourceIp - The bot's IP address
-   * @param icResult - The IC verification result (null if IC was skipped)
-   * @returns The event with IC metadata added (or unchanged if IC was skipped)
-   */
-  function enrichEventWithIcMetadata(
-    event: SdkEvent,
-    sourceIp: string | null,
-    icResult: VerificationResult | null
-  ): SdkEvent {
-    if (!icResult) {
-      // IC was not performed — return event as-is (no IC metadata)
-      return event;
-    }
-
-    return {
-      ...event,
-      source_ip: sourceIp,
-      ic_verified: icResult.verified,
-      ic_hostname: icResult.hostname,
-      ic_duration_ms: icResult.durationMs,
-    };
-  }
-
   // ---------------------------------------------------------------------------
-  // Request Handler
+  // Main Handler
   // ---------------------------------------------------------------------------
 
-  /**
-   * Async request handler. Called via fire-and-forget from the sync middleware.
-   * jwtVerify (from jose) and IC verify are async, so we need this wrapper.
-   */
-  async function handleRequest(
-    req: IncomingMessage,
-    res: ServerResponse,
-    next: () => void
-  ): Promise<void> {
+  return async function handleRequest(
+    request: Request
+  ): Promise<LiquadResult> {
     try {
-      const rules = rulesCache.getRules();
+      const rules = await rulesCache.getOrRefresh();
 
       // No rules = passthrough mode
       if (!rules) {
-        next();
-        return;
+        return { blocked: false };
       }
 
-      // Extract request info
-      const host = req.headers.host ?? "";
-      const userAgent = req.headers["user-agent"] ?? "";
-      const url = req.url ?? "/";
-      const sourceIp = extractSourceIp(req);
+      // Extract request info from Web API Request
+      const host = request.headers.get("host") ?? "";
+      const userAgent = request.headers.get("user-agent") ?? "";
+      const requestUrl = new URL(request.url);
+      const url = requestUrl.pathname + requestUrl.search;
+      const sourceIp = extractSourceIp(request);
 
       const decision = matchRequest(
         rules,
-        { url, host, userAgent },
+        { url: request.url, host, userAgent },
         defaultPrice
       );
 
       switch (decision.type) {
         case "passthrough":
-          // Non-bot or unverified domain → no IC needed
-          next();
-          break;
+          return { blocked: false };
 
         case "granted": {
-          // Free access granted → now check Identity Check
-          // Find the matched bot's dns_patterns from the rules
           const matchedAgent = rules.user_agents.find(
             (a) => a.name === decision.event.user_agent_name
           );
@@ -288,46 +240,42 @@ export function createLiquadMiddleware(
             );
 
             if (icResult && !icResult.verified) {
-              // Bot failed IC → deny with 403
-              sendJsonResponse(res, 403, {
-                error: "bot_identity_unverified",
-                message: "Bot identity could not be verified",
-              });
-
-              eventBuffer.add(
+              sendEvent(
+                config,
                 enrichEventWithIcMetadata(
-                  {
-                    ...decision.event,
-                    decision: "denied_identity_check",
-                  },
+                  { ...decision.event, decision: "denied_identity_check" },
                   sourceIp,
                   icResult
                 )
               );
-              return;
+              return {
+                blocked: true,
+                response: jsonResponse(403, {
+                  error: "bot_identity_unverified",
+                  message: "Bot identity could not be verified",
+                }),
+              };
             }
 
-            // IC passed or skipped → serve content
-            eventBuffer.add(
+            sendEvent(
+              config,
               enrichEventWithIcMetadata(decision.event, sourceIp, icResult)
             );
-            next();
+            return { blocked: false };
           } catch (icErr) {
-            // IC error → failsafe: serve content (don't block on IC failure)
+            // IC error → failsafe: serve content
             onError(
               icErr instanceof Error
                 ? icErr
                 : new Error("Identity Check error")
             );
-            eventBuffer.add(decision.event);
-            next();
+            sendEvent(config, decision.event);
+            return { blocked: false };
           }
-          break;
         }
 
         case "denied": {
-          // Check for JWT Authorization: License header
-          const authHeader = req.headers["authorization"];
+          const authHeader = request.headers.get("authorization");
 
           if (authHeader && authHeader.startsWith("License ")) {
             const jwtSecret = rulesCache.getJwtSecret();
@@ -344,40 +292,44 @@ export function createLiquadMiddleware(
 
                 // Build normalized request URL for comparison
                 const domain = host.replace(/:\d+$/, "");
-                const requestUrl = url.startsWith("http")
-                  ? url
+                const fullUrl = request.url.startsWith("http")
+                  ? request.url
                   : `https://${domain}${url.startsWith("/") ? url : "/" + url}`;
-                const normalizedRequestUrl = normalizeUrlForSdk(requestUrl);
+                const normalizedRequestUrl = normalizeUrlForSdk(fullUrl);
 
-                // Validate claim: publisher must match this workspace
+                // Validate: publisher must match this workspace
                 if (jwtPayload.pub !== rules.workspace_id) {
-                  sendJsonResponse(res, 402, {
-                    error: "invalid_token",
-                    reason: "invalid_publisher",
-                  });
-                  eventBuffer.add({
+                  sendEvent(config, {
                     ...decision.event,
                     decision: "denied_invalid_token",
                     consumer_workspace_id: jwtPayload.sub ?? null,
                   });
-                  return;
+                  return {
+                    blocked: true,
+                    response: jsonResponse(402, {
+                      error: "invalid_token",
+                      reason: "invalid_publisher",
+                    }),
+                  };
                 }
 
-                // Validate claim: URL must match the requested content
+                // Validate: URL must match
                 if (jwtPayload.url !== normalizedRequestUrl) {
-                  sendJsonResponse(res, 402, {
-                    error: "invalid_token",
-                    reason: "url_mismatch",
-                  });
-                  eventBuffer.add({
+                  sendEvent(config, {
                     ...decision.event,
                     decision: "denied_invalid_token",
                     consumer_workspace_id: jwtPayload.sub ?? null,
                   });
-                  return;
+                  return {
+                    blocked: true,
+                    response: jsonResponse(402, {
+                      error: "invalid_token",
+                      reason: "url_mismatch",
+                    }),
+                  };
                 }
 
-                // JWT valid! Now perform Identity Check before serving content
+                // JWT valid → perform Identity Check
                 const matchedAgent = rules.user_agents.find(
                   (a) => a.name === decision.event.user_agent_name
                 );
@@ -391,12 +343,8 @@ export function createLiquadMiddleware(
                   );
 
                   if (icResult && !icResult.verified) {
-                    // Bot failed IC → deny even though JWT is valid
-                    sendJsonResponse(res, 403, {
-                      error: "bot_identity_unverified",
-                      message: "Bot identity could not be verified",
-                    });
-                    eventBuffer.add(
+                    sendEvent(
+                      config,
                       enrichEventWithIcMetadata(
                         {
                           ...decision.event,
@@ -407,11 +355,18 @@ export function createLiquadMiddleware(
                         icResult
                       )
                     );
-                    return;
+                    return {
+                      blocked: true,
+                      response: jsonResponse(403, {
+                        error: "bot_identity_unverified",
+                        message: "Bot identity could not be verified",
+                      }),
+                    };
                   }
 
-                  // IC passed or skipped → serve paid content
-                  eventBuffer.add(
+                  // IC passed or skipped → authorize
+                  sendEvent(
+                    config,
                     enrichEventWithIcMetadata(
                       {
                         ...decision.event,
@@ -422,7 +377,7 @@ export function createLiquadMiddleware(
                       icResult
                     )
                   );
-                  next();
+                  return { blocked: false };
                 } catch (icErr) {
                   // IC error → failsafe: serve content
                   onError(
@@ -430,97 +385,74 @@ export function createLiquadMiddleware(
                       ? icErr
                       : new Error("Identity Check error")
                   );
-                  eventBuffer.add({
+                  sendEvent(config, {
                     ...decision.event,
                     decision: "authorized_paid",
                     consumer_workspace_id: jwtPayload.sub,
                   });
-                  next();
+                  return { blocked: false };
                 }
-                return;
               } catch (jwtErr) {
-                // JWT expired, invalid signature, malformed, etc.
                 const reason =
                   jwtErr instanceof Error &&
                   jwtErr.message.includes("expired")
                     ? "token_expired"
                     : "invalid_token";
 
-                sendJsonResponse(res, 402, {
-                  error: "invalid_token",
-                  reason,
-                });
-                eventBuffer.add({
+                sendEvent(config, {
                   ...decision.event,
                   decision: "denied_invalid_token",
                   consumer_workspace_id: null,
                 });
-                return;
+                return {
+                  blocked: true,
+                  response: jsonResponse(402, {
+                    error: "invalid_token",
+                    reason,
+                  }),
+                };
               }
             }
           }
 
           // No JWT or no secret → deny with authorization instructions
-          const deniedEvent: SdkEvent = {
+          sendEvent(config, {
             ...decision.event,
             decision: "denied_authorization_required",
             consumer_workspace_id: null,
-          };
-
-          sendJsonResponse(res, 402, {
-            error: "authorization_required",
-            authorize_url: `${apiBaseUrl}/api/sdk/authorize`,
-            content_url: decision.event.request_url,
-            price_eur: decision.price,
           });
-          eventBuffer.add(deniedEvent);
-          break;
+          return {
+            blocked: true,
+            response: jsonResponse(402, {
+              error: "authorization_required",
+              authorize_url: `${apiBaseUrl}/api/sdk/authorize`,
+              content_url: decision.event.request_url,
+              price_eur: decision.price,
+            }),
+          };
         }
 
         case "blocked_no_catalog": {
-          // Bot has no matching catalog → IC is not triggered (no wasted DNS lookup)
-          const errorBody = JSON.stringify({ error: "Access denied" });
-          res.writeHead(403, {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(errorBody),
-          });
-          res.end(errorBody);
-          eventBuffer.add(decision.event);
-          break;
+          sendEvent(config, decision.event);
+          return {
+            blocked: true,
+            response: jsonResponse(403, { error: "Access denied" }),
+          };
         }
       }
     } catch (err) {
-      // Failsafe: never crash the host server
+      // Failsafe: never crash the host
       onError(
-        err instanceof Error ? err : new Error("Unknown SDK middleware error")
+        err instanceof Error ? err : new Error("Unknown SDK handler error")
       );
-      next();
+      return { blocked: false };
     }
-  }
-
-  // Return the synchronous middleware wrapper (fire-and-forget async)
-  const middleware: LiquadMiddleware = (
-    req: IncomingMessage,
-    res: ServerResponse,
-    next: () => void
-  ): void => {
-    void handleRequest(req, res, next);
   };
-
-  // Attach cleanup method for graceful shutdown
-  (middleware as LiquadMiddleware & { destroy: () => Promise<void> }).destroy =
-    async () => {
-      rulesCache.stop();
-      identityChecker.stop();
-      await eventBuffer.stop();
-    };
-
-  return middleware;
 }
 
 // Re-export types
-export type { LiquadConfig, LiquadMiddleware, JwtPayload } from "./types";
+export type { LiquadConfig, LiquadResult, JwtPayload, SdkEvent } from "./types";
 export type { CachedRules } from "./rules-cache";
-export type { SdkEvent } from "./event-buffer";
 export type { MatchDecision } from "./matcher";
 export type { VerificationResult, IdentityChecker } from "./identity-check";
+export { toExpressMiddleware } from "./express";

@@ -1,5 +1,5 @@
 import type { CachedRules } from "./rules-cache";
-import type { SdkEvent } from "./event-buffer";
+import type { SdkEvent } from "./types";
 
 /**
  * Decision result from the matcher.

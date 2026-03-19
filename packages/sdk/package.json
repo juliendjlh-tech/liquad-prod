@@ -1,23 +1,23 @@
 {
   "name": "@liquad/sdk",
-  "version": "0.1.0",
-  "description": "Liquad AI Content Licensing SDK - Server-side middleware",
+  "version": "0.2.0",
+  "description": "Liquad AI Content Licensing SDK - Universal handler for Node.js and Edge runtimes",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
-    "dev": "tsup src/index.ts --format cjs,esm --dts --watch"
+    "build": "tsup src/index.ts src/express.ts --format cjs,esm --dts --clean",
+    "dev": "tsup src/index.ts src/express.ts --format cjs,esm --dts --watch"
   },
   "devDependencies": {
     "tsup": "^8.0.0",
@@ -28,12 +28,12 @@
     "ai",
     "licensing",
     "sdk",
-    "middleware"
+    "middleware",
+    "edge",
+    "cloudflare-workers",
+    "vercel-edge"
   ],
   "license": "MIT",
-  "engines": {
-    "node": ">=18.0.0"
-  },
   "dependencies": {
     "jose": "^6.2.0"
   }

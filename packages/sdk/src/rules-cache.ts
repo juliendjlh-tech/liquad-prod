@@ -9,7 +9,7 @@ import type { LiquadConfig, IdentityCheckRulesConfig } from "./types";
  * - Domain verification status
  * - Bot matching patterns
  * - Catalog pricing rules
- * - Identity Check configuration (new in IC feature)
+ * - Identity Check configuration
  */
 export interface CachedRules {
   workspace_id: string;
@@ -52,92 +52,68 @@ export interface CachedRules {
 const MIN_REFRESH_INTERVAL = 10_000; // 10s minimum
 
 /**
- * Fetch rules from the Liquad API using Node.js native https/http modules.
+ * Fetch rules from the Liquad API using the Fetch API.
  */
-function fetchRules(config: LiquadConfig): Promise<CachedRules> {
+async function fetchRules(config: LiquadConfig): Promise<CachedRules> {
   const baseUrl = config.apiBaseUrl ?? "https://liquad.app";
   const url = `${baseUrl}/api/sdk/rules`;
 
-  return new Promise((resolve, reject) => {
-    const parsedUrl = new URL(url);
-    const mod = parsedUrl.protocol === "https:" ? require("https") : require("http");
-
-    const req = mod.request(
-      url,
-      {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${config.apiKey}`,
-          Accept: "application/json",
-        },
-        timeout: 10_000,
-      },
-      (res: import("http").IncomingMessage) => {
-        let body = "";
-        res.on("data", (chunk: Buffer) => {
-          body += chunk.toString();
-        });
-        res.on("end", () => {
-          if (res.statusCode !== 200) {
-            reject(new Error(`Rules fetch failed with status ${res.statusCode}`));
-            return;
-          }
-          try {
-            const data = JSON.parse(body) as CachedRules;
-            resolve(data);
-          } catch {
-            reject(new Error("Failed to parse rules response"));
-          }
-        });
-      }
-    );
-
-    req.on("error", (err: Error) => reject(err));
-    req.on("timeout", () => {
-      req.destroy();
-      reject(new Error("Rules fetch timed out"));
-    });
-    req.end();
+  const resp = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${config.apiKey}`,
+      Accept: "application/json",
+    },
+    signal: AbortSignal.timeout(10_000),
   });
+
+  if (!resp.ok) {
+    throw new Error(`Rules fetch failed with status ${resp.status}`);
+  }
+
+  return (await resp.json()) as CachedRules;
 }
 
 /**
  * Create a rules cache instance.
  *
- * - Fetches rules on startup (async, non-blocking).
- * - Refreshes rules periodically on a configurable interval.
- * - Serves stale rules if a refresh fails (stale-while-revalidate).
- * - Returns null if no rules have been fetched yet (passthrough mode).
+ * Uses lazy stale-while-revalidate: rules are fetched on the first call
+ * to getOrRefresh(), then served from memory until the refresh interval
+ * expires. No setInterval — works identically in Node.js and edge runtimes.
+ *
+ * If a refresh fails, stale rules are kept (stale-while-revalidate).
+ * Returns null if no rules have ever been fetched successfully.
  */
 export function createRulesCache(config: LiquadConfig) {
   let rules: CachedRules | null = null;
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let lastFetchedAt = 0;
   const interval = Math.max(
     config.refreshInterval ?? 300_000,
     MIN_REFRESH_INTERVAL
   );
   const onError = config.onError ?? (() => {});
 
-  async function doRefresh(): Promise<void> {
-    try {
-      rules = await fetchRules(config);
-    } catch (err) {
-      onError(
-        err instanceof Error ? err : new Error("Unknown error fetching rules")
-      );
-      // Keep existing rules (stale-while-revalidate)
-    }
-  }
-
   return {
-    async start(): Promise<void> {
-      await doRefresh();
-      timer = setInterval(() => {
-        void doRefresh();
-      }, interval);
-    },
+    /**
+     * Get rules from cache, or fetch them if stale/missing.
+     * This is the only way to access rules — no separate start() needed.
+     */
+    async getOrRefresh(): Promise<CachedRules | null> {
+      if (rules && Date.now() - lastFetchedAt < interval) {
+        return rules;
+      }
 
-    getRules(): CachedRules | null {
+      try {
+        rules = await fetchRules(config);
+        lastFetchedAt = Date.now();
+      } catch (err) {
+        onError(
+          err instanceof Error
+            ? err
+            : new Error("Unknown error fetching rules")
+        );
+        // Keep existing rules (stale-while-revalidate)
+      }
+
       return rules;
     },
 
@@ -145,28 +121,8 @@ export function createRulesCache(config: LiquadConfig) {
       return rules?.jwt_signing_secret ?? null;
     },
 
-    /**
-     * Get the Identity Check configuration from cached rules.
-     *
-     * Returns null if no rules have been fetched yet or if the
-     * API response doesn't include IC config (older API version).
-     * The SDK uses sensible defaults when null.
-     *
-     * @returns IC config or null
-     */
     getIdentityCheckConfig(): IdentityCheckRulesConfig | null {
       return rules?.identity_check ?? null;
-    },
-
-    async refresh(): Promise<void> {
-      await doRefresh();
-    },
-
-    stop(): void {
-      if (timer !== null) {
-        clearInterval(timer);
-        timer = null;
-      }
     },
   };
 }

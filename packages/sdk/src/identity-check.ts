@@ -1,8 +1,8 @@
 /**
- * Identity Check Module — DNS-based Bot Verification
+ * Identity Check Module — DNS-based Bot Verification via DNS-over-HTTPS
  *
  * This module verifies that a bot's IP address actually belongs to the claimed
- * operator by performing a two-step DNS verification:
+ * operator by performing a two-step DNS verification using DoH (DNS-over-HTTPS):
  *
  *   1. **Reverse DNS (rDNS)**: Look up the IP address to get a hostname
  *      Example: 66.249.66.1 → crawl-66-249-66-1.googlebot.com
@@ -14,38 +14,15 @@
  * This prevents IP spoofing: an attacker can fake a User-Agent header
  * (e.g. "Googlebot"), but they cannot fake DNS records.
  *
+ * Uses Cloudflare's public DoH resolver (cloudflare-dns.com/dns-query)
+ * via standard fetch(). Works identically on Node.js 18+, Cloudflare Workers,
+ * and Vercel Edge Functions — no Node.js dns module needed.
+ *
  * The module includes an in-memory cache to avoid repeated DNS lookups
- * for the same IP+bot combination (DNS lookups are slow: ~50-200ms each).
- *
- * @example
- * ```typescript
- * import { createIdentityChecker } from './identity-check';
- *
- * const checker = createIdentityChecker({
- *   cacheTtlMs: 3600000,    // Cache results for 1 hour
- *   dnsTimeoutMs: 500,       // Timeout DNS lookups after 500ms
- * });
- *
- * checker.start(); // Start periodic cache cleanup
- *
- * const result = await checker.verify(
- *   '66.249.66.1',           // Bot's IP address
- *   'googlebot-123',         // Bot identifier (for cache key)
- *   ['*.googlebot.com', '*.google.com']  // Expected DNS patterns
- * );
- *
- * if (result.verified) {
- *   console.log(`Verified: ${result.hostname}`); // crawl-66-249-66-1.googlebot.com
- * }
- *
- * checker.stop(); // Clean up on shutdown
- * ```
+ * for the same IP+bot combination (DNS lookups are slow: ~20-100ms each).
  *
  * @module identity-check
- * @see ADR-003: Identity Check DNS Verification
  */
-
-import * as dns from "dns";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,60 +30,26 @@ import * as dns from "dns";
 
 /**
  * Configuration for the Identity Checker.
- *
- * These values control DNS lookup behavior and cache management.
- * All have sensible defaults if not provided.
  */
 export interface IdentityCheckConfig {
-  /**
-   * How long to cache a verification result (in milliseconds).
-   * After this time, a fresh DNS lookup will be performed.
-   *
-   * Default: 3,600,000 (1 hour)
-   *
-   * Recommended range: 300,000 (5 min) to 86,400,000 (24 hours).
-   * Shorter = more DNS lookups but fresher data.
-   * Longer = fewer lookups but stale results if bot IPs change.
-   */
+  /** How long to cache a verification result (ms). Default: 3,600,000 (1 hour) */
   cacheTtlMs?: number;
 
-  /**
-   * Maximum time to wait for a single DNS lookup (in milliseconds).
-   * If the DNS server doesn't respond within this time, the lookup
-   * is considered failed and the bot is marked as unverified.
-   *
-   * Default: 500 (half a second)
-   *
-   * Note: Each verification performs up to 2 DNS lookups (rDNS + fDNS),
-   * so worst-case latency is 2 × dnsTimeoutMs = 1 second.
-   */
+  /** Maximum time to wait for a DNS lookup (ms). Default: 500 */
   dnsTimeoutMs?: number;
 
-  /**
-   * Optional error callback. Called when DNS errors occur.
-   * DNS errors are non-fatal — they result in `verified: false`.
-   */
+  /** Optional error callback. DNS errors are non-fatal — they result in verified: false. */
   onError?: (error: Error) => void;
 }
 
 /**
  * The result of a bot identity verification.
- *
- * This object tells you:
- * - Whether the bot is who it claims to be (`verified`)
- * - What hostname was found via rDNS (`hostname`)
- * - How long the verification took (`durationMs`)
- * - Whether the result came from cache (`cached`)
  */
 export interface VerificationResult {
   /** Whether the bot's identity was verified via DNS */
   verified: boolean;
 
-  /**
-   * The hostname returned by reverse DNS lookup.
-   * Example: "crawl-66-249-66-1.googlebot.com"
-   * Null if rDNS failed or timed out.
-   */
+  /** The hostname returned by reverse DNS lookup. Null if rDNS failed. */
   hostname: string | null;
 
   /** How long the verification took in milliseconds */
@@ -117,35 +60,9 @@ export interface VerificationResult {
 }
 
 /**
- * Internal cache entry structure.
- * Stores a verification result along with its timestamp for TTL expiry.
- */
-interface CacheEntry {
-  /** The cached verification result */
-  result: VerificationResult;
-
-  /**
-   * When this entry was created (Unix timestamp in ms).
-   * Used to determine if the entry has expired (checkedAt + ttl < now).
-   */
-  checkedAt: number;
-}
-
-/**
  * The public interface of an Identity Checker instance.
- *
- * Created by `createIdentityChecker()`. Provides methods to:
- * - `start()`: Begin periodic cache cleanup
- * - `stop()`: Stop cleanup timer and release resources
- * - `verify()`: Perform DNS verification on a bot IP
  */
 export interface IdentityChecker {
-  /** Start periodic cache cleanup (every 5 minutes) */
-  start: () => void;
-
-  /** Stop the cleanup timer. Call this on graceful shutdown. */
-  stop: () => void;
-
   /**
    * Verify a bot's identity via DNS.
    *
@@ -161,25 +78,20 @@ export interface IdentityChecker {
   ) => Promise<VerificationResult>;
 }
 
+/** Internal cache entry structure. */
+interface CacheEntry {
+  result: VerificationResult;
+  checkedAt: number;
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-/** Default cache TTL: 1 hour (in milliseconds) */
-const DEFAULT_CACHE_TTL_MS = 3_600_000;
-
-/** Default DNS lookup timeout: 500ms */
+const DEFAULT_CACHE_TTL_MS = 3_600_000; // 1 hour
 const DEFAULT_DNS_TIMEOUT_MS = 500;
-
-/** How often to run the cache cleanup sweep (every 5 minutes) */
-const CACHE_CLEANUP_INTERVAL_MS = 5 * 60 * 1000;
-
-/**
- * Maximum number of entries allowed in the cache.
- * When this limit is reached, the oldest entries are evicted.
- * This prevents memory leaks if the SDK processes many unique IPs.
- */
 const MAX_CACHE_ENTRIES = 10_000;
+const DOH_RESOLVER = "https://cloudflare-dns.com/dns-query";
 
 // ---------------------------------------------------------------------------
 // Glob Pattern Matcher
@@ -188,50 +100,28 @@ const MAX_CACHE_ENTRIES = 10_000;
 /**
  * Check if a hostname matches a DNS glob pattern.
  *
- * DNS glob patterns use `*` as a wildcard that matches one or more
- * characters (but NOT dots in this implementation — we match full subdomains).
+ * DNS glob patterns use `*` as a wildcard that matches one or more characters.
  *
  * Examples:
  *   - `matchDnsPattern("crawl-1.googlebot.com", "*.googlebot.com")` → true
  *   - `matchDnsPattern("googlebot.com", "*.googlebot.com")` → false (no subdomain)
  *   - `matchDnsPattern("evil.googlebot.com.attacker.net", "*.googlebot.com")` → false
- *
- * Implementation: Converts the glob pattern to a regex.
- *   `*.googlebot.com` becomes `/^.+\.googlebot\.com$/i`
- *
- * The `*` wildcard is translated to `.+` (one or more characters),
- * meaning the pattern requires at least one subdomain level.
- *
- * @param hostname - The hostname to check (e.g. from rDNS lookup)
- * @param pattern - A DNS glob pattern (e.g. "*.googlebot.com")
- * @returns true if the hostname matches the pattern
  */
 export function matchDnsPattern(hostname: string, pattern: string): boolean {
   try {
-    // Escape all regex special characters in the pattern,
-    // then replace the escaped wildcard (\*) with .+ (one or more chars)
     const escaped = pattern
-      .replace(/[.+?^${}()|[\]\\]/g, "\\$&") // Escape regex specials
-      .replace(/\\\*/g, ".+"); // Replace \* with .+ (NOT .* — must match at least 1 char)
+      .replace(/[.+?^${}()|[\]\\]/g, "\\$&")
+      .replace(/\\\*/g, ".+");
 
-    const regex = new RegExp(`^${escaped}$`, "i"); // Case-insensitive, full match
+    const regex = new RegExp(`^${escaped}$`, "i");
     return regex.test(hostname);
   } catch {
-    // If the pattern is somehow invalid, don't crash — just return false
     return false;
   }
 }
 
 /**
  * Check if a hostname matches ANY of the provided DNS patterns.
- *
- * This is the multi-pattern version of `matchDnsPattern`.
- * A bot can have multiple valid DNS patterns (e.g. Googlebot uses
- * both *.googlebot.com and *.google.com).
- *
- * @param hostname - The hostname to check
- * @param patterns - Array of DNS glob patterns to match against
- * @returns true if the hostname matches at least one pattern
  */
 export function matchAnyDnsPattern(
   hostname: string,
@@ -241,69 +131,63 @@ export function matchAnyDnsPattern(
 }
 
 // ---------------------------------------------------------------------------
-// DNS Helpers (with timeout)
+// DNS-over-HTTPS Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Perform a reverse DNS lookup with a timeout.
- *
- * Reverse DNS (rDNS) converts an IP address to a hostname.
- * Example: 66.249.66.1 → ["crawl-66-249-66-1.googlebot.com"]
- *
- * Uses `Promise.race` to enforce a hard timeout. If the DNS server
- * doesn't respond in time, the promise rejects with a timeout error.
- *
- * @param ip - IP address to look up
- * @param timeoutMs - Maximum time to wait (in milliseconds)
- * @returns Array of hostnames (usually just one)
- * @throws Error if the lookup times out or fails
+ * Convert an IPv4 address to the in-addr.arpa format for PTR lookups.
+ * Example: "66.249.66.1" → "1.66.249.66.in-addr.arpa"
  */
-async function reverseDnsWithTimeout(
-  ip: string,
-  timeoutMs: number
-): Promise<string[]> {
-  return Promise.race([
-    // The actual DNS lookup
-    dns.promises.reverse(ip),
-    // The timeout — rejects after timeoutMs milliseconds
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`rDNS timeout after ${timeoutMs}ms`)),
-        timeoutMs
-      )
-    ),
-  ]);
+function ipToArpa(ip: string): string {
+  return ip.split(".").reverse().join(".") + ".in-addr.arpa";
 }
 
 /**
- * Perform a forward DNS lookup (A record) with a timeout.
- *
- * Forward DNS (fDNS) converts a hostname to IP address(es).
- * Example: crawl-66-249-66-1.googlebot.com → ["66.249.66.1"]
- *
- * This is the second step of verification: we confirm that the
- * hostname (from rDNS) resolves back to the original IP.
- *
- * @param hostname - Hostname to resolve
- * @param timeoutMs - Maximum time to wait (in milliseconds)
- * @returns Array of IPv4 addresses
- * @throws Error if the lookup times out or fails
+ * Perform a reverse DNS lookup via DNS-over-HTTPS.
+ * Returns hostnames for the given IP address (PTR records).
  */
-async function forwardDnsWithTimeout(
+async function reverseDns(
+  ip: string,
+  timeoutMs: number
+): Promise<string[]> {
+  const resp = await fetch(
+    `${DOH_RESOLVER}?name=${ipToArpa(ip)}&type=PTR`,
+    {
+      headers: { Accept: "application/dns-json" },
+      signal: AbortSignal.timeout(timeoutMs),
+    }
+  );
+
+  if (!resp.ok) return [];
+
+  const data = await resp.json();
+  return ((data as { Answer?: Array<{ type: number; data: string }> }).Answer ?? [])
+    .filter((a) => a.type === 12) // PTR = type 12
+    .map((a) => a.data.replace(/\.$/, "")); // remove trailing dot
+}
+
+/**
+ * Perform a forward DNS lookup via DNS-over-HTTPS.
+ * Returns IPv4 addresses for the given hostname (A records).
+ */
+async function forwardDns(
   hostname: string,
   timeoutMs: number
 ): Promise<string[]> {
-  return Promise.race([
-    // The actual DNS lookup (resolve4 = IPv4 A records)
-    dns.promises.resolve4(hostname),
-    // The timeout
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`fDNS timeout after ${timeoutMs}ms`)),
-        timeoutMs
-      )
-    ),
-  ]);
+  const resp = await fetch(
+    `${DOH_RESOLVER}?name=${hostname}&type=A`,
+    {
+      headers: { Accept: "application/dns-json" },
+      signal: AbortSignal.timeout(timeoutMs),
+    }
+  );
+
+  if (!resp.ok) return [];
+
+  const data = await resp.json();
+  return ((data as { Answer?: Array<{ type: number; data: string }> }).Answer ?? [])
+    .filter((a) => a.type === 1) // A = type 1
+    .map((a) => a.data);
 }
 
 // ---------------------------------------------------------------------------
@@ -313,85 +197,33 @@ async function forwardDnsWithTimeout(
 /**
  * Create an Identity Checker instance.
  *
- * The Identity Checker performs DNS-based bot verification and maintains
- * an in-memory cache to avoid repeated DNS lookups.
+ * The Identity Checker performs DNS-based bot verification using DoH
+ * (DNS-over-HTTPS) and maintains an in-memory cache to avoid repeated lookups.
  *
- * **Lifecycle:**
- * 1. Call `createIdentityChecker(config)` to create an instance
- * 2. Call `checker.start()` to begin periodic cache cleanup
- * 3. Call `checker.verify(ip, botId, patterns)` to verify bots
- * 4. Call `checker.stop()` on shutdown to release resources
- *
- * **Cache behavior:**
- * - Cache key: `${ip}:${botId}` (unique per IP + bot combination)
- * - TTL: configurable (default 1 hour)
- * - Max entries: 10,000 (oldest evicted when full)
- * - Cleanup: every 5 minutes, expired entries are removed
- *
- * **Error handling:**
- * This module NEVER throws exceptions. All DNS errors are caught and
- * returned as `{ verified: false }`. This ensures the SDK never crashes
- * due to DNS issues.
+ * No timers or background tasks — cache cleanup is done lazily on access.
+ * Works identically on Node.js, Cloudflare Workers, and Vercel Edge.
  *
  * @param config - Optional configuration overrides
- * @returns An IdentityChecker instance with start/stop/verify methods
+ * @returns An IdentityChecker instance
  */
 export function createIdentityChecker(
   config: IdentityCheckConfig = {}
 ): IdentityChecker {
-  // ---------------------------------------------------------------------------
-  // Configuration with defaults
-  // ---------------------------------------------------------------------------
   const cacheTtlMs = config.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
   const dnsTimeoutMs = config.dnsTimeoutMs ?? DEFAULT_DNS_TIMEOUT_MS;
   const onError = config.onError ?? (() => {});
 
-  // ---------------------------------------------------------------------------
-  // In-memory cache
-  // ---------------------------------------------------------------------------
-  // Map<cacheKey, CacheEntry> where cacheKey = "${ip}:${botId}"
-  // Using a Map ensures O(1) lookup and preserves insertion order.
   const cache = new Map<string, CacheEntry>();
 
-  // Timer for periodic cache cleanup
-  let cleanupTimer: ReturnType<typeof setInterval> | null = null;
-
-  // ---------------------------------------------------------------------------
-  // Cache Management
-  // ---------------------------------------------------------------------------
-
   /**
-   * Remove expired entries from the cache.
-   *
-   * Called periodically (every 5 minutes) to prevent memory buildup.
-   * Iterates the entire cache and deletes entries older than the TTL.
-   */
-  function cleanupExpiredEntries(): void {
-    const now = Date.now();
-
-    for (const [key, entry] of cache.entries()) {
-      if (now - entry.checkedAt > cacheTtlMs) {
-        cache.delete(key);
-      }
-    }
-  }
-
-  /**
-   * Evict the oldest entries if the cache exceeds the maximum size.
-   *
-   * This uses the fact that Map preserves insertion order: the first
-   * entries in the iterator are the oldest ones.
-   *
-   * Called after each new cache insertion to enforce the 10,000 limit.
+   * Evict oldest entries if the cache exceeds the maximum size.
    */
   function evictIfOverCapacity(): void {
     if (cache.size <= MAX_CACHE_ENTRIES) return;
 
-    // Calculate how many entries to remove
     const entriesToRemove = cache.size - MAX_CACHE_ENTRIES;
     const keysToDelete: string[] = [];
 
-    // Collect the oldest keys (first N entries in the Map)
     let count = 0;
     for (const key of cache.keys()) {
       if (count >= entriesToRemove) break;
@@ -399,44 +231,21 @@ export function createIdentityChecker(
       count++;
     }
 
-    // Delete the collected keys
     for (const key of keysToDelete) {
       cache.delete(key);
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Core Verification Logic
-  // ---------------------------------------------------------------------------
-
   /**
-   * Verify a bot's identity via DNS.
+   * Verify a bot's identity via DNS-over-HTTPS.
    *
-   * The verification flow is:
-   *
-   * ```
+   * Flow:
    * 1. Check cache → if hit and not expired → return cached result
-   *                                         ↓
-   * 2. Reverse DNS: IP → hostname
-   *    (e.g. 66.249.66.1 → crawl-66-249-66-1.googlebot.com)
-   *                                         ↓
+   * 2. Reverse DNS: IP → hostname (via DoH)
    * 3. Pattern match: hostname vs dns_patterns
-   *    (e.g. crawl-66-249-66-1.googlebot.com matches *.googlebot.com ?)
-   *                                         ↓
-   * 4. Forward DNS: hostname → IP
-   *    (e.g. crawl-66-249-66-1.googlebot.com → 66.249.66.1)
-   *                                         ↓
+   * 4. Forward DNS: hostname → IP (via DoH)
    * 5. IP comparison: does the resolved IP match the original IP?
-   *                                         ↓
    * 6. Cache result and return
-   * ```
-   *
-   * If ANY step fails, the result is `{ verified: false }`.
-   *
-   * @param ip - The bot's IP address (IPv4, e.g. "66.249.66.1")
-   * @param botId - Unique identifier for cache key (e.g. bot's UUID)
-   * @param dnsPatterns - Expected hostname patterns (e.g. ["*.googlebot.com"])
-   * @returns VerificationResult with verified status and metadata
    */
   async function verify(
     ip: string,
@@ -446,14 +255,11 @@ export function createIdentityChecker(
     const startTime = Date.now();
 
     try {
-      // -----------------------------------------------------------------------
-      // Step 1: Check the cache
-      // -----------------------------------------------------------------------
+      // Step 1: Check cache (lazy expiry — expired entries are simply re-fetched)
       const cacheKey = `${ip}:${botId}`;
       const cached = cache.get(cacheKey);
 
       if (cached && Date.now() - cached.checkedAt <= cacheTtlMs) {
-        // Cache hit — return the stored result without any DNS lookup
         return {
           ...cached.result,
           cached: true,
@@ -461,21 +267,13 @@ export function createIdentityChecker(
         };
       }
 
-      // Cache miss or expired — perform fresh DNS verification
-
-      // -----------------------------------------------------------------------
-      // Step 2: Reverse DNS lookup (IP → hostname)
-      // -----------------------------------------------------------------------
+      // Step 2: Reverse DNS (IP → hostname)
       let hostnames: string[];
       try {
-        hostnames = await reverseDnsWithTimeout(ip, dnsTimeoutMs);
+        hostnames = await reverseDns(ip, dnsTimeoutMs);
       } catch (err) {
-        // rDNS failed (timeout, NXDOMAIN, network error, etc.)
-        // This means we can't determine who owns this IP → unverified
         onError(
-          err instanceof Error
-            ? err
-            : new Error(`rDNS failed for ${ip}`)
+          err instanceof Error ? err : new Error(`rDNS failed for ${ip}`)
         );
 
         const failResult: VerificationResult = {
@@ -485,15 +283,11 @@ export function createIdentityChecker(
           cached: false,
         };
 
-        // Cache the failure so we don't keep retrying the same bad IP
         cache.set(cacheKey, { result: failResult, checkedAt: Date.now() });
         evictIfOverCapacity();
-
         return failResult;
       }
 
-      // rDNS can return multiple hostnames; use the first one
-      // (most DNS servers return only one PTR record for an IP)
       if (hostnames.length === 0) {
         const failResult: VerificationResult = {
           verified: false,
@@ -508,13 +302,8 @@ export function createIdentityChecker(
 
       const hostname = hostnames[0];
 
-      // -----------------------------------------------------------------------
-      // Step 3: Pattern matching (hostname vs dns_patterns)
-      // -----------------------------------------------------------------------
-      // Check if the rDNS hostname matches any of the expected patterns.
-      // Example: "crawl-1.googlebot.com" should match "*.googlebot.com"
+      // Step 3: Pattern matching
       if (!matchAnyDnsPattern(hostname, dnsPatterns)) {
-        // Hostname doesn't match any expected pattern → likely spoofed
         const failResult: VerificationResult = {
           verified: false,
           hostname,
@@ -526,14 +315,11 @@ export function createIdentityChecker(
         return failResult;
       }
 
-      // -----------------------------------------------------------------------
-      // Step 4: Forward DNS lookup (hostname → IP)
-      // -----------------------------------------------------------------------
+      // Step 4: Forward DNS (hostname → IP)
       let resolvedIps: string[];
       try {
-        resolvedIps = await forwardDnsWithTimeout(hostname, dnsTimeoutMs);
+        resolvedIps = await forwardDns(hostname, dnsTimeoutMs);
       } catch (err) {
-        // fDNS failed — can't confirm the hostname resolves to this IP
         onError(
           err instanceof Error
             ? err
@@ -551,12 +337,7 @@ export function createIdentityChecker(
         return failResult;
       }
 
-      // -----------------------------------------------------------------------
       // Step 5: IP comparison
-      // -----------------------------------------------------------------------
-      // The hostname's resolved IP(s) must include the original IP.
-      // If not, someone may have a hostname that matches the pattern but
-      // points to a different IP (unlikely but theoretically possible).
       const ipMatches = resolvedIps.includes(ip);
 
       const finalResult: VerificationResult = {
@@ -566,9 +347,7 @@ export function createIdentityChecker(
         cached: false,
       };
 
-      // -----------------------------------------------------------------------
-      // Step 6: Cache the result
-      // -----------------------------------------------------------------------
+      // Step 6: Cache
       cache.set(cacheKey, { result: finalResult, checkedAt: Date.now() });
       evictIfOverCapacity();
 
@@ -590,42 +369,5 @@ export function createIdentityChecker(
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Public API
-  // ---------------------------------------------------------------------------
-
-  return {
-    /**
-     * Start the periodic cache cleanup timer.
-     *
-     * The timer runs every 5 minutes and removes expired cache entries.
-     * Call this once at SDK initialization.
-     */
-    start(): void {
-      if (cleanupTimer !== null) return; // Already started
-
-      cleanupTimer = setInterval(cleanupExpiredEntries, CACHE_CLEANUP_INTERVAL_MS);
-
-      // Ensure the timer doesn't prevent Node.js from exiting
-      // (unref allows the process to exit even if the timer is still active)
-      if (cleanupTimer && typeof cleanupTimer === "object" && "unref" in cleanupTimer) {
-        (cleanupTimer as NodeJS.Timeout).unref();
-      }
-    },
-
-    /**
-     * Stop the periodic cache cleanup timer.
-     *
-     * Call this during graceful shutdown to release resources.
-     * Does NOT clear the cache — just stops the cleanup timer.
-     */
-    stop(): void {
-      if (cleanupTimer !== null) {
-        clearInterval(cleanupTimer);
-        cleanupTimer = null;
-      }
-    },
-
-    verify,
-  };
+  return { verify };
 }
