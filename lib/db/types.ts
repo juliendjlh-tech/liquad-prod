@@ -184,7 +184,7 @@ export type Database = {
       contents: {
         Row: {
           created_at: string | null
-          domain: string
+          domain_id: string
           id: string
           lastmod: string | null
           source_url: string
@@ -193,7 +193,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
-          domain: string
+          domain_id: string
           id?: string
           lastmod?: string | null
           source_url: string
@@ -202,7 +202,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
-          domain?: string
+          domain_id?: string
           id?: string
           lastmod?: string | null
           source_url?: string
@@ -215,6 +215,13 @@ export type Database = {
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "fk_contents_domain"
+            columns: ["domain_id"]
+            isOneToOne: false
+            referencedRelation: "domains"
             referencedColumns: ["id"]
           },
         ]
@@ -513,7 +520,7 @@ export type Database = {
           p_workspace_id: string
         }
         Returns: {
-          domain: string
+          domain_id: string
           content_count: number
         }[]
       }

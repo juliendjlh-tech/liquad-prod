@@ -19,10 +19,11 @@ export interface ContentRow {
   id: string;
   workspace_id: string;
   source_url: string;
-  domain: string;
+  domain_id: string;
+  domain: string; // from joined domains(domain)
   title: string | null;
   lastmod: string | null;
-  created_at: string;
+  created_at: string | null;
 }
 
 export interface PaginatedContents {
@@ -146,14 +147,14 @@ export async function fetchAndParseSitemap(
 // ---------------------------------------------------------------------------
 
 /**
- * Ensure a domain record exists for the workspace.
+ * Ensure a domain record exists for the workspace and return its UUID.
  * If not existing, creates it with status "unverified".
  * Uses upsert on UNIQUE(workspace_id, domain) for idempotency.
  */
 export async function ensureDomainExists(
   workspaceId: string,
   domain: string
-): Promise<void> {
+): Promise<string> {
   const supabase = await createServerClient();
 
   const { error } = await supabase
@@ -167,6 +168,20 @@ export async function ensureDomainExists(
     console.error(`Failed to ensure domain "${domain}":`, error.message);
     throw new Error(`Failed to create domain: ${error.message}`);
   }
+
+  // ignoreDuplicates doesn't return data, so always fetch the id
+  const { data: existing } = await supabase
+    .from("domains")
+    .select("id")
+    .eq("workspace_id", workspaceId)
+    .eq("domain", domain)
+    .single();
+
+  if (!existing) {
+    throw new Error(`Failed to resolve domain id for: ${domain}`);
+  }
+
+  return existing.id;
 }
 
 // ---------------------------------------------------------------------------
@@ -198,21 +213,24 @@ export async function importFromSitemap(
     return { imported: 0, upserted: 0 };
   }
 
-  // Step 2-3: Extract unique domains and ensure they exist
+  // Step 2-3: Extract unique domains, ensure they exist, and build hostname→UUID map
   const uniqueDomains = [...new Set(entries.map((e) => extractDomain(e.loc)))];
-  await Promise.all(
-    uniqueDomains.map((domain) => ensureDomainExists(workspaceId, domain))
+  const domainIdPairs = await Promise.all(
+    uniqueDomains.map(async (domain) => {
+      const id = await ensureDomainExists(workspaceId, domain);
+      return [domain, id] as const;
+    })
   );
+  const domainMap = new Map(domainIdPairs);
 
   // Step 4: Upsert all entries in batches of 1000
   // Uses UNIQUE(workspace_id, source_url) constraint — inserts new records,
-  // updates lastmod on existing ones. Eliminates the need to fetch existing
-  // URLs, classify entries, or update records one by one.
+  // updates lastmod on existing ones.
   const BATCH_SIZE = 1000;
   const allRecords = entries.map((entry) => ({
     workspace_id: workspaceId,
     source_url: entry.loc,
-    domain: extractDomain(entry.loc),
+    domain_id: domainMap.get(extractDomain(entry.loc))!,
     lastmod: entry.lastmod,
   }));
 
@@ -267,21 +285,20 @@ export async function getDomainsWithContentCount(
 
   if (!domains || domains.length === 0) return [];
 
-  // Get content counts per domain in a single GROUP BY query via RPC
-  // (replaces N+1 individual COUNT queries)
+  // Get content counts per domain_id in a single GROUP BY query via RPC
   const { data: counts } = await supabase.rpc("get_domain_content_counts", {
     p_workspace_id: workspaceId,
   });
   const countMap = new Map<string, number>();
-  for (const row of (counts ?? []) as Array<{ domain: string; content_count: number }>) {
-    countMap.set(row.domain, Number(row.content_count));
+  for (const row of (counts ?? []) as Array<{ domain_id: string; content_count: number }>) {
+    countMap.set(row.domain_id, Number(row.content_count));
   }
 
   return domains.map((d) => ({
     id: d.id,
     domain: d.domain,
     status: d.status,
-    content_count: countMap.get(d.domain) ?? 0,
+    content_count: countMap.get(d.id) ?? 0,
     created_at: d.created_at,
   }));
 }
@@ -306,19 +323,36 @@ export async function getContents(
   const limit = Math.min(100, Math.max(1, params.limit ?? 50));
   const offset = (page - 1) * limit;
 
-  // Build query for items
+  // Resolve domain hostname → domain_id if filter provided
+  let domainId: string | undefined;
+  if (params.domain) {
+    const { data: domainRecord } = await supabase
+      .from("domains")
+      .select("id")
+      .eq("workspace_id", params.workspaceId)
+      .eq("domain", params.domain)
+      .single();
+
+    if (!domainRecord) {
+      // Domain not found → return empty result
+      return { items: [], total: 0, page, totalPages: 0 };
+    }
+    domainId = domainRecord.id;
+  }
+
+  // Build query with joined domain name
   let query = supabase
     .from("contents")
-    .select("id, workspace_id, source_url, domain, title, lastmod, created_at", {
+    .select("id, workspace_id, source_url, domain_id, title, lastmod, created_at, domains(domain)", {
       count: "exact",
     })
     .eq("workspace_id", params.workspaceId)
     .order("created_at", { ascending: false })
     .range(offset, offset + limit - 1);
 
-  // Apply domain filter if provided
-  if (params.domain) {
-    query = query.eq("domain", params.domain);
+  // Apply domain_id filter
+  if (domainId) {
+    query = query.eq("domain_id", domainId);
   }
 
   // Apply search filter if provided
@@ -334,8 +368,20 @@ export async function getContents(
 
   const total = count ?? 0;
 
+  // Flatten the joined domain name into ContentRow shape
+  const items: ContentRow[] = (data ?? []).map((row) => ({
+    id: row.id,
+    workspace_id: row.workspace_id,
+    source_url: row.source_url,
+    domain_id: row.domain_id,
+    domain: (row.domains as unknown as { domain: string } | null)?.domain ?? "",
+    title: row.title,
+    lastmod: row.lastmod,
+    created_at: row.created_at,
+  }));
+
   return {
-    items: (data ?? []) as ContentRow[],
+    items,
     total,
     page,
     totalPages: Math.ceil(total / limit),

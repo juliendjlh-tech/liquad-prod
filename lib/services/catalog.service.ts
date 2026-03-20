@@ -51,6 +51,43 @@ export interface PreviewResult {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch ALL rows from a table, paginating through Supabase's default 1000-row
+ * limit. Returns all rows matching the query.
+ */
+async function fetchAllContentUrls(
+  workspaceId: string,
+  columns: string = "source_url"
+): Promise<Array<Record<string, unknown>>> {
+  const supabase = await createServerClient();
+  const PAGE_SIZE = 1000;
+  const allRows: Array<Record<string, unknown>> = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("contents")
+      .select(columns)
+      .eq("workspace_id", workspaceId)
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (error) {
+      throw new Error(`Failed to fetch contents: ${error.message}`);
+    }
+
+    if (!data || data.length === 0) break;
+    allRows.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  return allRows;
+}
+
+// ---------------------------------------------------------------------------
 // CRUD
 // ---------------------------------------------------------------------------
 
@@ -137,13 +174,8 @@ export async function getCatalogs(
     throw new Error(`Failed to list catalogs: ${error.message}`);
   }
 
-  // Fetch all contents once for content_count computation
-  const { data: allContents } = await supabase
-    .from("contents")
-    .select("source_url")
-    .eq("workspace_id", workspaceId);
-
-  const contents = allContents ?? [];
+  // Fetch all contents (paginated to bypass Supabase 1000-row default limit)
+  const contents = await fetchAllContentUrls(workspaceId, "source_url") as Array<{ source_url: string }>;
 
   // Get agent counts for each catalog
   const results: CatalogListItem[] = [];
@@ -153,13 +185,26 @@ export async function getCatalogs(
       .select("user_agent_id", { count: "exact", head: true })
       .eq("catalog_id", catalog.id);
 
-    // Compute content_count by matching url_patterns against contents
+    // Compute content_count by matching url_patterns against content pathnames
     let contentCount = 0;
     if (catalog.url_patterns.length > 0 && contents.length > 0) {
       const regexes = catalog.url_patterns.map((p: string) => new RegExp(p));
+      
+      // test if matching on the source URL pattern
       contentCount = contents.filter((c) =>
         regexes.some((regex) => regex.test(c.source_url))
       ).length;
+
+      /*
+      // test if matching on the pathname pattern
+      contentCount = contents.filter((c) => {
+        try {
+          const pathname = new URL(c.source_url).pathname;
+          return regexes.some((regex) => regex.test(pathname));
+        } catch {
+          return false;
+        }
+      }).length; */
     }
 
     results.push({
@@ -355,23 +400,26 @@ export async function previewCatalogMatch(
 ): Promise<PreviewResult> {
   const supabase = await createServerClient();
 
-  // Fetch all contents for the workspace
-  const { data: allContents, error } = await supabase
-    .from("contents")
-    .select("id, source_url, title")
-    .eq("workspace_id", workspaceId);
-
-  if (error) {
-    throw new Error(`Failed to fetch contents: ${error.message}`);
-  }
-
-  const contents = allContents ?? [];
+  // Fetch all contents (paginated to bypass Supabase 1000-row default limit)
+  const contents = await fetchAllContentUrls(workspaceId, "id, source_url, title") as Array<{ id: string; source_url: string; title: string | null }>;
   const totalContents = contents.length;
 
   // Compile regex patterns
   const regexes = urlPatterns.map((p) => new RegExp(p));
 
-  // Test each content against patterns
+ /*
+  // Test each content's pathname against patterns
+  const matched = contents.filter((content) => {
+    try {
+      const pathname = new URL(content.source_url).pathname;
+      return regexes.some((regex) => regex.test(pathname));
+    } catch {
+      return false;
+    }
+  });
+  */
+
+  // Test each content's source URL against patterns
   const matched = contents.filter((content) =>
     regexes.some((regex) => regex.test(content.source_url))
   );
