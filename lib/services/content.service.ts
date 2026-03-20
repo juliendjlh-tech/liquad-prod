@@ -12,8 +12,7 @@ export interface SitemapEntry {
 
 export interface ImportResult {
   imported: number;
-  created: number;
-  updated: number;
+  upserted: number;
 }
 
 export interface ContentRow {
@@ -118,7 +117,9 @@ export async function fetchAndParseSitemap(
 
   // Sitemap index: <sitemapindex><sitemap><loc>...</loc></sitemap></sitemapindex>
   if (root.sitemapindex?.sitemap) {
-    const nestedUrls = root.sitemapindex.sitemap.slice(0, 500);
+    const MAX_NESTED_SITEMAPS = 50;
+    const MAX_TOTAL_ENTRIES = 50_000;
+    const nestedUrls = root.sitemapindex.sitemap.slice(0, MAX_NESTED_SITEMAPS);
     const entries: SitemapEntry[] = [];
 
     // Fetch nested sitemaps in batches of 5 for concurrency control
@@ -129,10 +130,12 @@ export async function fetchAndParseSitemap(
       );
       for (const result of results) {
         entries.push(...result);
+        if (entries.length >= MAX_TOTAL_ENTRIES) break;
       }
+      if (entries.length >= MAX_TOTAL_ENTRIES) break;
     }
 
-    return entries;
+    return entries.slice(0, MAX_TOTAL_ENTRIES);
   }
 
   throw new Error("INVALID_SITEMAP");
@@ -153,12 +156,17 @@ export async function ensureDomainExists(
 ): Promise<void> {
   const supabase = await createServerClient();
 
-  await supabase
+  const { error } = await supabase
     .from("domains")
     .upsert(
       { workspace_id: workspaceId, domain, status: "unverified" },
       { onConflict: "workspace_id,domain", ignoreDuplicates: true }
     );
+
+  if (error) {
+    console.error(`Failed to ensure domain "${domain}":`, error.message);
+    throw new Error(`Failed to create domain: ${error.message}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -172,12 +180,10 @@ export async function ensureDomainExists(
  * 1. Fetch and parse the sitemap (supports sitemap index).
  * 2. Extract unique domains from all URLs.
  * 3. Create domain records for new domains (status: "unverified").
- * 4. Fetch existing content source_urls for this workspace.
- * 5. Classify entries as "create" or "update".
- * 6. Batch insert new records, batch update existing records.
- * 7. Return counts.
+ * 4. Upsert all entries in batches (insert or update on conflict).
  *
- * Idempotent: re-importing updates lastmod on existing records.
+ * Idempotent: uses UPSERT on UNIQUE(workspace_id, source_url) —
+ * new URLs are inserted, existing URLs get their lastmod updated.
  */
 export async function importFromSitemap(
   workspaceId: string,
@@ -189,7 +195,7 @@ export async function importFromSitemap(
   const entries = await fetchAndParseSitemap(sitemapUrl);
 
   if (entries.length === 0) {
-    return { imported: 0, created: 0, updated: 0 };
+    return { imported: 0, upserted: 0 };
   }
 
   // Step 2-3: Extract unique domains and ensure they exist
@@ -198,67 +204,34 @@ export async function importFromSitemap(
     uniqueDomains.map((domain) => ensureDomainExists(workspaceId, domain))
   );
 
-  // Step 4: Get existing content source_urls for this workspace
-  const { data: existingContents } = await supabase
-    .from("contents")
-    .select("source_url")
-    .eq("workspace_id", workspaceId);
+  // Step 4: Upsert all entries in batches of 1000
+  // Uses UNIQUE(workspace_id, source_url) constraint — inserts new records,
+  // updates lastmod on existing ones. Eliminates the need to fetch existing
+  // URLs, classify entries, or update records one by one.
+  const BATCH_SIZE = 1000;
+  const allRecords = entries.map((entry) => ({
+    workspace_id: workspaceId,
+    source_url: entry.loc,
+    domain: extractDomain(entry.loc),
+    lastmod: entry.lastmod,
+  }));
 
-  const existingUrls = new Set(
-    (existingContents ?? []).map((c) => c.source_url)
-  );
-
-  // Step 5: Classify entries
-  const toCreate: Array<{
-    workspace_id: string;
-    source_url: string;
-    domain: string;
-    lastmod: string | null;
-  }> = [];
-
-  const toUpdate: Array<{
-    source_url: string;
-    lastmod: string | null;
-  }> = [];
-
-  for (const entry of entries) {
-    const domain = extractDomain(entry.loc);
-    if (existingUrls.has(entry.loc)) {
-      toUpdate.push({ source_url: entry.loc, lastmod: entry.lastmod });
-    } else {
-      toCreate.push({
-        workspace_id: workspaceId,
-        source_url: entry.loc,
-        domain,
-        lastmod: entry.lastmod,
-      });
-    }
-  }
-
-  // Step 6a: Batch insert new records
-  if (toCreate.length > 0) {
-    const { error: insertError } = await supabase
+  let upserted = 0;
+  for (let i = 0; i < allRecords.length; i += BATCH_SIZE) {
+    const batch = allRecords.slice(i, i + BATCH_SIZE);
+    const { error } = await supabase
       .from("contents")
-      .insert(toCreate);
+      .upsert(batch, { onConflict: "workspace_id,source_url" });
 
-    if (insertError) {
-      throw new Error(`Failed to insert contents: ${insertError.message}`);
+    if (error) {
+      throw new Error(`Failed to upsert contents: ${error.message}`);
     }
-  }
-
-  // Step 6b: Update existing records one by one (lastmod)
-  for (const record of toUpdate) {
-    await supabase
-      .from("contents")
-      .update({ lastmod: record.lastmod })
-      .eq("workspace_id", workspaceId)
-      .eq("source_url", record.source_url);
+    upserted += batch.length;
   }
 
   return {
     imported: entries.length,
-    created: toCreate.length,
-    updated: toUpdate.length,
+    upserted,
   };
 }
 
@@ -294,15 +267,14 @@ export async function getDomainsWithContentCount(
 
   if (!domains || domains.length === 0) return [];
 
-  // Get content counts per domain in a single query
-  const { data: counts } = await supabase
-    .from("contents")
-    .select("domain")
-    .eq("workspace_id", workspaceId);
-
+  // Get content counts per domain in a single GROUP BY query via RPC
+  // (replaces N+1 individual COUNT queries)
+  const { data: counts } = await supabase.rpc("get_domain_content_counts", {
+    p_workspace_id: workspaceId,
+  });
   const countMap = new Map<string, number>();
-  for (const row of counts ?? []) {
-    countMap.set(row.domain, (countMap.get(row.domain) ?? 0) + 1);
+  for (const row of (counts ?? []) as Array<{ domain: string; content_count: number }>) {
+    countMap.set(row.domain, Number(row.content_count));
   }
 
   return domains.map((d) => ({

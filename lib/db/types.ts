@@ -140,6 +140,47 @@ export type Database = {
           },
         ]
       }
+      import_jobs: {
+        Row: {
+          id: string
+          workspace_id: string
+          sitemap_url: string
+          status: string
+          result: Json | null
+          error_message: string | null
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          sitemap_url: string
+          status?: string
+          result?: Json | null
+          error_message?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          workspace_id?: string
+          sitemap_url?: string
+          status?: string
+          result?: Json | null
+          error_message?: string | null
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_jobs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contents: {
         Row: {
           created_at: string | null
@@ -467,6 +508,15 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      get_domain_content_counts: {
+        Args: {
+          p_workspace_id: string
+        }
+        Returns: {
+          domain: string
+          content_count: number
+        }[]
+      }
       check_cache_and_debit: {
         Args: {
           p_catalog_id: string

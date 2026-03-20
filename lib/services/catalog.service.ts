@@ -16,6 +16,7 @@ export interface CatalogListItem {
   price_eur: number;
   status: string;
   agent_count: number;
+  content_count: number;
   created_at: string;
 }
 
@@ -136,6 +137,14 @@ export async function getCatalogs(
     throw new Error(`Failed to list catalogs: ${error.message}`);
   }
 
+  // Fetch all contents once for content_count computation
+  const { data: allContents } = await supabase
+    .from("contents")
+    .select("source_url")
+    .eq("workspace_id", workspaceId);
+
+  const contents = allContents ?? [];
+
   // Get agent counts for each catalog
   const results: CatalogListItem[] = [];
   for (const catalog of catalogs ?? []) {
@@ -143,6 +152,15 @@ export async function getCatalogs(
       .from("catalog_agents")
       .select("user_agent_id", { count: "exact", head: true })
       .eq("catalog_id", catalog.id);
+
+    // Compute content_count by matching url_patterns against contents
+    let contentCount = 0;
+    if (catalog.url_patterns.length > 0 && contents.length > 0) {
+      const regexes = catalog.url_patterns.map((p: string) => new RegExp(p));
+      contentCount = contents.filter((c) =>
+        regexes.some((regex) => regex.test(c.source_url))
+      ).length;
+    }
 
     results.push({
       id: catalog.id,
@@ -152,6 +170,7 @@ export async function getCatalogs(
       price_eur: Number(catalog.price_eur),
       status: catalog.status,
       agent_count: count ?? 0,
+      content_count: contentCount,
       created_at: catalog.created_at!,
     });
   }

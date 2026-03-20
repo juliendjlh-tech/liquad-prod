@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
 
 interface DomainItem {
@@ -25,6 +25,13 @@ interface PaginatedContents {
   totalPages: number;
 }
 
+interface ImportJob {
+  id: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  result?: { imported: number; upserted: number };
+  error_message?: string;
+}
+
 export default function ContentsPage() {
   const { id: workspaceId } = useWorkspace();
 
@@ -41,7 +48,8 @@ export default function ContentsPage() {
 
   // Import
   const [importUrl, setImportUrl] = useState("");
-  const [importing, setImporting] = useState(false);
+  const [importJob, setImportJob] = useState<ImportJob | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Toast
   const [toast, setToast] = useState<{
@@ -106,11 +114,59 @@ export default function ContentsPage() {
     void fetchContents();
   }, [fetchContents]);
 
+  // ── Poll import job status ─────────────────────────────────────────
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  const startPolling = useCallback(
+    (jobId: string) => {
+      stopPolling();
+      pollRef.current = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/contents/import/${jobId}`, {
+            headers: { "x-workspace-id": workspaceId },
+          });
+          if (!res.ok) return;
+          const job: ImportJob = await res.json();
+          setImportJob(job);
+
+          if (job.status === "completed") {
+            stopPolling();
+            const r = job.result;
+            showToast(
+              `Imported ${r?.imported ?? 0} URLs (${r?.upserted ?? 0} upserted)`,
+              "success"
+            );
+            setImportJob(null);
+            void fetchDomains();
+            if (selectedDomain) void fetchContents();
+          } else if (job.status === "failed") {
+            stopPolling();
+            showToast(job.error_message ?? "Import failed", "error");
+            setImportJob(null);
+          }
+        } catch {
+          // Ignore polling errors, will retry on next interval
+        }
+      }, 2000);
+    },
+    [workspaceId, stopPolling, fetchDomains, fetchContents, selectedDomain]
+  );
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => stopPolling();
+  }, [stopPolling]);
+
   // ── Import sitemap ─────────────────────────────────────────────────
   const handleImport = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!importUrl) return;
-    setImporting(true);
+    if (!importUrl || importJob) return;
+
     try {
       const res = await fetch("/api/contents/import", {
         method: "POST",
@@ -121,21 +177,16 @@ export default function ContentsPage() {
         body: JSON.stringify({ url: importUrl }),
       });
       const json = await res.json();
-      if (res.ok) {
-        showToast(
-          `Imported ${json.imported} URLs (${json.created} new, ${json.updated} updated)`,
-          "success"
-        );
+
+      if (res.ok || res.status === 202) {
+        setImportJob({ id: json.jobId, status: "pending" });
         setImportUrl("");
-        void fetchDomains();
-        if (selectedDomain) void fetchContents();
+        startPolling(json.jobId);
       } else {
         showToast(json.error ?? "Import failed", "error");
       }
     } catch {
       showToast("Import failed", "error");
-    } finally {
-      setImporting(false);
     }
   };
 
@@ -170,6 +221,15 @@ export default function ContentsPage() {
 
   // ── Total content count ────────────────────────────────────────────
   const totalContents = domains.reduce((sum, d) => sum + d.content_count, 0);
+
+  // ── Import status helpers ──────────────────────────────────────────
+  const isImporting = importJob !== null;
+  const importStatusLabel =
+    importJob?.status === "pending"
+      ? "Starting import..."
+      : importJob?.status === "processing"
+        ? "Importing..."
+        : null;
 
   return (
     <div>
@@ -213,22 +273,50 @@ export default function ContentsPage() {
       </div>
 
       {/* Import form — always visible */}
-      <form onSubmit={handleImport} className="flex gap-2 mb-6">
-        <input
-          type="url"
-          value={importUrl}
-          onChange={(e) => setImportUrl(e.target.value)}
-          placeholder="https://example.com/sitemap.xml"
-          className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-          required
-        />
-        <button
-          type="submit"
-          disabled={importing}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-        >
-          {importing ? "Importing..." : "Import Sitemap"}
-        </button>
+      <form onSubmit={handleImport} className="mb-6">
+        <div className="flex gap-2">
+          <input
+            type="url"
+            value={importUrl}
+            onChange={(e) => setImportUrl(e.target.value)}
+            placeholder="https://example.com/sitemap.xml"
+            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            required
+            disabled={isImporting}
+          />
+          <button
+            type="submit"
+            disabled={isImporting}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {isImporting ? importStatusLabel : "Import Sitemap"}
+          </button>
+        </div>
+        {isImporting && (
+          <div className="mt-2 flex items-center gap-2 text-sm text-blue-600">
+            <svg
+              className="h-4 w-4 animate-spin"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+              />
+            </svg>
+            <span>{importStatusLabel} This may take a few minutes for large sitemaps.</span>
+          </div>
+        )}
       </form>
 
       {/* ─── Domain list view ───────────────────────────────────────── */}
