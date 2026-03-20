@@ -11,6 +11,7 @@ interface CatalogItem {
   status: "active" | "inactive";
   price_eur: number;
   agent_count: number;
+  content_count: number;
 }
 
 export default function CatalogsPage() {
@@ -144,6 +145,7 @@ export default function CatalogsPage() {
                 <div className="mt-1 flex gap-4 text-xs text-gray-500">
                   <span>{catalog.price_eur.toFixed(2)} EUR</span>
                   <span>{catalog.agent_count} bot(s)</span>
+                  <span>{catalog.content_count} content(s)</span>
                 </div>
               </div>
               <div className="flex items-center gap-3">
