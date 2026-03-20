@@ -40,6 +40,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+#build sdk dist
+/packages/sdk/dist
+
 .claude*
 
 /ADRs

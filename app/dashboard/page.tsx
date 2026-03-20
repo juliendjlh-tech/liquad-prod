@@ -249,7 +249,7 @@ export default function DashboardOverviewPage() {
                 No bot activity detected yet
               </p>
               <a
-                href="/dashboard/sdk"
+                href="/dashboard/integration"
                 className="text-sm text-blue-600 hover:text-blue-800"
               >
                 Set up SDK integration
