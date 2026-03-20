@@ -79,7 +79,8 @@ async function fetchAllContentUrls(
     }
 
     if (!data || data.length === 0) break;
-    allRows.push(...data);
+    const rows = data as unknown as Array<Record<string, unknown>>;
+    allRows.push(...rows);
     if (data.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
