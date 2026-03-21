@@ -141,6 +141,31 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    // Block editing name, ua_pattern, dns_patterns on preset bots
+    const existing = await getUserAgentById(userAgentId, workspaceId);
+    if (!existing) {
+      return NextResponse.json(
+        { error: "User-agent not found" },
+        { status: 404 }
+      );
+    }
+
+    if (
+      existing.is_preset &&
+      (validation.data.name !== undefined ||
+        validation.data.ua_pattern !== undefined ||
+        validation.data.dns_patterns !== undefined)
+    ) {
+      return NextResponse.json(
+        {
+          error: "PRESET_LOCKED",
+          message:
+            "Preset bots cannot be edited. Duplicate the bot to customize it.",
+        },
+        { status: 403 }
+      );
+    }
+
     const updated = await updateUserAgent(
       userAgentId,
       workspaceId,

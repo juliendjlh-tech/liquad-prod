@@ -369,3 +369,49 @@ export async function deleteUserAgent(
 
   return { deleted: true, catalogCount };
 }
+
+/**
+ * Duplicate a user-agent as a custom bot (is_preset = false).
+ *
+ * Generates a unique name following the pattern:
+ *   "OriginalName (copy)", "OriginalName (copy 2)", "OriginalName (copy 3)", …
+ *
+ * @param userAgentId - The source bot's UUID
+ * @param workspaceId - The workspace the bot must belong to
+ * @returns The newly created custom bot, or null if source not found
+ */
+export async function duplicateUserAgent(
+  userAgentId: string,
+  workspaceId: string
+): Promise<UserAgentRow | null> {
+  const source = await getUserAgentById(userAgentId, workspaceId);
+  if (!source) return null;
+
+  const supabase = await createServerClient();
+
+  // Find a unique name
+  const baseName = `${source.name} (copy)`;
+  const { data: siblings } = await supabase
+    .from("user_agents")
+    .select("name")
+    .eq("workspace_id", workspaceId)
+    .like("name", `${source.name} (copy%`);
+
+  const existingNames = new Set((siblings ?? []).map((s: { name: string }) => s.name));
+
+  let candidateName = baseName;
+  if (existingNames.has(candidateName)) {
+    let counter = 2;
+    while (existingNames.has(`${source.name} (copy ${counter})`)) {
+      counter++;
+    }
+    candidateName = `${source.name} (copy ${counter})`;
+  }
+
+  return createUserAgent(workspaceId, {
+    name: candidateName,
+    ua_pattern: source.ua_pattern,
+    is_preset: false,
+    dns_patterns: source.dns_patterns,
+  });
+}

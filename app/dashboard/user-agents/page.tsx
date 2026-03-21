@@ -51,9 +51,11 @@ export default function UserAgentsPage() {
   const [customPattern, setCustomPattern] = useState("");
   const [customDnsPatterns, setCustomDnsPatterns] = useState("");
 
-  /** Which bot ID is currently being edited for dns_patterns (null = none) */
-  const [editingDnsPatterns, setEditingDnsPatterns] = useState<string | null>(null);
-  /** Temporary value for the dns_patterns editor */
+  /** Which bot ID is currently being edited (null = none) */
+  const [editingAgent, setEditingAgent] = useState<string | null>(null);
+  /** Temporary values for the editor */
+  const [editName, setEditName] = useState("");
+  const [editPattern, setEditPattern] = useState("");
   const [editDnsValue, setEditDnsValue] = useState("");
 
   const [toast, setToast] = useState<{
@@ -167,6 +169,22 @@ export default function UserAgentsPage() {
     if (res.ok) void fetchAgents();
   };
 
+  const duplicateAgent = async (agent: UserAgent) => {
+    const res = await fetch(`/api/user-agents/${agent.id}/duplicate`, {
+      method: "POST",
+      headers: { "x-workspace-id": workspaceId },
+    });
+
+    if (res.ok) {
+      const created = await res.json();
+      showToast(`Duplicated as "${created.name}"`, "success");
+      void fetchAgents();
+    } else {
+      const json = await res.json();
+      showToast(json.error ?? "Failed to duplicate bot", "error");
+    }
+  };
+
   const deleteAgent = async (agent: UserAgent) => {
     if (!confirm(`Delete ${agent.name}?`)) return;
 
@@ -186,12 +204,21 @@ export default function UserAgentsPage() {
     }
   };
 
-  const startEditDns = (agent: UserAgent) => {
-    setEditingDnsPatterns(agent.id);
+  const startEdit = (agent: UserAgent) => {
+    setEditingAgent(agent.id);
+    setEditName(agent.name);
+    setEditPattern(agent.ua_pattern);
     setEditDnsValue(agent.dns_patterns.join(", "));
   };
 
-  const saveDnsPatterns = async (agentId: string) => {
+  const cancelEdit = () => {
+    setEditingAgent(null);
+    setEditName("");
+    setEditPattern("");
+    setEditDnsValue("");
+  };
+
+  const saveEdit = async (agentId: string) => {
     const newPatterns = editDnsValue
       .split(",")
       .map((p) => p.trim())
@@ -203,17 +230,20 @@ export default function UserAgentsPage() {
         "Content-Type": "application/json",
         "x-workspace-id": workspaceId,
       },
-      body: JSON.stringify({ dns_patterns: newPatterns }),
+      body: JSON.stringify({
+        name: editName,
+        ua_pattern: editPattern,
+        dns_patterns: newPatterns,
+      }),
     });
 
     if (res.ok) {
-      showToast("DNS patterns updated", "success");
-      setEditingDnsPatterns(null);
-      setEditDnsValue("");
+      showToast("Bot updated", "success");
+      cancelEdit();
       void fetchAgents();
     } else {
       const json = await res.json();
-      showToast(json.error ?? "Failed to update DNS patterns", "error");
+      showToast(json.error ?? "Failed to update bot", "error");
     }
   };
 
@@ -379,102 +409,144 @@ export default function UserAgentsPage() {
               key={agent.id}
               className="rounded-lg border border-gray-200 bg-white px-4 py-3"
             >
-              {/* Top row: name + controls */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-900">
-                        {agent.name}
-                      </span>
-                      {agent.is_preset && (
-                        <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
-                          Preset
-                        </span>
-                      )}
+              {editingAgent === agent.id ? (
+                /* ---- Inline edit mode (custom bots only) ---- */
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        Name
+                      </label>
+                      <input
+                        type="text"
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                        autoFocus
+                      />
                     </div>
-                    <span className="text-xs text-gray-500">
-                      {agent.ua_pattern}
-                    </span>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        User-Agent Pattern
+                      </label>
+                      <input
+                        type="text"
+                        value={editPattern}
+                        onChange={(e) => setEditPattern(e.target.value)}
+                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                      />
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => toggleActive(agent)}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                      agent.is_active ? "bg-blue-600" : "bg-gray-300"
-                    }`}
-                    title={agent.is_active ? "Active" : "Inactive"}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        agent.is_active ? "translate-x-6" : "translate-x-1"
-                      }`}
-                    />
-                  </button>
-                  <button
-                    onClick={() => deleteAgent(agent)}
-                    className="text-sm text-red-600 hover:text-red-800"
-                  >
-                    Delete
-                  </button>
-                </div>
-              </div>
-
-              {/* DNS Patterns row */}
-              <div className="mt-2 flex items-start gap-2">
-                <span className="text-xs text-gray-400 mt-0.5 shrink-0">
-                  DNS:
-                </span>
-                {editingDnsPatterns === agent.id ? (
-                  <div className="flex-1 flex gap-2">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-500 mb-1">
+                      DNS Patterns
+                    </label>
                     <input
                       type="text"
                       value={editDnsValue}
                       onChange={(e) => setEditDnsValue(e.target.value)}
-                      className="flex-1 rounded border border-gray-300 px-2 py-1 text-xs"
+                      className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
                       placeholder="*.example.com, *.example.net"
-                      autoFocus
                     />
+                  </div>
+                  <div className="flex justify-end gap-2">
                     <button
-                      onClick={() => saveDnsPatterns(agent.id)}
-                      className="text-xs text-blue-600 hover:text-blue-800"
-                    >
-                      Save
-                    </button>
-                    <button
-                      onClick={() => setEditingDnsPatterns(null)}
-                      className="text-xs text-gray-500 hover:text-gray-700"
+                      onClick={cancelEdit}
+                      className="rounded px-3 py-1 text-xs text-gray-500 hover:text-gray-700"
                     >
                       Cancel
                     </button>
-                  </div>
-                ) : (
-                  <div className="flex-1 flex items-center gap-1 flex-wrap">
-                    {agent.dns_patterns.length > 0 ? (
-                      agent.dns_patterns.map((dp) => (
-                        <span
-                          key={dp}
-                          className="rounded bg-purple-50 border border-purple-200 px-1.5 py-0.5 text-xs text-purple-700"
-                        >
-                          {dp}
-                        </span>
-                      ))
-                    ) : (
-                      <span className="text-xs text-gray-400 italic">
-                        No DNS patterns (IC skipped)
-                      </span>
-                    )}
                     <button
-                      onClick={() => startEditDns(agent)}
-                      className="ml-1 text-xs text-gray-400 hover:text-blue-600"
-                      title="Edit DNS patterns"
+                      onClick={() => saveEdit(agent.id)}
+                      className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
                     >
-                      Edit
+                      Save
                     </button>
                   </div>
-                )}
-              </div>
+                </div>
+              ) : (
+                /* ---- Display mode ---- */
+                <>
+                  {/* Top row: name + controls */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900">
+                            {agent.name}
+                          </span>
+                          {agent.is_preset && (
+                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                              Preset
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          {agent.ua_pattern}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => toggleActive(agent)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          agent.is_active ? "bg-blue-600" : "bg-gray-300"
+                        }`}
+                        title={agent.is_active ? "Active" : "Inactive"}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                            agent.is_active ? "translate-x-6" : "translate-x-1"
+                          }`}
+                        />
+                      </button>
+                      {!agent.is_preset && (
+                        <button
+                          onClick={() => startEdit(agent)}
+                          className="text-sm text-gray-600 hover:text-blue-600"
+                        >
+                          Edit
+                        </button>
+                      )}
+                      <button
+                        onClick={() => duplicateAgent(agent)}
+                        className="text-sm text-gray-600 hover:text-blue-600"
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        onClick={() => deleteAgent(agent)}
+                        className="text-sm text-red-600 hover:text-red-800"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* DNS Patterns row */}
+                  <div className="mt-2 flex items-start gap-2">
+                    <span className="text-xs text-gray-400 mt-0.5 shrink-0">
+                      DNS:
+                    </span>
+                    <div className="flex-1 flex items-center gap-1 flex-wrap">
+                      {agent.dns_patterns.length > 0 ? (
+                        agent.dns_patterns.map((dp) => (
+                          <span
+                            key={dp}
+                            className="rounded bg-purple-50 border border-purple-200 px-1.5 py-0.5 text-xs text-purple-700"
+                          >
+                            {dp}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">
+                          No DNS patterns (IC skipped)
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
