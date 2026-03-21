@@ -1,32 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { previewPatternsSchema } from "@/lib/validations/catalog.schema";
+import { previewFilterRulesSchema } from "@/lib/validations/catalog.schema";
 import { previewCatalogMatch } from "@/lib/services/catalog.service";
 
 /**
  * POST /api/catalogs/preview
  *
- * Ad-hoc preview: test URL patterns against workspace contents
- * before creating a catalog.
+ * Ad-hoc preview: test filter rules against workspace contents.
  *
  * HEADERS:
  * - x-workspace-id: UUID of the workspace
  *
  * REQUEST BODY (JSON):
  * ```json
- * { "url_patterns": ["/premium/.*", "/vip/.*"] }
+ * { "filter_rules": { "domain_rules": [{ "domain_id": "<uuid>" }] } }
  * ```
  *
  * QUERY PARAMS:
  * - page (optional): Page number, default 1
  * - limit (optional): Items per page, default 50, max 100
- *
- * RESPONSES:
- * - 200: PreviewResult with matched_contents and warnings
- * - 400: Validation error (invalid regex, empty patterns)
- * - 401: Unauthorized
- * - 403: User not a member
- * - 500: Internal server error
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -39,7 +31,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const body = await request.json();
-    const validation = previewPatternsSchema.safeParse(body);
+    const validation = previewFilterRulesSchema.safeParse(body);
 
     if (!validation.success) {
       return NextResponse.json(
@@ -74,7 +66,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const result = await previewCatalogMatch(
       workspaceId,
-      validation.data.url_patterns,
+      validation.data.filter_rules,
       page,
       limit
     );

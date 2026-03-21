@@ -9,7 +9,7 @@ import {
  * GET /api/catalogs/:id/preview
  *
  * Preview content matching for an existing catalog.
- * Uses the catalog's url_patterns to test against workspace contents.
+ * Uses the catalog's filter_rules to test against workspace contents.
  *
  * HEADERS:
  * - x-workspace-id: UUID of the workspace
@@ -60,7 +60,7 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Get catalog to verify ownership and get url_patterns
+    // Get catalog to verify ownership and get filter_rules
     const catalog = await getCatalogById(catalogId, workspaceId);
 
     if (!catalog) {
@@ -76,7 +76,7 @@ export async function GET(
 
     const result = await previewCatalogMatch(
       workspaceId,
-      catalog.url_patterns,
+      catalog.filter_rules,
       page,
       limit
     );

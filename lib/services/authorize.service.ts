@@ -6,6 +6,62 @@ import { SignJWT } from "jose";
 import type { AuthorizeInput } from "@/lib/validations/authorize.schema";
 
 // ---------------------------------------------------------------------------
+// Filter matching (structured, no regex)
+// ---------------------------------------------------------------------------
+
+interface MatchPathRule {
+  operator: string;
+  value: string;
+}
+
+interface MatchDomainRule {
+  domain: string;
+  path_rules?: MatchPathRule[];
+  path_logic?: "AND" | "OR";
+}
+
+function evaluatePathRule(pathname: string, rule: MatchPathRule): boolean {
+  switch (rule.operator) {
+    case "contains":
+      return pathname.includes(rule.value);
+    case "not_contains":
+      return !pathname.includes(rule.value);
+    case "starts_with":
+      return pathname.startsWith(rule.value);
+    case "not_starts_with":
+      return !pathname.startsWith(rule.value);
+    case "equals":
+      return pathname === rule.value;
+    case "ends_with":
+      return pathname.endsWith(rule.value);
+    default:
+      return false;
+  }
+}
+
+function matchFilterRules(
+  hostname: string,
+  pathname: string,
+  filterRules: { domain_rules: MatchDomainRule[] }
+): boolean {
+  const matchingRules = filterRules.domain_rules.filter(
+    (r) => r.domain === hostname
+  );
+  if (matchingRules.length === 0) return false;
+
+  for (const rule of matchingRules) {
+    if (!rule.path_rules || rule.path_rules.length === 0) return true;
+    const logic = rule.path_logic ?? "AND";
+    const matches =
+      logic === "AND"
+        ? rule.path_rules.every((pr) => evaluatePathRule(pathname, pr))
+        : rule.path_rules.some((pr) => evaluatePathRule(pathname, pr));
+    if (matches) return true;
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -63,7 +119,7 @@ type RpcResult = RpcSuccess | RpcFailure;
  * 3. Identify publisher by verified domain
  * 4. Fetch publisher rules (user_agents, catalogs, jwt_signing_secret)
  * 5. Match consumer's User-Agent against publisher's declared bots
- * 6. Find matching catalog (url_patterns + agent_ids)
+ * 6. Find matching catalog (filter_rules + agent_ids)
  * 7. Check max_price_eur ceiling (if provided)
  * 8. Call RPC check_cache_and_debit (atomic debit + grant)
  * 9. Sign JWT with publisher's jwt_signing_secret
@@ -133,17 +189,10 @@ export async function authorize(
   for (const catalog of rules.catalogs) {
     if (!catalog.agent_ids.includes(matchedAgent.id)) continue;
 
-    for (const pattern of catalog.url_patterns) {
-      try {
-        if (new RegExp(pattern).test(urlPath)) {
-          matchedCatalog = catalog;
-          break;
-        }
-      } catch {
-        /* skip invalid regex */
-      }
+    if (matchFilterRules(domain, urlPath, catalog.filter_rules)) {
+      matchedCatalog = catalog;
+      break;
     }
-    if (matchedCatalog) break;
   }
 
   if (!matchedCatalog) {

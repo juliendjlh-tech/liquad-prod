@@ -1,5 +1,5 @@
 import type { CachedRules } from "./rules-cache";
-import type { SdkEvent } from "./types";
+import type { SdkEvent, FilterRule, CatalogFilterRules } from "./types";
 
 /**
  * Decision result from the matcher.
@@ -38,22 +38,53 @@ export function matchUserAgent(
 }
 
 /**
- * Match a request URL path against catalog URL patterns (regex).
+ * Evaluate a single path rule against a pathname.
  */
-export function matchUrlPatterns(
-  requestPath: string,
-  urlPatterns: string[]
-): boolean {
-  for (const pattern of urlPatterns) {
-    try {
-      const regex = new RegExp(pattern);
-      if (regex.test(requestPath)) {
-        return true;
-      }
-    } catch {
-      // Invalid regex — skip this pattern
-    }
+function evaluatePathRule(pathname: string, rule: FilterRule): boolean {
+  switch (rule.operator) {
+    case "contains":
+      return pathname.includes(rule.value);
+    case "not_contains":
+      return !pathname.includes(rule.value);
+    case "starts_with":
+      return pathname.startsWith(rule.value);
+    case "not_starts_with":
+      return !pathname.startsWith(rule.value);
+    case "equals":
+      return pathname === rule.value;
+    case "ends_with":
+      return pathname.endsWith(rule.value);
   }
+}
+
+/**
+ * Match a request domain and path against catalog filter rules.
+ * Uses structured matching (no regex).
+ */
+export function matchFilterRules(
+  requestDomain: string,
+  requestPath: string,
+  filterRules: CatalogFilterRules
+): boolean {
+  // 1. Find domain rules matching the request domain
+  const matchingRules = filterRules.domain_rules.filter(
+    (r) => r.domain === requestDomain
+  );
+  if (matchingRules.length === 0) return false;
+
+  // 2. Evaluate path_rules
+  for (const rule of matchingRules) {
+    if (!rule.path_rules || rule.path_rules.length === 0) return true;
+
+    const logic = rule.path_logic ?? "AND";
+    const matches =
+      logic === "AND"
+        ? rule.path_rules.every((pr) => evaluatePathRule(requestPath, pr))
+        : rule.path_rules.some((pr) => evaluatePathRule(requestPath, pr));
+
+    if (matches) return true;
+  }
+
   return false;
 }
 
@@ -65,7 +96,7 @@ export function matchUrlPatterns(
  * 2. Match user-agent against declared agents. If no match → passthrough.
  * 3. Find first catalog that:
  *    a. Has the matched agent in its agent_ids
- *    b. Has url_patterns matching the request path
+ *    b. Has filter_rules matching the request domain + path
  * 4. If catalog found:
  *    - price <= defaultPrice → granted
  *    - price > defaultPrice → denied (402)
@@ -110,8 +141,8 @@ export function matchRequest(
       continue;
     }
 
-    // Check if URL matches catalog patterns
-    if (!matchUrlPatterns(requestPath, catalog.url_patterns)) {
+    // Check if request matches catalog filter rules
+    if (!matchFilterRules(domain, requestPath, catalog.filter_rules)) {
       continue;
     }
 

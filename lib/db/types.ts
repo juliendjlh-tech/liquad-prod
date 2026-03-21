@@ -103,31 +103,31 @@ export type Database = {
         Row: {
           created_at: string | null
           description: string | null
+          filter_rules: Json
           id: string
           name: string
           price_eur: number
           status: string
-          url_patterns: string[]
           workspace_id: string
         }
         Insert: {
           created_at?: string | null
           description?: string | null
+          filter_rules?: Json
           id?: string
           name: string
           price_eur?: number
           status?: string
-          url_patterns?: string[]
           workspace_id: string
         }
         Update: {
           created_at?: string | null
           description?: string | null
+          filter_rules?: Json
           id?: string
           name?: string
           price_eur?: number
           status?: string
-          url_patterns?: string[]
           workspace_id?: string
         }
         Relationships: [

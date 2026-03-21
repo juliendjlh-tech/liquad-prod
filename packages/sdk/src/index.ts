@@ -451,7 +451,15 @@ export function createLiquadHandler(
 }
 
 // Re-export types
-export type { LiquadConfig, LiquadResult, JwtPayload, SdkEvent } from "./types";
+export type {
+  LiquadConfig,
+  LiquadResult,
+  JwtPayload,
+  SdkEvent,
+  FilterRule,
+  DomainRule,
+  CatalogFilterRules,
+} from "./types";
 export type { CachedRules } from "./rules-cache";
 export type { MatchDecision } from "./matcher";
 export type { VerificationResult, IdentityChecker } from "./identity-check";

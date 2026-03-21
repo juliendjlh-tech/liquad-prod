@@ -1,8 +1,11 @@
 import { createServerClient } from "@/lib/db/supabase-server";
+import type { Json } from "@/lib/db/types";
 import type {
   CreateCatalogInput,
   UpdateCatalogInput,
+  FilterRules,
 } from "@/lib/validations/catalog.schema";
+import { matchContentAgainstRules } from "@/lib/validations/catalog.schema";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -12,7 +15,7 @@ export interface CatalogListItem {
   id: string;
   name: string;
   description: string | null;
-  url_patterns: string[];
+  filter_rules: FilterRules;
   price_eur: number;
   status: string;
   agent_count: number;
@@ -24,7 +27,7 @@ export interface CatalogDetail {
   id: string;
   name: string;
   description: string | null;
-  url_patterns: string[];
+  filter_rules: FilterRules;
   price_eur: number;
   status: string;
   created_at: string;
@@ -39,12 +42,19 @@ export interface CatalogDetail {
 export interface PreviewResult {
   matched_count: number;
   total_contents: number;
+  per_domain: Array<{
+    domain: string;
+    domain_id: string;
+    matched: number;
+    total: number;
+  }>;
   matched_contents: Array<{
     id: string;
     source_url: string;
     title: string | null;
+    matched: boolean;
   }>;
-  warnings: Array<"no_match" | "too_broad">;
+  warnings: string[];
   page: number;
   limit: number;
   total_pages: number;
@@ -88,16 +98,54 @@ async function fetchAllContentUrls(
   return allRows;
 }
 
+/**
+ * Build a map of domain_id -> hostname for a workspace.
+ */
+async function buildDomainMap(
+  workspaceId: string
+): Promise<Map<string, string>> {
+  const supabase = await createServerClient();
+  const { data: domains } = await supabase
+    .from("domains")
+    .select("id, domain")
+    .eq("workspace_id", workspaceId);
+
+  const map = new Map<string, string>();
+  for (const d of domains ?? []) {
+    map.set(d.id, d.domain);
+  }
+  return map;
+}
+
+/**
+ * Count contents matching filter_rules using structured matching.
+ */
+function countMatchedContents(
+  contents: Array<{ source_url: string }>,
+  filterRules: FilterRules,
+  domainMap: Map<string, string>
+): number {
+  let count = 0;
+  for (const c of contents) {
+    try {
+      const url = new URL(c.source_url);
+      if (matchContentAgainstRules(url.hostname, url.pathname, filterRules, domainMap)) {
+        count++;
+      }
+    } catch {
+      // Skip invalid URLs
+    }
+  }
+  return count;
+}
+
 // ---------------------------------------------------------------------------
 // CRUD
 // ---------------------------------------------------------------------------
 
 /**
  * Create a new catalog and link authorized agents.
- *
  * New catalogs always start with status "inactive".
- *
- * @throws Error with "INVALID_AGENT_IDS" if any agent_id doesn't belong to workspace
  */
 export async function createCatalog(
   workspaceId: string,
@@ -118,6 +166,20 @@ export async function createCatalog(
     }
   }
 
+  // Validate domain_ids belong to the workspace
+  const domainIds = data.filter_rules.domain_rules.map((r) => r.domain_id);
+  if (domainIds.length > 0) {
+    const { data: validDomains } = await supabase
+      .from("domains")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .in("id", domainIds);
+
+    if ((validDomains?.length ?? 0) !== new Set(domainIds).size) {
+      throw new Error("INVALID_DOMAIN_IDS");
+    }
+  }
+
   // Insert the catalog
   const { data: catalog, error: catalogError } = await supabase
     .from("catalogs")
@@ -125,11 +187,11 @@ export async function createCatalog(
       workspace_id: workspaceId,
       name: data.name,
       description: data.description ?? null,
-      url_patterns: data.url_patterns,
+      filter_rules: data.filter_rules as unknown as Json,
       price_eur: data.price_eur,
       status: "inactive",
     })
-    .select("id, name, description, url_patterns, price_eur, status, created_at")
+    .select("id, name, description, filter_rules, price_eur, status, created_at")
     .single();
 
   if (catalogError || !catalog) {
@@ -152,13 +214,12 @@ export async function createCatalog(
     }
   }
 
-  // Fetch linked agents for response
   return getCatalogById(catalog.id, workspaceId) as Promise<CatalogDetail>;
 }
 
 /**
  * List all catalogs for a workspace with agent count.
- * Ordered by created_at ASC (PRD-R-003: first match wins).
+ * Ordered by created_at ASC (first match wins).
  */
 export async function getCatalogs(
   workspaceId: string
@@ -167,7 +228,7 @@ export async function getCatalogs(
 
   const { data: catalogs, error } = await supabase
     .from("catalogs")
-    .select("id, name, description, url_patterns, price_eur, status, created_at")
+    .select("id, name, description, filter_rules, price_eur, status, created_at")
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: true });
 
@@ -175,10 +236,13 @@ export async function getCatalogs(
     throw new Error(`Failed to list catalogs: ${error.message}`);
   }
 
-  // Fetch all contents (paginated to bypass Supabase 1000-row default limit)
-  const contents = await fetchAllContentUrls(workspaceId, "source_url") as Array<{ source_url: string }>;
+  // Fetch all contents and domain map for matching
+  const contents = (await fetchAllContentUrls(
+    workspaceId,
+    "source_url"
+  )) as Array<{ source_url: string }>;
+  const domainMap = await buildDomainMap(workspaceId);
 
-  // Get agent counts for each catalog
   const results: CatalogListItem[] = [];
   for (const catalog of catalogs ?? []) {
     const { count } = await supabase
@@ -186,33 +250,14 @@ export async function getCatalogs(
       .select("user_agent_id", { count: "exact", head: true })
       .eq("catalog_id", catalog.id);
 
-    // Compute content_count by matching url_patterns against content pathnames
-    let contentCount = 0;
-    if (catalog.url_patterns.length > 0 && contents.length > 0) {
-      const regexes = catalog.url_patterns.map((p: string) => new RegExp(p));
-      
-      // test if matching on the source URL pattern
-      contentCount = contents.filter((c) =>
-        regexes.some((regex) => regex.test(c.source_url))
-      ).length;
-
-      /*
-      // test if matching on the pathname pattern
-      contentCount = contents.filter((c) => {
-        try {
-          const pathname = new URL(c.source_url).pathname;
-          return regexes.some((regex) => regex.test(pathname));
-        } catch {
-          return false;
-        }
-      }).length; */
-    }
+    const filterRules = catalog.filter_rules as unknown as FilterRules;
+    const contentCount = countMatchedContents(contents, filterRules, domainMap);
 
     results.push({
       id: catalog.id,
       name: catalog.name,
       description: catalog.description,
-      url_patterns: catalog.url_patterns,
+      filter_rules: filterRules,
       price_eur: Number(catalog.price_eur),
       status: catalog.status,
       agent_count: count ?? 0,
@@ -226,8 +271,6 @@ export async function getCatalogs(
 
 /**
  * Get a single catalog with full agent details.
- *
- * @returns Catalog detail with agents, or null if not found/wrong workspace
  */
 export async function getCatalogById(
   catalogId: string,
@@ -237,7 +280,7 @@ export async function getCatalogById(
 
   const { data: catalog, error } = await supabase
     .from("catalogs")
-    .select("id, name, description, url_patterns, price_eur, status, created_at")
+    .select("id, name, description, filter_rules, price_eur, status, created_at")
     .eq("id", catalogId)
     .eq("workspace_id", workspaceId)
     .single();
@@ -273,7 +316,7 @@ export async function getCatalogById(
     id: catalog.id,
     name: catalog.name,
     description: catalog.description,
-    url_patterns: catalog.url_patterns,
+    filter_rules: catalog.filter_rules as unknown as FilterRules,
     price_eur: Number(catalog.price_eur),
     status: catalog.status,
     created_at: catalog.created_at!,
@@ -283,9 +326,6 @@ export async function getCatalogById(
 
 /**
  * Update a catalog and optionally replace agent links.
- *
- * @throws Error with "INVALID_AGENT_IDS" if any agent_id doesn't belong to workspace
- * @returns Updated catalog or null if not found
  */
 export async function updateCatalog(
   catalogId: string,
@@ -294,7 +334,6 @@ export async function updateCatalog(
 ): Promise<CatalogDetail | null> {
   const supabase = await createServerClient();
 
-  // Check catalog exists and belongs to workspace
   const existing = await getCatalogById(catalogId, workspaceId);
   if (!existing) {
     return null;
@@ -314,13 +353,11 @@ export async function updateCatalog(
       }
     }
 
-    // Delete existing links
     await supabase
       .from("catalog_agents")
       .delete()
       .eq("catalog_id", catalogId);
 
-    // Insert new links
     if (data.agent_ids.length > 0) {
       await supabase.from("catalog_agents").insert(
         data.agent_ids.map((agentId) => ({
@@ -331,11 +368,27 @@ export async function updateCatalog(
     }
   }
 
+  // Validate domain_ids if filter_rules provided
+  if (data.filter_rules) {
+    const domainIds = data.filter_rules.domain_rules.map((r) => r.domain_id);
+    if (domainIds.length > 0) {
+      const { data: validDomains } = await supabase
+        .from("domains")
+        .select("id")
+        .eq("workspace_id", workspaceId)
+        .in("id", domainIds);
+
+      if ((validDomains?.length ?? 0) !== new Set(domainIds).size) {
+        throw new Error("INVALID_DOMAIN_IDS");
+      }
+    }
+  }
+
   // Build update object (only provided fields)
   const updateFields: Record<string, unknown> = {};
   if (data.name !== undefined) updateFields.name = data.name;
   if (data.description !== undefined) updateFields.description = data.description;
-  if (data.url_patterns !== undefined) updateFields.url_patterns = data.url_patterns;
+  if (data.filter_rules !== undefined) updateFields.filter_rules = data.filter_rules;
   if (data.price_eur !== undefined) updateFields.price_eur = data.price_eur;
   if (data.status !== undefined) updateFields.status = data.status;
 
@@ -356,8 +409,6 @@ export async function updateCatalog(
 
 /**
  * Delete a catalog (cascade removes catalog_agents).
- *
- * @returns true if deleted, false if not found
  */
 export async function deleteCatalog(
   catalogId: string,
@@ -388,47 +439,92 @@ export async function deleteCatalog(
 // ---------------------------------------------------------------------------
 
 /**
- * Preview which contents match given URL patterns.
- *
- * Tests each content's source_url against the regex patterns in JS.
- * Generates warnings for edge cases (no_match, too_broad).
+ * Preview which contents match given filter rules.
+ * Uses structured matching (no regex).
  */
 export async function previewCatalogMatch(
   workspaceId: string,
-  urlPatterns: string[],
+  filterRules: FilterRules,
   page = 1,
   limit = 50
 ): Promise<PreviewResult> {
-  const supabase = await createServerClient();
-
-  // Fetch all contents (paginated to bypass Supabase 1000-row default limit)
-  const contents = await fetchAllContentUrls(workspaceId, "id, source_url, title") as Array<{ id: string; source_url: string; title: string | null }>;
+  // Fetch all contents with domain info
+  const contents = (await fetchAllContentUrls(
+    workspaceId,
+    "id, source_url, title"
+  )) as Array<{ id: string; source_url: string; title: string | null }>;
   const totalContents = contents.length;
 
-  // Compile regex patterns
-  const regexes = urlPatterns.map((p) => new RegExp(p));
+  // Build domain map
+  const domainMap = await buildDomainMap(workspaceId);
 
- /*
-  // Test each content's pathname against patterns
-  const matched = contents.filter((content) => {
+  // Match each content and track per-domain stats
+  const perDomainStats = new Map<
+    string,
+    { domain: string; domain_id: string; matched: number; total: number }
+  >();
+  const matchedContents: Array<{
+    id: string;
+    source_url: string;
+    title: string | null;
+    matched: boolean;
+  }> = [];
+
+  for (const content of contents) {
     try {
-      const pathname = new URL(content.source_url).pathname;
-      return regexes.some((regex) => regex.test(pathname));
+      const url = new URL(content.source_url);
+      const hostname = url.hostname;
+      const pathname = url.pathname;
+
+      // Find domain_id for this hostname
+      let contentDomainId: string | undefined;
+      for (const [id, domain] of domainMap) {
+        if (domain === hostname) {
+          contentDomainId = id;
+          break;
+        }
+      }
+
+      // Update per-domain total
+      if (contentDomainId) {
+        if (!perDomainStats.has(contentDomainId)) {
+          perDomainStats.set(contentDomainId, {
+            domain: hostname,
+            domain_id: contentDomainId,
+            matched: 0,
+            total: 0,
+          });
+        }
+        perDomainStats.get(contentDomainId)!.total++;
+      }
+
+      const isMatched = matchContentAgainstRules(
+        hostname,
+        pathname,
+        filterRules,
+        domainMap
+      );
+
+      if (isMatched && contentDomainId) {
+        perDomainStats.get(contentDomainId)!.matched++;
+      }
+
+      matchedContents.push({
+        id: content.id,
+        source_url: content.source_url,
+        title: content.title,
+        matched: isMatched,
+      });
     } catch {
-      return false;
+      // Skip invalid URLs
     }
-  });
-  */
+  }
 
-  // Test each content's source URL against patterns
-  const matched = contents.filter((content) =>
-    regexes.some((regex) => regex.test(content.source_url))
-  );
-
+  const matched = matchedContents.filter((c) => c.matched);
   const matchedCount = matched.length;
 
   // Generate warnings
-  const warnings: Array<"no_match" | "too_broad"> = [];
+  const warnings: string[] = [];
   if (matchedCount === 0) {
     warnings.push("no_match");
   }
@@ -436,7 +532,16 @@ export async function previewCatalogMatch(
     warnings.push("too_broad");
   }
 
-  // Paginate matched contents
+  // Check for domains with 0 matches
+  for (const rule of filterRules.domain_rules) {
+    const stats = perDomainStats.get(rule.domain_id);
+    if (stats && stats.matched === 0) {
+      const hostname = domainMap.get(rule.domain_id) ?? rule.domain_id;
+      warnings.push(`domain_no_match:${hostname}`);
+    }
+  }
+
+  // Paginate matched contents (show matched first)
   const safePage = Math.max(1, page);
   const safeLimit = Math.min(100, Math.max(1, limit));
   const offset = (safePage - 1) * safeLimit;
@@ -445,11 +550,8 @@ export async function previewCatalogMatch(
   return {
     matched_count: matchedCount,
     total_contents: totalContents,
-    matched_contents: paginatedContents.map((c) => ({
-      id: c.id,
-      source_url: c.source_url,
-      title: c.title,
-    })),
+    per_domain: [...perDomainStats.values()],
+    matched_contents: paginatedContents,
     warnings,
     page: safePage,
     limit: safeLimit,
@@ -463,7 +565,6 @@ export async function previewCatalogMatch(
 
 /**
  * Check if a workspace has at least one verified domain.
- * Used by the PATCH handler to generate activation warnings.
  */
 export async function hasVerifiedDomain(
   workspaceId: string

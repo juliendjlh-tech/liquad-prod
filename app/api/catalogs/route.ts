@@ -72,8 +72,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
  * {
  *   "name": "Premium Articles",
  *   "description": "All premium content",
- *   "url_patterns": ["/premium/.*"],
- *   "agent_ids": ["<uuid>", "<uuid>"],
+ *   "filter_rules": { "domain_rules": [{ "domain_id": "<uuid>" }] },
+ *   "agent_ids": ["<uuid>"],
  *   "price_eur": 0.50
  * }
  * ```
@@ -131,6 +131,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (err instanceof Error && err.message === "INVALID_AGENT_IDS") {
       return NextResponse.json(
         { error: "agent_ids contains invalid or unauthorized agent IDs" },
+        { status: 400 }
+      );
+    }
+    if (err instanceof Error && err.message === "INVALID_DOMAIN_IDS") {
+      return NextResponse.json(
+        { error: "filter_rules contains domain_ids not belonging to this workspace" },
         { status: 400 }
       );
     }

@@ -1,5 +1,6 @@
 import { createServerClient } from "@/lib/db/supabase-server";
 import type { SdkEventInput } from "@/lib/validations/sdk-event.schema";
+import type { FilterRules } from "@/lib/validations/catalog.schema";
 import { sdkEventSchema } from "@/lib/validations/sdk-event.schema";
 
 // ---------------------------------------------------------------------------
@@ -40,16 +41,22 @@ export interface SdkRules {
   catalogs: Array<{
     id: string;
     name: string;
-    url_patterns: string[];
+    filter_rules: {
+      domain_rules: Array<{
+        domain: string;
+        path_rules?: Array<{
+          operator: string;
+          value: string;
+        }>;
+        path_logic?: "AND" | "OR";
+      }>;
+    };
     price_eur: number;
     agent_ids: string[];
   }>;
 
   /**
    * Identity Check configuration for this workspace.
-   * Added by US-IC-02. Older SDKs that don't know about this field
-   * will simply ignore it (additive / backward compatible).
-   *
    * IC is always active — per-bot `dns_patterns` controls verification.
    */
   identity_check: {
@@ -104,15 +111,25 @@ export async function getWorkspaceRules(
     .eq("workspace_id", workspaceId)
     .eq("is_active", true);
 
-  // 3. Active catalogs (ordered by created_at ASC)
+  // 3. All workspace domains (for resolving domain_ids in filter_rules)
+  const { data: allDomains } = await supabase
+    .from("domains")
+    .select("id, domain")
+    .eq("workspace_id", workspaceId);
+
+  const domainIdToHostname = new Map(
+    (allDomains ?? []).map((d) => [d.id, d.domain])
+  );
+
+  // 4. Active catalogs (ordered by created_at ASC)
   const { data: catalogs } = await supabase
     .from("catalogs")
-    .select("id, name, url_patterns, price_eur, created_at")
+    .select("id, name, filter_rules, price_eur, created_at")
     .eq("workspace_id", workspaceId)
     .eq("status", "active")
     .order("created_at", { ascending: true });
 
-  // 4. Get agent_ids for each catalog
+  // 5. Get agent_ids for each catalog and resolve domain_ids to hostnames
   const catalogsWithAgents = await Promise.all(
     (catalogs ?? []).map(async (catalog) => {
       const { data: links } = await supabase
@@ -120,10 +137,35 @@ export async function getWorkspaceRules(
         .select("user_agent_id")
         .eq("catalog_id", catalog.id);
 
+      // Resolve domain_ids to hostnames in filter_rules
+      const rawRules = catalog.filter_rules as unknown as {
+        domain_rules: Array<{
+          domain_id: string;
+          path_rules?: Array<{ operator: string; value: string }>;
+          path_logic?: "AND" | "OR";
+        }>;
+      };
+
+      const resolvedFilterRules = {
+        domain_rules: (rawRules?.domain_rules ?? [])
+          .map((rule) => {
+            const hostname = domainIdToHostname.get(rule.domain_id);
+            if (!hostname) return null; // Domain deleted, skip gracefully
+            return {
+              domain: hostname,
+              ...(rule.path_rules && rule.path_rules.length > 0
+                ? { path_rules: rule.path_rules }
+                : {}),
+              ...(rule.path_logic ? { path_logic: rule.path_logic } : {}),
+            };
+          })
+          .filter((r): r is NonNullable<typeof r> => r !== null),
+      };
+
       return {
         id: catalog.id,
         name: catalog.name,
-        url_patterns: catalog.url_patterns,
+        filter_rules: resolvedFilterRules,
         price_eur: Number(catalog.price_eur),
         agent_ids: (links ?? []).map((l) => l.user_agent_id),
       };
@@ -363,7 +405,7 @@ export async function getDashboardMetrics(
     .select("id", { count: "exact", head: true })
     .eq("workspace_id", workspaceId);
 
-  // 2. Contents covered by at least one active catalog (regex matching in JS)
+  // 2. Contents covered by at least one active catalog (structured matching)
   const { data: allContents } = await supabase
     .from("contents")
     .select("source_url")
@@ -371,28 +413,39 @@ export async function getDashboardMetrics(
 
   const { data: activeCatalogs } = await supabase
     .from("catalogs")
-    .select("url_patterns")
+    .select("filter_rules")
     .eq("workspace_id", workspaceId)
     .eq("status", "active");
 
+  // Build domain map for matching
+  const { data: metricDomains } = await supabase
+    .from("domains")
+    .select("id, domain")
+    .eq("workspace_id", workspaceId);
+
+  const metricDomainMap = new Map(
+    (metricDomains ?? []).map((d) => [d.id, d.domain])
+  );
+
   let covered = 0;
   if (allContents && activeCatalogs && activeCatalogs.length > 0) {
-    const patterns = activeCatalogs.flatMap((c) =>
-      (c.url_patterns as string[]).map((p) => {
-        try {
-          return new RegExp(p);
-        } catch {
-          return null;
-        }
-      })
-    ).filter((r): r is RegExp => r !== null);
+    const { matchContentAgainstRules } = await import(
+      "@/lib/validations/catalog.schema"
+    );
 
     for (const content of allContents) {
       try {
-        const path = new URL(content.source_url).pathname;
-        if (patterns.some((re) => re.test(path))) {
-          covered++;
-        }
+        const url = new URL(content.source_url);
+        const isCovered = activeCatalogs.some((c) => {
+          const rules = c.filter_rules as unknown as FilterRules;
+          return matchContentAgainstRules(
+            url.hostname,
+            url.pathname,
+            rules,
+            metricDomainMap
+          );
+        });
+        if (isCovered) covered++;
       } catch {
         // Skip invalid URLs
       }

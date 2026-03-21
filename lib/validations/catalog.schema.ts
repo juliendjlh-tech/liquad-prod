@@ -1,68 +1,117 @@
 import { z } from "zod";
 
+// ---------------------------------------------------------------------------
+// Filter Rules Schema
+// ---------------------------------------------------------------------------
+
+const pathOperatorEnum = z.enum([
+  "contains",
+  "not_contains",
+  "starts_with",
+  "not_starts_with",
+  "equals",
+  "ends_with",
+]);
+
+export type PathOperator = z.infer<typeof pathOperatorEnum>;
+
+const pathRuleSchema = z.object({
+  operator: pathOperatorEnum,
+  value: z.string().trim().min(1, "value must not be empty").max(500),
+});
+
+export type PathRule = z.infer<typeof pathRuleSchema>;
+
+const domainRuleSchema = z.object({
+  domain_id: z.string().uuid(),
+  path_rules: z.array(pathRuleSchema).optional(),
+  path_logic: z.enum(["AND", "OR"]).default("AND").optional(),
+});
+
+export type DomainRule = z.infer<typeof domainRuleSchema>;
+
+const filterRulesSchema = z.object({
+  domain_rules: z.array(domainRuleSchema).min(1, "at least one domain rule is required"),
+});
+
+export type FilterRules = z.infer<typeof filterRulesSchema>;
+
+// ---------------------------------------------------------------------------
+// Matching Logic (shared between preview service and can be imported by SDK)
+// ---------------------------------------------------------------------------
+
 /**
- * Validates that a string is a valid regex and safe from ReDoS.
- *
- * Tests the pattern against a pathological probe string ("a" x 50)
- * with a 100ms timeout. If the regex takes too long, it is rejected
- * as a potential ReDoS vector.
- *
- * @param pattern - The regex pattern string to validate
- * @returns true if the pattern is valid and safe
+ * Evaluate a single path rule against a pathname.
  */
-function isRegexSafe(pattern: string): boolean {
-  try {
-    const regex = new RegExp(pattern);
-    const probeString = "a".repeat(50);
-    const startTime = Date.now();
-    regex.test(probeString);
-    const elapsed = Date.now() - startTime;
-    return elapsed <= 100;
-  } catch {
-    return false;
+function evaluatePathRule(pathname: string, rule: PathRule): boolean {
+  switch (rule.operator) {
+    case "contains":
+      return pathname.includes(rule.value);
+    case "not_contains":
+      return !pathname.includes(rule.value);
+    case "starts_with":
+      return pathname.startsWith(rule.value);
+    case "not_starts_with":
+      return !pathname.startsWith(rule.value);
+    case "equals":
+      return pathname === rule.value;
+    case "ends_with":
+      return pathname.endsWith(rule.value);
   }
 }
 
-/** Reusable Zod schema for a safe regex pattern string. */
-const safeRegexPattern = z
-  .string()
-  .min(1, "Pattern must not be empty")
-  .refine(
-    (pattern) => {
-      try {
-        new RegExp(pattern);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    { message: "invalid regular expression" }
-  )
-  .refine(
-    (pattern) => isRegexSafe(pattern),
-    { message: "regex pattern timed out during validation (potential ReDoS)" }
-  );
+/**
+ * Match a content URL against filter rules.
+ *
+ * Algorithm:
+ * 1. Find domain rules matching the content's hostname
+ * 2. Evaluate path_rules according to path_logic (AND/OR)
+ *
+ * @param hostname - The content's hostname (e.g. "example.com")
+ * @param pathname - The content's pathname (e.g. "/blog/article-1")
+ * @param filterRules - The filter rules to match against
+ * @param domainMap - Map of domain_id to hostname for resolving domain_rules
+ */
+export function matchContentAgainstRules(
+  hostname: string,
+  pathname: string,
+  filterRules: FilterRules,
+  domainMap: Map<string, string>
+): boolean {
+  // 1. Find domain rules matching the hostname
+  const matchingRules = filterRules.domain_rules.filter((r) => {
+    const ruleHostname = domainMap.get(r.domain_id);
+    return ruleHostname === hostname;
+  });
+  if (matchingRules.length === 0) return false;
+
+  // 2. Evaluate path_rules
+  for (const rule of matchingRules) {
+    if (!rule.path_rules || rule.path_rules.length === 0) return true;
+
+    const logic = rule.path_logic ?? "AND";
+    const matches =
+      logic === "AND"
+        ? rule.path_rules.every((pr) => evaluatePathRule(pathname, pr))
+        : rule.path_rules.some((pr) => evaluatePathRule(pathname, pr));
+
+    if (matches) return true;
+  }
+
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Catalog Schemas
+// ---------------------------------------------------------------------------
 
 /**
  * Schema for POST /api/catalogs request body.
- *
- * Validates catalog creation input:
- * - name: Required, non-empty, trimmed, max 255 chars.
- * - description: Optional, max 1000 chars.
- * - url_patterns: Required array, 1-50 elements, each a valid ReDoS-safe regex.
- * - agent_ids: Required array (can be empty), each a UUID string.
- * - price_eur: Required, 0-1 EUR, max 2 decimal places.
- *
- * Used by:
- * - `app/api/catalogs/route.ts` — POST handler
  */
 export const createCatalogSchema = z.object({
   name: z.string().trim().min(1, "name is required").max(255),
   description: z.string().max(1000).optional(),
-  url_patterns: z
-    .array(safeRegexPattern)
-    .min(1, "url_patterns must contain at least one pattern")
-    .max(50),
+  filter_rules: filterRulesSchema,
   agent_ids: z.array(z.string().uuid()),
   price_eur: z
     .number()
@@ -76,18 +125,11 @@ export type CreateCatalogInput = z.infer<typeof createCatalogSchema>;
 /**
  * Schema for PATCH /api/catalogs/:id request body.
  * All fields optional (partial update).
- *
- * Used by:
- * - `app/api/catalogs/[id]/route.ts` — PATCH handler
  */
 export const updateCatalogSchema = z.object({
   name: z.string().trim().min(1).max(255).optional(),
   description: z.string().max(1000).optional(),
-  url_patterns: z
-    .array(safeRegexPattern)
-    .min(1, "url_patterns must contain at least one pattern")
-    .max(50)
-    .optional(),
+  filter_rules: filterRulesSchema.optional(),
   agent_ids: z.array(z.string().uuid()).optional(),
   price_eur: z
     .number()
@@ -105,16 +147,10 @@ export const updateCatalogSchema = z.object({
 export type UpdateCatalogInput = z.infer<typeof updateCatalogSchema>;
 
 /**
- * Schema for POST /api/catalogs/preview request body (ad-hoc preview).
- *
- * Used by:
- * - `app/api/catalogs/preview/route.ts` — POST handler
+ * Schema for POST /api/catalogs/preview request body.
  */
-export const previewPatternsSchema = z.object({
-  url_patterns: z
-    .array(safeRegexPattern)
-    .min(1, "url_patterns must contain at least one pattern")
-    .max(50),
+export const previewFilterRulesSchema = z.object({
+  filter_rules: filterRulesSchema,
 });
 
-export type PreviewPatternsInput = z.infer<typeof previewPatternsSchema>;
+export type PreviewFilterRulesInput = z.infer<typeof previewFilterRulesSchema>;

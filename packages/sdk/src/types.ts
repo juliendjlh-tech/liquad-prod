@@ -52,6 +52,42 @@ export interface LiquadResult {
 }
 
 // ---------------------------------------------------------------------------
+// Filter Rules Types (structured matching, no regex)
+// ---------------------------------------------------------------------------
+
+/**
+ * A single path rule with an operator and value.
+ */
+export interface FilterRule {
+  operator:
+    | "contains"
+    | "not_contains"
+    | "starts_with"
+    | "not_starts_with"
+    | "equals"
+    | "ends_with";
+  value: string;
+}
+
+/**
+ * A domain-level rule with optional path filtering.
+ */
+export interface DomainRule {
+  /** Hostname (e.g. "example.com") — resolved from domain_id by the server */
+  domain: string;
+  path_rules?: FilterRule[];
+  path_logic?: "AND" | "OR";
+}
+
+/**
+ * Structured filter rules for a catalog.
+ * Replaces regex-based url_patterns.
+ */
+export interface CatalogFilterRules {
+  domain_rules: DomainRule[];
+}
+
+// ---------------------------------------------------------------------------
 // SDK Event Types
 // ---------------------------------------------------------------------------
 

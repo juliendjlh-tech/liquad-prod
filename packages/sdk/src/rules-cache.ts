@@ -1,4 +1,8 @@
-import type { LiquadConfig, IdentityCheckRulesConfig } from "./types";
+import type {
+  LiquadConfig,
+  IdentityCheckRulesConfig,
+  CatalogFilterRules,
+} from "./types";
 
 /**
  * Cached rules structure (mirrors SdkRules from the API).
@@ -32,7 +36,7 @@ export interface CachedRules {
   catalogs: Array<{
     id: string;
     name: string;
-    url_patterns: string[];
+    filter_rules: CatalogFilterRules;
     price_eur: number;
     agent_ids: string[];
   }>;

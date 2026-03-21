@@ -80,7 +80,7 @@ export async function GET(
  * PATCH /api/catalogs/:id
  *
  * Update a catalog. Supports partial updates for name, description,
- * url_patterns, agent_ids, price_eur, and status.
+ * filter_rules, agent_ids, price_eur, and status.
  *
  * When status is set to "active", checks for verified domains and
  * includes a warning if none exist (activation still proceeds).
@@ -169,6 +169,12 @@ export async function PATCH(
     if (err instanceof Error && err.message === "INVALID_AGENT_IDS") {
       return NextResponse.json(
         { error: "agent_ids contains invalid or unauthorized agent IDs" },
+        { status: 400 }
+      );
+    }
+    if (err instanceof Error && err.message === "INVALID_DOMAIN_IDS") {
+      return NextResponse.json(
+        { error: "filter_rules contains domain_ids not belonging to this workspace" },
         { status: 400 }
       );
     }

@@ -3,6 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
+import DomainSelector from "@/app/components/catalog/DomainSelector";
+import CatalogPreview from "@/app/components/catalog/CatalogPreview";
+import type { DomainRule } from "@/lib/validations/catalog.schema";
 
 interface UserAgent {
   id: string;
@@ -11,22 +14,49 @@ interface UserAgent {
   is_active: boolean;
 }
 
-interface PreviewResult {
-  matched_contents: Array<{ source_url: string }>;
+interface DomainWithCount {
+  id: string;
+  domain: string;
+  content_count: number;
+}
+
+interface PerDomainStat {
+  domain: string;
+  domain_id: string;
+  matched: number;
   total: number;
+}
+
+interface PreviewContent {
+  id: string;
+  source_url: string;
+  title: string | null;
+  matched: boolean;
+}
+
+interface PreviewResult {
+  matched_count: number;
+  total_contents: number;
+  per_domain: PerDomainStat[];
+  matched_contents: PreviewContent[];
   warnings: string[];
+  page: number;
+  limit: number;
+  total_pages: number;
 }
 
 export default function NewCatalogPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [patternsText, setPatternsText] = useState("");
+  const [domainRules, setDomainRules] = useState<DomainRule[]>([]);
   const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
   const [priceEur, setPriceEur] = useState("0.00");
   const [agents, setAgents] = useState<UserAgent[]>([]);
+  const [domains, setDomains] = useState<DomainWithCount[]>([]);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewPage, setPreviewPage] = useState(1);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [toast, setToast] = useState<{
@@ -41,51 +71,68 @@ export default function NewCatalogPage() {
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Fetch agents for checkboxes
+  // Fetch agents and domains
   useEffect(() => {
     void (async () => {
-      const res = await fetch("/api/user-agents", {
-        headers: { "x-workspace-id": workspaceId },
-      });
-      if (res.ok) {
-        const data = (await res.json()) as UserAgent[];
+      const [agentsRes, domainsRes] = await Promise.all([
+        fetch("/api/user-agents", {
+          headers: { "x-workspace-id": workspaceId },
+        }),
+        fetch(`/api/domains?workspace_id=${workspaceId}`),
+      ]);
+      if (agentsRes.ok) {
+        const data = (await agentsRes.json()) as UserAgent[];
         setAgents(data.filter((a) => a.is_active));
+      }
+      if (domainsRes.ok) {
+        setDomains(await domainsRes.json());
       }
     })();
   }, [workspaceId]);
 
   // Debounced preview
-  const fetchPreview = useCallback(async () => {
-    const patterns = patternsText
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-    if (patterns.length === 0) {
-      setPreview(null);
-      return;
-    }
-    setPreviewLoading(true);
-    try {
-      const res = await fetch("/api/catalogs/preview", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
-        body: JSON.stringify({ url_patterns: patterns }),
-      });
-      if (res.ok) setPreview(await res.json());
-    } finally {
-      setPreviewLoading(false);
-    }
-  }, [patternsText, workspaceId]);
+  const fetchPreview = useCallback(
+    async (page: number) => {
+      if (domainRules.length === 0) {
+        setPreview(null);
+        return;
+      }
+      setPreviewLoading(true);
+      try {
+        const res = await fetch(
+          `/api/catalogs/preview?page=${page}&limit=20`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-workspace-id": workspaceId,
+            },
+            body: JSON.stringify({
+              filter_rules: { domain_rules: domainRules },
+            }),
+          }
+        );
+        if (res.ok) setPreview(await res.json());
+      } finally {
+        setPreviewLoading(false);
+      }
+    },
+    [domainRules, workspaceId]
+  );
 
   useEffect(() => {
+    setPreviewPage(1);
     const timer = setTimeout(() => {
-      void fetchPreview();
+      void fetchPreview(1);
     }, 500);
     return () => clearTimeout(timer);
-  }, [fetchPreview]);
+  }, [domainRules, workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (previewPage > 1) {
+      void fetchPreview(previewPage);
+    }
+  }, [previewPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const toggleAgent = (id: string) => {
     setSelectedAgents((prev) =>
@@ -97,13 +144,8 @@ export default function NewCatalogPage() {
     e.preventDefault();
     setErrors({});
 
-    const urlPatterns = patternsText
-      .split("\n")
-      .map((l) => l.trim())
-      .filter(Boolean);
-
-    if (urlPatterns.length === 0) {
-      setErrors({ url_patterns: "At least one pattern is required" });
+    if (domainRules.length === 0) {
+      setErrors({ filter_rules: "At least one domain is required" });
       return;
     }
 
@@ -125,7 +167,7 @@ export default function NewCatalogPage() {
         body: JSON.stringify({
           name,
           description: description || undefined,
-          url_patterns: urlPatterns,
+          filter_rules: { domain_rules: domainRules },
           agent_ids: selectedAgents,
           price_eur: Math.round(price * 100) / 100,
         }),
@@ -187,51 +229,23 @@ export default function NewCatalogPage() {
           />
         </div>
 
-        {/* URL Patterns */}
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            URL Patterns (one regex per line)
-          </label>
-          <textarea
-            value={patternsText}
-            onChange={(e) => setPatternsText(e.target.value)}
-            rows={4}
-            placeholder={"/premium/.*\n/vip/.*"}
-            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
-          />
-          {errors.url_patterns && (
-            <p className="mt-1 text-sm text-red-600">{errors.url_patterns}</p>
-          )}
-        </div>
+        {/* Domain Selector */}
+        <DomainSelector
+          domains={domains}
+          domainRules={domainRules}
+          onDomainRulesChange={setDomainRules}
+        />
+        {errors.filter_rules && (
+          <p className="text-sm text-red-600">{errors.filter_rules}</p>
+        )}
 
         {/* Preview */}
-        {preview && (
-          <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-            <div className="text-sm font-medium text-gray-700 mb-2">
-              Preview: {preview.total} contents match
-            </div>
-            {preview.warnings.map((w, i) => (
-              <div
-                key={i}
-                className="text-sm text-yellow-700 bg-yellow-50 rounded px-2 py-1 mb-1"
-              >
-                {w}
-              </div>
-            ))}
-            {preview.matched_contents.length > 0 && (
-              <ul className="mt-2 space-y-1 max-h-40 overflow-y-auto">
-                {preview.matched_contents.map((c, i) => (
-                  <li key={i} className="text-xs text-gray-600 truncate">
-                    {c.source_url}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {previewLoading && (
-              <span className="text-xs text-gray-400">Refreshing...</span>
-            )}
-          </div>
-        )}
+        <CatalogPreview
+          preview={preview}
+          loading={previewLoading}
+          page={previewPage}
+          onPageChange={setPreviewPage}
+        />
 
         {/* Agents */}
         <div>
