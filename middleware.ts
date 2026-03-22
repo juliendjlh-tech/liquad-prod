@@ -117,6 +117,9 @@ export async function middleware(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Forward pathname to server components (used by Navbar to hide on dashboard)
+  response.headers.set("x-pathname", pathname);
+
   // All other matched routes: pass through with refreshed cookies
   return response;
 }

@@ -1,8 +1,15 @@
 import Link from "next/link";
+import { headers } from "next/headers";
 import { createServerClient } from "@/lib/db/supabase-server";
 import Button from "@/app/components/ui/Button";
 
 export default async function Navbar() {
+  const headersList = await headers();
+  const pathname = headersList.get("x-pathname") ?? "";
+
+  // Hide Navbar on dashboard pages — ModeNav handles navigation there
+  if (pathname.startsWith("/dashboard")) return null;
+
   const supabase = await createServerClient();
   const {
     data: { user },

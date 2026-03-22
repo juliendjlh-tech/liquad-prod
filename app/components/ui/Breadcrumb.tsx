@@ -11,6 +11,8 @@ const routeLabels: Record<string, string> = {
   settings: "Settings",
   new: "Create",
   edit: "Edit",
+  access: "Access",
+  marketplace: "Marketplace",
 };
 
 export default function Breadcrumb() {

@@ -8,9 +8,10 @@ import Button from "@/app/components/ui/Button";
 interface SidebarProps {
   workspace: { id: string; name: string };
   userEmail: string;
+  mode: "license" | "access";
 }
 
-const navLinks = [
+const licenseLinks = [
   { label: "Overview", href: "/dashboard" },
   { label: "Contents", href: "/dashboard/contents" },
   { label: "AI Bots", href: "/dashboard/user-agents" },
@@ -19,14 +20,24 @@ const navLinks = [
   { label: "Settings", href: "/dashboard/settings" },
 ];
 
-export default function Sidebar({ workspace, userEmail }: SidebarProps) {
+const accessLinks = [
+  { label: "Overview", href: "/dashboard/access" },
+  { label: "Integration", href: "/dashboard/access/integration" },
+  { label: "Marketplace", href: "/dashboard/access/marketplace" },
+  { label: "Settings", href: "/dashboard/access/settings" },
+];
+
+export default function Sidebar({ workspace, userEmail, mode }: SidebarProps) {
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
+  const navLinks = mode === "access" ? accessLinks : licenseLinks;
+
   const isActive = (href: string) => {
     if (href === "/dashboard") return pathname === "/dashboard";
+    if (href === "/dashboard/access") return pathname === "/dashboard/access";
     return pathname.startsWith(href);
   };
 
