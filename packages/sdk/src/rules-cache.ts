@@ -42,6 +42,13 @@ export interface CachedRules {
   }>;
 
   /**
+   * Content paths registered in the workspace.
+   * Format: "hostname/pathname" (e.g. "example.com/blog/article-1").
+   * Used for content existence checks — only registered content is accessible.
+   */
+  known_content_paths: string[];
+
+  /**
    * Identity Check configuration for this workspace.
    *
    * Provides DNS verification timeout/cache settings.
@@ -89,6 +96,7 @@ async function fetchRules(config: LiquadConfig): Promise<CachedRules> {
  */
 export function createRulesCache(config: LiquadConfig) {
   let rules: CachedRules | null = null;
+  let contentPathSet: Set<string> | null = null;
   let lastFetchedAt = 0;
   const interval = Math.max(
     config.refreshInterval ?? 300_000,
@@ -108,6 +116,7 @@ export function createRulesCache(config: LiquadConfig) {
 
       try {
         rules = await fetchRules(config);
+        contentPathSet = new Set(rules.known_content_paths);
         lastFetchedAt = Date.now();
       } catch (err) {
         onError(
@@ -127,6 +136,14 @@ export function createRulesCache(config: LiquadConfig) {
 
     getIdentityCheckConfig(): IdentityCheckRulesConfig | null {
       return rules?.identity_check ?? null;
+    },
+
+    /**
+     * Get the pre-built Set of known content paths for O(1) existence checks.
+     * Returns an empty Set before the first successful rules fetch.
+     */
+    getContentPathSet(): Set<string> {
+      return contentPathSet ?? new Set();
     },
   };
 }

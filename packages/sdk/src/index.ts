@@ -216,10 +216,12 @@ export function createLiquadHandler(
       const url = requestUrl.pathname + requestUrl.search;
       const sourceIp = extractSourceIp(request);
 
+      const contentPathSet = rulesCache.getContentPathSet();
       const decision = matchRequest(
         rules,
         { url: request.url, host, userAgent },
-        defaultPrice
+        defaultPrice,
+        contentPathSet
       );
 
       switch (decision.type) {

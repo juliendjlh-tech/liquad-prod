@@ -182,17 +182,26 @@ export async function authorize(
     return { access: "free", reason: "bot_not_tracked" };
   }
 
-  // 6. Find matching catalog (first match, ordered by created_at ASC)
+  // 5.5. Check if content exists in workspace
   const urlPath = urlObj.pathname;
+  const contentKey = `${domain}${urlPath}`;
+  const pathSet = new Set(rules.known_content_paths);
+  if (!pathSet.has(contentKey)) {
+    return { error: "content_not_found", status: 404 };
+  }
+
+  // 6. Find ALL matching catalogs, pick the lowest price
   let matchedCatalog: (typeof rules.catalogs)[number] | null = null;
 
-  for (const catalog of rules.catalogs) {
-    if (!catalog.agent_ids.includes(matchedAgent.id)) continue;
+  const allMatches = rules.catalogs.filter(
+    (catalog) =>
+      catalog.agent_ids.includes(matchedAgent.id) &&
+      matchFilterRules(domain, urlPath, catalog.filter_rules)
+  );
 
-    if (matchFilterRules(domain, urlPath, catalog.filter_rules)) {
-      matchedCatalog = catalog;
-      break;
-    }
+  if (allMatches.length > 0) {
+    allMatches.sort((a, b) => a.price_eur - b.price_eur);
+    matchedCatalog = allMatches[0];
   }
 
   if (!matchedCatalog) {

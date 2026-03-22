@@ -56,6 +56,14 @@ export interface SdkRules {
   }>;
 
   /**
+   * Content paths registered in the workspace.
+   * Format: "hostname/pathname" (e.g. "example.com/blog/article-1").
+   * Used by the SDK for content existence checks — only registered
+   * content is accessible to bots.
+   */
+  known_content_paths: string[];
+
+  /**
    * Identity Check configuration for this workspace.
    * IC is always active — per-bot `dns_patterns` controls verification.
    */
@@ -172,6 +180,41 @@ export async function getWorkspaceRules(
     })
   );
 
+  // 6. Known content paths (for content existence check in SDK)
+  //    Fetch all source_url from contents table, paginating through
+  //    Supabase's 1000-row default limit (same pattern as catalog.service.ts).
+  const PAGE_SIZE = 1000;
+  const allContentUrls: string[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data: contentBatch, error: contentError } = await supabase
+      .from("contents")
+      .select("source_url")
+      .eq("workspace_id", workspaceId)
+      .range(from, from + PAGE_SIZE - 1);
+
+    if (contentError) {
+      // Non-fatal: if content fetch fails, SDK falls back to current behavior
+      break;
+    }
+    if (!contentBatch || contentBatch.length === 0) break;
+    allContentUrls.push(...contentBatch.map((c) => c.source_url));
+    if (contentBatch.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+
+  const knownContentPaths = allContentUrls
+    .map((sourceUrl) => {
+      try {
+        const url = new URL(sourceUrl);
+        return `${url.hostname}${url.pathname}`;
+      } catch {
+        return null;
+      }
+    })
+    .filter((p): p is string => p !== null);
+
   return {
     workspace_id: workspaceId,
     jwt_signing_secret: workspace?.jwt_signing_secret ?? "",
@@ -183,6 +226,7 @@ export async function getWorkspaceRules(
       dns_patterns: (a.dns_patterns as string[]) ?? [],
     })),
     catalogs: catalogsWithAgents,
+    known_content_paths: knownContentPaths,
     // Identity Check configuration — DNS verification settings.
     // IC is always active; per-bot dns_patterns controls verification.
     identity_check: {
