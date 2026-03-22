@@ -4,6 +4,7 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/db/supabase';
 import { useRouter } from 'next/navigation';
+import Button from '@/app/components/ui/Button';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -51,7 +52,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-md w-96">
         <h1 className="text-2xl font-bold mb-6">Login</h1>
-        
+
         {error && (
           <div className="bg-red-100 text-red-700 p-3 rounded mb-4">
             {error}
@@ -65,7 +66,7 @@ export default function LoginPage() {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="w-full border rounded px-3 py-2"
+              className="w-full border rounded-lg border-gray-300 px-3 py-2 text-sm"
               required
             />
           </div>
@@ -78,27 +79,25 @@ export default function LoginPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full border rounded px-3 py-2"
+              className="w-full border rounded-lg border-gray-300 px-3 py-2 text-sm"
               required
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 disabled:opacity-50"
-          >
-            {loading ? 'Loading...' : 'Log in'}
-          </button>
+          <Button type="submit" loading={loading} full>
+            Log in
+          </Button>
         </form>
 
-        <button
+        <Button
+          variant="secondary"
           onClick={handleSignUp}
           disabled={loading}
-          className="w-full mt-2 border border-blue-600 text-blue-600 py-2 rounded hover:bg-blue-50"
+          full
+          className="mt-2"
         >
           Create an account
-        </button>
+        </Button>
       </div>
     </div>
   );

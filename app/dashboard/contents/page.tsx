@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
+import Button from "@/app/components/ui/Button";
+import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
 
 interface DomainItem {
   id: string;
@@ -34,14 +37,16 @@ interface ImportJob {
 
 export default function ContentsPage() {
   const { id: workspaceId } = useWorkspace();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Domain list state
   const [domains, setDomains] = useState<DomainItem[]>([]);
   const [domainSearch, setDomainSearch] = useState("");
   const [domainsLoading, setDomainsLoading] = useState(true);
 
-  // Selected domain / contents state
-  const [selectedDomain, setSelectedDomain] = useState<string | null>(null);
+  // Selected domain driven by ?domain= query param
+  const selectedDomain = searchParams.get("domain");
   const [contents, setContents] = useState<PaginatedContents | null>(null);
   const [contentsPage, setContentsPage] = useState(1);
   const [contentsLoading, setContentsLoading] = useState(false);
@@ -50,6 +55,9 @@ export default function ContentsPage() {
   const [importUrl, setImportUrl] = useState("");
   const [importJob, setImportJob] = useState<ImportJob | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Confirm dialog
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Toast
   const [toast, setToast] = useState<{
@@ -191,8 +199,7 @@ export default function ContentsPage() {
   };
 
   // ── Delete content ─────────────────────────────────────────────────
-  const handleDelete = async (id: string) => {
-    if (!confirm("Delete this content?")) return;
+  const executeDelete = async (id: string) => {
     const res = await fetch(`/api/contents/${id}`, {
       method: "DELETE",
       headers: { "x-workspace-id": workspaceId },
@@ -204,19 +211,20 @@ export default function ContentsPage() {
     } else {
       showToast("Failed to delete", "error");
     }
+    setConfirmDeleteId(null);
   };
 
   // ── Select / back ──────────────────────────────────────────────────
   const openDomain = (domain: string) => {
-    setSelectedDomain(domain);
     setContentsPage(1);
     setContents(null);
+    router.push(`/dashboard/contents?domain=${encodeURIComponent(domain)}`);
   };
 
   const goBack = () => {
-    setSelectedDomain(null);
     setContents(null);
     setContentsPage(1);
+    router.push("/dashboard/contents");
   };
 
   // ── Total content count ────────────────────────────────────────────
@@ -247,19 +255,9 @@ export default function ContentsPage() {
 
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          {selectedDomain && (
-            <button
-              onClick={goBack}
-              className="rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-600 hover:bg-gray-50"
-            >
-              &larr;
-            </button>
-          )}
-          <h1 className="text-2xl font-bold text-gray-900">
-            {selectedDomain ? selectedDomain : "Contents"}
-          </h1>
-        </div>
+        <h1 className="text-2xl font-bold text-gray-900">
+          {selectedDomain ?? "Contents"}
+        </h1>
         {!selectedDomain && (
           <span className="text-sm text-gray-500">
             {domains.length} domain(s) &middot; {totalContents} content(s)
@@ -284,13 +282,9 @@ export default function ContentsPage() {
             required
             disabled={isImporting}
           />
-          <button
-            type="submit"
-            disabled={isImporting}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
+          <Button type="submit" loading={isImporting}>
             {isImporting ? importStatusLabel : "Import Sitemap"}
-          </button>
+          </Button>
         </div>
         {isImporting && (
           <div className="mt-2 flex items-center gap-2 text-sm text-blue-600">
@@ -376,6 +370,16 @@ export default function ContentsPage() {
       )}
 
       {/* ─── Contents view for selected domain ──────────────────────── */}
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        title="Delete this content?"
+        description="This action cannot be undone. The content URL will be permanently removed."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => confirmDeleteId && executeDelete(confirmDeleteId)}
+        onCancel={() => setConfirmDeleteId(null)}
+      />
+
       {selectedDomain && (
         <>
           {contentsLoading ? (
@@ -403,7 +407,7 @@ export default function ContentsPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-200 bg-white">
                     {contents.items.map((item) => (
-                      <tr key={item.id}>
+                      <tr key={item.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-4 py-3 text-sm text-gray-900 max-w-lg truncate">
                           {item.source_url}
                         </td>
@@ -414,7 +418,7 @@ export default function ContentsPage() {
                         </td>
                         <td className="px-4 py-3 text-right">
                           <button
-                            onClick={() => handleDelete(item.id)}
+                            onClick={() => setConfirmDeleteId(item.id)}
                             className="text-sm text-red-600 hover:text-red-800"
                           >
                             Delete
@@ -429,29 +433,31 @@ export default function ContentsPage() {
               {/* Pagination */}
               {contents.totalPages > 1 && (
                 <div className="flex items-center justify-between mt-4">
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() =>
                       setContentsPage((p) => Math.max(1, p - 1))
                     }
                     disabled={contentsPage <= 1}
-                    className="rounded-md border border-gray-300 px-3 py-1 text-sm disabled:opacity-50"
                   >
                     Previous
-                  </button>
+                  </Button>
                   <span className="text-sm text-gray-600">
                     Page {contents.page} of {contents.totalPages}
                   </span>
-                  <button
+                  <Button
+                    variant="secondary"
+                    size="sm"
                     onClick={() =>
                       setContentsPage((p) =>
                         Math.min(contents.totalPages, p + 1)
                       )
                     }
                     disabled={contentsPage >= contents.totalPages}
-                    className="rounded-md border border-gray-300 px-3 py-1 text-sm disabled:opacity-50"
                   >
                     Next
-                  </button>
+                  </Button>
                 </div>
               )}
             </>

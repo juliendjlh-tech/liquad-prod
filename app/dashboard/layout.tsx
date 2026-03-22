@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createServerClient } from "@/lib/db/supabase-server";
 import Sidebar from "@/app/components/Sidebar";
+import Breadcrumb from "@/app/components/ui/Breadcrumb";
 import { WorkspaceProvider } from "@/app/dashboard/workspace-context";
 
 export default async function DashboardLayout({
@@ -38,7 +39,10 @@ export default async function DashboardLayout({
     <WorkspaceProvider workspace={workspace}>
       <div className="flex min-h-screen bg-gray-50">
         <Sidebar workspace={workspace} userEmail={user.email ?? ""} />
-        <main className="flex-1 p-6 md:p-8 overflow-auto">{children}</main>
+        <main className="flex-1 p-6 md:p-8 overflow-auto">
+          <Breadcrumb />
+          {children}
+        </main>
       </div>
     </WorkspaceProvider>
   );

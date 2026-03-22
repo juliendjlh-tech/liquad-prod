@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
+import Button from "@/app/components/ui/Button";
 import DomainSelector from "@/app/components/catalog/DomainSelector";
 import CatalogPreview from "@/app/components/catalog/CatalogPreview";
 import type { DomainRule, FilterRules } from "@/lib/validations/catalog.schema";
@@ -313,20 +314,16 @@ export default function EditCatalogPage({
         </div>
 
         <div className="flex gap-3">
-          <button
-            type="submit"
-            disabled={submitting}
-            className="rounded-lg bg-blue-600 px-6 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
+          <Button type="submit" loading={submitting}>
             {submitting ? "Saving..." : "Save"}
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
             type="button"
             onClick={() => router.push("/dashboard/catalogs")}
-            className="rounded-lg border border-gray-300 px-6 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Cancel
-          </button>
+          </Button>
         </div>
       </form>
     </div>

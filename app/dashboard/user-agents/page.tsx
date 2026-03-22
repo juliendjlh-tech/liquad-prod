@@ -2,6 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
+import Button from "@/app/components/ui/Button";
+import DropdownMenu from "@/app/components/ui/DropdownMenu";
+import Toggle from "@/app/components/ui/Toggle";
+import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,6 +61,9 @@ export default function UserAgentsPage() {
   const [editName, setEditName] = useState("");
   const [editPattern, setEditPattern] = useState("");
   const [editDnsValue, setEditDnsValue] = useState("");
+
+  const [confirmTarget, setConfirmTarget] = useState<UserAgent | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const [toast, setToast] = useState<{
     message: string;
@@ -158,15 +165,20 @@ export default function UserAgentsPage() {
   // ---------------------------------------------------------------------------
 
   const toggleActive = async (agent: UserAgent) => {
-    const res = await fetch(`/api/user-agents/${agent.id}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "x-workspace-id": workspaceId,
-      },
-      body: JSON.stringify({ is_active: !agent.is_active }),
-    });
-    if (res.ok) void fetchAgents();
+    setTogglingId(agent.id);
+    try {
+      const res = await fetch(`/api/user-agents/${agent.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-workspace-id": workspaceId,
+        },
+        body: JSON.stringify({ is_active: !agent.is_active }),
+      });
+      if (res.ok) void fetchAgents();
+    } finally {
+      setTogglingId(null);
+    }
   };
 
   const duplicateAgent = async (agent: UserAgent) => {
@@ -185,9 +197,7 @@ export default function UserAgentsPage() {
     }
   };
 
-  const deleteAgent = async (agent: UserAgent) => {
-    if (!confirm(`Delete ${agent.name}?`)) return;
-
+  const executeDelete = async (agent: UserAgent) => {
     const res = await fetch(`/api/user-agents/${agent.id}`, {
       method: "DELETE",
       headers: { "x-workspace-id": workspaceId },
@@ -202,6 +212,7 @@ export default function UserAgentsPage() {
       showToast(`Bot deleted${warning}`, "success");
       void fetchAgents();
     }
+    setConfirmTarget(null);
   };
 
   const startEdit = (agent: UserAgent) => {
@@ -273,18 +284,15 @@ export default function UserAgentsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">AI Bots</h1>
         <div className="flex gap-2">
-          <button
-            onClick={() => setShowAddPreset(!showAddPreset)}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
+          <Button onClick={() => setShowAddPreset(!showAddPreset)}>
             Add AI Bot
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="secondary"
             onClick={() => setShowAddCustom(!showAddCustom)}
-            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
             Add Custom Bot
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -379,12 +387,7 @@ export default function UserAgentsPage() {
             </p>
           </div>
           <div className="mt-3 flex justify-end">
-            <button
-              type="submit"
-              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Save
-            </button>
+            <Button type="submit">Save</Button>
           </div>
         </form>
       )}
@@ -395,19 +398,16 @@ export default function UserAgentsPage() {
       ) : agents.length === 0 ? (
         <div className="text-center py-12">
           <p className="text-gray-500 mb-4">No AI bots declared</p>
-          <button
-            onClick={() => setShowAddPreset(true)}
-            className="text-sm text-blue-600 hover:text-blue-800"
-          >
+          <Button variant="ghost" onClick={() => setShowAddPreset(true)}>
             Add your first bot
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="space-y-2">
           {agents.map((agent) => (
             <div
               key={agent.id}
-              className="rounded-lg border border-gray-200 bg-white px-4 py-3"
+              className="group rounded-lg border border-gray-200 bg-white px-4 py-3 hover:bg-gray-50 transition-colors"
             >
               {editingAgent === agent.id ? (
                 /* ---- Inline edit mode (custom bots only) ---- */
@@ -450,18 +450,12 @@ export default function UserAgentsPage() {
                     />
                   </div>
                   <div className="flex justify-end gap-2">
-                    <button
-                      onClick={cancelEdit}
-                      className="rounded px-3 py-1 text-xs text-gray-500 hover:text-gray-700"
-                    >
+                    <Button variant="ghost" size="sm" onClick={cancelEdit}>
                       Cancel
-                    </button>
-                    <button
-                      onClick={() => saveEdit(agent.id)}
-                      className="rounded bg-blue-600 px-3 py-1 text-xs font-medium text-white hover:bg-blue-700"
-                    >
+                    </Button>
+                    <Button size="sm" onClick={() => saveEdit(agent.id)}>
                       Save
-                    </button>
+                    </Button>
                   </div>
                 </div>
               ) : (
@@ -487,39 +481,36 @@ export default function UserAgentsPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => toggleActive(agent)}
-                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                          agent.is_active ? "bg-blue-600" : "bg-gray-300"
-                        }`}
-                        title={agent.is_active ? "Active" : "Inactive"}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                            agent.is_active ? "translate-x-6" : "translate-x-1"
-                          }`}
+                      <Toggle
+                        checked={agent.is_active}
+                        onChange={() => toggleActive(agent)}
+                        loading={togglingId === agent.id}
+                        label={`Toggle ${agent.name} ${agent.is_active ? "off" : "on"}`}
+                      />
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                        <DropdownMenu
+                          items={[
+                            ...(!agent.is_preset
+                              ? [
+                                  {
+                                    label: "Edit",
+                                    onClick: () => startEdit(agent),
+                                  },
+                                ]
+                              : []),
+                            {
+                              label: "Duplicate",
+                              onClick: () => duplicateAgent(agent),
+                            },
+                            {
+                              label: "Delete",
+                              onClick: () => setConfirmTarget(agent),
+                              variant: "danger" as const,
+                              separator: true,
+                            },
+                          ]}
                         />
-                      </button>
-                      {!agent.is_preset && (
-                        <button
-                          onClick={() => startEdit(agent)}
-                          className="text-sm text-gray-600 hover:text-blue-600"
-                        >
-                          Edit
-                        </button>
-                      )}
-                      <button
-                        onClick={() => duplicateAgent(agent)}
-                        className="text-sm text-gray-600 hover:text-blue-600"
-                      >
-                        Duplicate
-                      </button>
-                      <button
-                        onClick={() => deleteAgent(agent)}
-                        className="text-sm text-red-600 hover:text-red-800"
-                      >
-                        Delete
-                      </button>
+                      </div>
                     </div>
                   </div>
 
@@ -551,6 +542,16 @@ export default function UserAgentsPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirmTarget}
+        title={`Delete ${confirmTarget?.name ?? "bot"}?`}
+        description="This action cannot be undone. The bot will be permanently deleted and removed from all associated catalogs."
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => confirmTarget && executeDelete(confirmTarget)}
+        onCancel={() => setConfirmTarget(null)}
+      />
     </div>
   );
 }

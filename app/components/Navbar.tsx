@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createServerClient } from "@/lib/db/supabase-server";
+import Button from "@/app/components/ui/Button";
 
 export default async function Navbar() {
   const supabase = await createServerClient();
@@ -34,12 +35,7 @@ export default async function Navbar() {
                 >
                   Login
                 </Link>
-                <Link
-                  href="/login"
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
-                >
-                  Get Started
-                </Link>
+                <Button href="/login">Get Started</Button>
               </>
             )}
           </div>

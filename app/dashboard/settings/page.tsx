@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
+import Button from "@/app/components/ui/Button";
+import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -49,6 +51,8 @@ export default function SettingsPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "viewer">("viewer");
   const [loading, setLoading] = useState(true);
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
+  const [removeMemberTarget, setRemoveMemberTarget] = useState<Member | null>(null);
   const [toast, setToast] = useState<{
     message: string;
     type: "success" | "error";
@@ -88,14 +92,8 @@ export default function SettingsPage() {
   // API Key
   // ---------------------------------------------------------------------------
 
-  const regenerateKey = async () => {
-    if (
-      !confirm(
-        "Regenerate API key? The current key will stop working immediately."
-      )
-    )
-      return;
-
+  const executeRegenerate = async () => {
+    setShowRegenConfirm(false);
     const res = await fetch(`/api/workspaces/${workspaceId}/regenerate-key`, {
       method: "POST",
     });
@@ -137,9 +135,7 @@ export default function SettingsPage() {
     }
   };
 
-  const removeMember = async (userId: string) => {
-    if (!confirm("Remove this member?")) return;
-
+  const executeRemoveMember = async (userId: string) => {
     const res = await fetch(
       `/api/workspaces/${workspaceId}/members/${userId}`,
       { method: "DELETE" }
@@ -152,6 +148,7 @@ export default function SettingsPage() {
       const json = await res.json();
       showToast(json.error ?? "Failed to remove member", "error");
     }
+    setRemoveMemberTarget(null);
   };
 
   const changeRole = async (userId: string, newRole: "admin" | "viewer") => {
@@ -252,12 +249,13 @@ export default function SettingsPage() {
             <span className="text-sm text-gray-600 font-mono">
               API Key: ••••••••
             </span>
-            <button
-              onClick={regenerateKey}
-              className="rounded-md bg-gray-100 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-200"
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setShowRegenConfirm(true)}
             >
               Regenerate Key
-            </button>
+            </Button>
           </div>
         )}
       </section>
@@ -330,7 +328,7 @@ export default function SettingsPage() {
                     <option value="viewer">Viewer</option>
                   </select>
                   <button
-                    onClick={() => removeMember(m.user_id)}
+                    onClick={() => setRemoveMemberTarget(m)}
                     className="text-xs text-red-600 hover:text-red-800"
                   >
                     Remove
@@ -360,14 +358,31 @@ export default function SettingsPage() {
             <option value="viewer">Viewer</option>
             <option value="admin">Admin</option>
           </select>
-          <button
-            type="submit"
-            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-          >
-            Invite
-          </button>
+          <Button type="submit">Invite</Button>
         </form>
       </section>
+
+      <ConfirmDialog
+        open={showRegenConfirm}
+        title="Regenerate API key?"
+        description="The current key will stop working immediately. Any integrations using it will break until updated with the new key."
+        confirmLabel="Regenerate"
+        variant="danger"
+        onConfirm={executeRegenerate}
+        onCancel={() => setShowRegenConfirm(false)}
+      />
+
+      <ConfirmDialog
+        open={!!removeMemberTarget}
+        title={`Remove ${removeMemberTarget?.email ?? "member"}?`}
+        description="This member will lose access to the workspace immediately."
+        confirmLabel="Remove"
+        variant="danger"
+        onConfirm={() =>
+          removeMemberTarget && executeRemoveMember(removeMemberTarget.user_id)
+        }
+        onCancel={() => setRemoveMemberTarget(null)}
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Button from "@/app/components/ui/Button";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -64,13 +65,9 @@ export default function OnboardingPage() {
               required
             />
           </div>
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full rounded-lg bg-blue-600 py-2.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
-          >
+          <Button type="submit" loading={loading} full>
             {loading ? "Creating..." : "Create Workspace"}
-          </button>
+          </Button>
         </form>
       </div>
     </div>

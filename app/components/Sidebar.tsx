@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import Button from "@/app/components/ui/Button";
 
 interface SidebarProps {
   workspace: { id: string; name: string };
@@ -63,13 +64,16 @@ export default function Sidebar({ workspace, userEmail }: SidebarProps) {
 
       <div className="p-4 border-t border-gray-200">
         <div className="text-xs text-gray-500 truncate mb-2">{userEmail}</div>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
+          full
           onClick={handleLogout}
-          disabled={loggingOut}
-          className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md disabled:opacity-50"
+          loading={loggingOut}
+          className="justify-start"
         >
-          {loggingOut ? "Logging out..." : "Logout"}
-        </button>
+          Logout
+        </Button>
       </div>
     </>
   );

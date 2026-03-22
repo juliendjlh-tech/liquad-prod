@@ -111,7 +111,7 @@ export default function RevenuePage() {
                     {data.top_contents.map((item, i) => (
                       <tr
                         key={i}
-                        className="border-b border-gray-50 last:border-0"
+                        className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors"
                       >
                         <td className="py-2 text-gray-700 truncate max-w-xs">
                           {item.url}
@@ -152,7 +152,7 @@ export default function RevenuePage() {
                     {data.top_consumers.map((item, i) => (
                       <tr
                         key={i}
-                        className="border-b border-gray-50 last:border-0"
+                        className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors"
                       >
                         <td className="py-2 font-mono text-xs text-gray-600">
                           {item.workspace_id}
