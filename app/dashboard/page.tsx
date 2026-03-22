@@ -7,14 +7,6 @@ import { useWorkspace } from "@/app/dashboard/workspace-context";
 // Types
 // ---------------------------------------------------------------------------
 
-/**
- * Dashboard metrics fetched from the API.
- *
- * Includes:
- * - Content accessibility and scraping stats
- * - Top catalogs, contents, and agents by event count
- * - Identity Check metrics (IC blocked, verified/unverified breakdown)
- */
 interface DashboardMetrics {
   contentAccessible: { covered: number; total: number; percentage: number };
   contentScraped: { scraped: number; total: number; percentage: number };
@@ -22,17 +14,19 @@ interface DashboardMetrics {
   topContents: Array<{ sourceUrl: string; eventCount: number }>;
   topAgents: Array<{ name: string; eventCount: number }>;
 
-  /** Identity Check analytics (US-IC-07) */
   identityCheck?: {
-    /** Events blocked by Identity Check (decision = "denied_identity_check") */
     blockedCount: number;
-    /** Events where bot identity was verified (ic_verified = true) */
     verifiedCount: number;
-    /** Events where bot identity was NOT verified (ic_verified = false) */
     unverifiedCount: number;
-    /** Top agents that failed IC most often (potential spoofers) */
     topFailedAgents: Array<{ name: string; failCount: number }>;
   };
+}
+
+interface RevenueData {
+  total_revenue_eur: number;
+  total_paid_accesses: number;
+  top_contents: Array<{ url: string; access_count: number; total_eur: number }>;
+  top_consumers: Array<{ workspace_id: string; total_eur: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -49,43 +43,41 @@ const PERIODS = [
 // Dashboard Overview Page
 // ---------------------------------------------------------------------------
 
-/**
- * Dashboard Overview Page
- *
- * Displays workspace analytics including:
- * - Content accessibility percentage (how much content is covered by catalogs)
- * - Content scraping percentage (how much content was accessed by bots)
- * - Top catalogs, contents, and agents by activity
- * - Identity Check metrics: blocked bots, verification breakdown, top spoofers
- *
- * All metrics are filtered by a selectable time period (7, 30, or 90 days).
- */
 export default function DashboardOverviewPage() {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
+  const [revenue, setRevenue] = useState<RevenueData | null>(null);
   const [period, setPeriod] = useState(30);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   const { id: workspaceId } = useWorkspace();
 
-  const fetchMetrics = useCallback(async () => {
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/dashboard/metrics?workspace_id=${workspaceId}&period=${period}`
-      );
-      if (res.ok) {
-        setMetrics(await res.json());
-        setLastUpdated(new Date());
+      const [metricsRes, revenueRes] = await Promise.all([
+        fetch(
+          `/api/dashboard/metrics?workspace_id=${workspaceId}&period=${period}`
+        ),
+        fetch(
+          `/api/workspaces/${workspaceId}/revenue?period=${period}d`
+        ),
+      ]);
+      if (metricsRes.ok) {
+        setMetrics(await metricsRes.json());
       }
+      if (revenueRes.ok) {
+        setRevenue(await revenueRes.json());
+      }
+      setLastUpdated(new Date());
     } finally {
       setLoading(false);
     }
   }, [workspaceId, period]);
 
   useEffect(() => {
-    void fetchMetrics();
-  }, [fetchMetrics]);
+    void fetchData();
+  }, [fetchData]);
 
   const hasEvents =
     metrics &&
@@ -93,17 +85,30 @@ export default function DashboardOverviewPage() {
       metrics.topContents.length > 0 ||
       metrics.topAgents.length > 0);
 
-  /**
-   * Whether there is any Identity Check activity in the period.
-   * Only show the IC section if at least one IC-related event exists.
-   * The `identityCheck` field is optional for backward compatibility
-   * (older API responses might not include it).
-   */
   const hasIcActivity =
     metrics?.identityCheck &&
     (metrics.identityCheck.blockedCount > 0 ||
       metrics.identityCheck.verifiedCount > 0 ||
       metrics.identityCheck.unverifiedCount > 0);
+
+  // Build merged top contents: combine eventCount from metrics + revenue from revenue API
+  const mergedTopContents = (() => {
+    if (!metrics) return [];
+    const revenueByUrl = new Map<string, { access_count: number; total_eur: number }>();
+    if (revenue?.top_contents) {
+      for (const rc of revenue.top_contents) {
+        revenueByUrl.set(rc.url, { access_count: rc.access_count, total_eur: rc.total_eur });
+      }
+    }
+    return metrics.topContents.map((c) => {
+      const rev = revenueByUrl.get(c.sourceUrl);
+      return {
+        sourceUrl: c.sourceUrl,
+        eventCount: c.eventCount,
+        totalEur: rev?.total_eur ?? null,
+      };
+    });
+  })();
 
   return (
     <div>
@@ -142,7 +147,7 @@ export default function DashboardOverviewPage() {
       ) : (
         <>
           {/* Metric cards */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 mb-8">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-8">
             <div className="rounded-lg border border-gray-200 bg-white p-6">
               <div className="text-sm text-gray-500">Content Accessible</div>
               <div className="mt-1 text-3xl font-bold text-gray-900">
@@ -163,19 +168,33 @@ export default function DashboardOverviewPage() {
                 {metrics.contentScraped.total} contents accessed by bots
               </div>
             </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-6">
+              <div className="text-sm text-gray-500">Total Revenue</div>
+              <div className="mt-1 text-3xl font-bold text-gray-900">
+                {revenue?.total_revenue_eur?.toFixed(2) ?? "0.00"} EUR
+              </div>
+              <div className="mt-1 text-xs text-gray-400">
+                Tracked revenue. Manual payout.
+              </div>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white p-6">
+              <div className="text-sm text-gray-500">Paid Accesses</div>
+              <div className="mt-1 text-3xl font-bold text-gray-900">
+                {revenue?.total_paid_accesses ?? 0}
+              </div>
+              <div className="mt-1 text-xs text-gray-400">
+                Content accessed by paying bots
+              </div>
+            </div>
           </div>
 
-          {/* ----------------------------------------------------------------- */}
-          {/* Identity Check Metrics (US-IC-07)                                  */}
-          {/* Only shown when IC has been active (at least one IC event exists)  */}
-          {/* ----------------------------------------------------------------- */}
+          {/* Identity Check Metrics */}
           {hasIcActivity && metrics.identityCheck && (
             <div className="mb-8">
               <h2 className="text-sm font-semibold text-gray-900 mb-3">
                 Identity Check
               </h2>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 mb-4">
-                {/* IC Blocked count — bots denied because DNS verification failed */}
                 <div className="rounded-lg border border-red-200 bg-red-50 p-4">
                   <div className="text-xs text-red-600 font-medium">
                     Blocked by IC
@@ -188,7 +207,6 @@ export default function DashboardOverviewPage() {
                   </div>
                 </div>
 
-                {/* IC Verified count — bots that passed DNS verification */}
                 <div className="rounded-lg border border-green-200 bg-green-50 p-4">
                   <div className="text-xs text-green-600 font-medium">
                     Verified
@@ -201,7 +219,6 @@ export default function DashboardOverviewPage() {
                   </div>
                 </div>
 
-                {/* IC Unverified count — bots that failed DNS but were not necessarily blocked */}
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
                   <div className="text-xs text-amber-600 font-medium">
                     Unverified
@@ -215,7 +232,6 @@ export default function DashboardOverviewPage() {
                 </div>
               </div>
 
-              {/* Top IC Failed Agents — bots that failed IC most often */}
               {metrics.identityCheck.topFailedAgents.length > 0 && (
                 <div className="rounded-lg border border-gray-200 bg-white p-4">
                   <h3 className="text-xs font-semibold text-gray-700 mb-2">
@@ -256,83 +272,126 @@ export default function DashboardOverviewPage() {
               </a>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-              {/* Top Catalogs */}
-              <div className="rounded-lg border border-gray-200 bg-white p-6">
-                <h2 className="text-sm font-semibold text-gray-900 mb-3">
-                  Most Valued Catalogs
-                </h2>
-                {metrics.topCatalogs.length === 0 ? (
-                  <p className="text-sm text-gray-400">No data</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {metrics.topCatalogs.map((c) => (
-                      <li
-                        key={c.id}
-                        className="flex items-center justify-between text-sm"
-                      >
-                        <span className="text-gray-700 truncate">
-                          {c.name}
-                        </span>
-                        <span className="text-gray-500 ml-2 whitespace-nowrap">
-                          {c.eventCount}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+            <>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 mb-8">
+                {/* Top Catalogs */}
+                <div className="rounded-lg border border-gray-200 bg-white p-6">
+                  <h2 className="text-sm font-semibold text-gray-900 mb-3">
+                    Most Valued Catalogs
+                  </h2>
+                  {metrics.topCatalogs.length === 0 ? (
+                    <p className="text-sm text-gray-400">No data</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {metrics.topCatalogs.map((c) => (
+                        <li
+                          key={c.id}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <span className="text-gray-700 truncate">
+                            {c.name}
+                          </span>
+                          <span className="text-gray-500 ml-2 whitespace-nowrap">
+                            {c.eventCount}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Top Contents (merged: eventCount + revenue) */}
+                <div className="rounded-lg border border-gray-200 bg-white p-6">
+                  <h2 className="text-sm font-semibold text-gray-900 mb-3">
+                    Most Valued Contents
+                  </h2>
+                  {mergedTopContents.length === 0 ? (
+                    <p className="text-sm text-gray-400">No data</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {mergedTopContents.map((c, i) => (
+                        <li
+                          key={i}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <span className="text-gray-700 truncate max-w-[180px]">
+                            {c.sourceUrl}
+                          </span>
+                          <span className="text-gray-500 ml-2 whitespace-nowrap">
+                            {c.eventCount}
+                            {c.totalEur !== null && (
+                              <span className="text-green-600 ml-1.5">
+                                {c.totalEur.toFixed(2)}€
+                              </span>
+                            )}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                {/* Top Agents */}
+                <div className="rounded-lg border border-gray-200 bg-white p-6">
+                  <h2 className="text-sm font-semibold text-gray-900 mb-3">
+                    Most Active Agents
+                  </h2>
+                  {metrics.topAgents.length === 0 ? (
+                    <p className="text-sm text-gray-400">No data</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {metrics.topAgents.map((a, i) => (
+                        <li
+                          key={i}
+                          className="flex items-center justify-between text-sm"
+                        >
+                          <span className="text-gray-700">{a.name}</span>
+                          <span className="text-gray-500 ml-2">
+                            {a.eventCount}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
               </div>
 
-              {/* Top Contents */}
-              <div className="rounded-lg border border-gray-200 bg-white p-6">
-                <h2 className="text-sm font-semibold text-gray-900 mb-3">
-                  Most Valued Contents
-                </h2>
-                {metrics.topContents.length === 0 ? (
-                  <p className="text-sm text-gray-400">No data</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {metrics.topContents.map((c, i) => (
-                      <li
-                        key={i}
-                        className="flex items-center justify-between text-sm"
-                      >
-                        <span className="text-gray-700 truncate max-w-[200px]">
-                          {c.sourceUrl}
-                        </span>
-                        <span className="text-gray-500 ml-2 whitespace-nowrap">
-                          {c.eventCount}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {/* Top Agents */}
-              <div className="rounded-lg border border-gray-200 bg-white p-6">
-                <h2 className="text-sm font-semibold text-gray-900 mb-3">
-                  Most Active Agents
-                </h2>
-                {metrics.topAgents.length === 0 ? (
-                  <p className="text-sm text-gray-400">No data</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {metrics.topAgents.map((a, i) => (
-                      <li
-                        key={i}
-                        className="flex items-center justify-between text-sm"
-                      >
-                        <span className="text-gray-700">{a.name}</span>
-                        <span className="text-gray-500 ml-2">
-                          {a.eventCount}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
+              {/* Top Consumers */}
+              {revenue?.top_consumers && revenue.top_consumers.length > 0 && (
+                <div className="rounded-lg border border-gray-200 bg-white p-6">
+                  <h2 className="text-sm font-semibold text-gray-900 mb-4">
+                    Top Consumers
+                  </h2>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-100 text-left text-gray-500">
+                          <th className="pb-2 font-medium">Workspace ID</th>
+                          <th className="pb-2 font-medium text-right">
+                            Total EUR
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {revenue.top_consumers.map((item, i) => (
+                          <tr
+                            key={i}
+                            className="border-b border-gray-50 last:border-0 hover:bg-gray-50 transition-colors"
+                          >
+                            <td className="py-2 font-mono text-xs text-gray-600">
+                              {item.workspace_id}
+                            </td>
+                            <td className="py-2 text-right font-medium text-gray-900">
+                              {item.total_eur.toFixed(2)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </>
       )}

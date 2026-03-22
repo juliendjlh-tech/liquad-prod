@@ -7,7 +7,6 @@ const routeLabels: Record<string, string> = {
   contents: "Contents",
   "user-agents": "AI Bots",
   catalogs: "Catalogs",
-  revenue: "Revenue",
   integration: "Integration",
   settings: "Settings",
   new: "Create",
