@@ -22,9 +22,9 @@ const licenseLinks = [
 
 const accessLinks = [
   { label: "Overview", href: "/dashboard/access" },
-  { label: "Integration", href: "/dashboard/access/integration" },
-  { label: "Marketplace", href: "/dashboard/access/marketplace" },
-  { label: "Settings", href: "/dashboard/access/settings" },
+  //{ label: "Integration", href: "/dashboard/access/integration" },
+  //{ label: "Marketplace", href: "/dashboard/access/marketplace" },
+  //{ label: "Settings", href: "/dashboard/access/settings" },
 ];
 
 export default function Sidebar({ workspace, userEmail, mode }: SidebarProps) {
