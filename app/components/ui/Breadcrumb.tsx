@@ -4,12 +4,13 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
 const routeLabels: Record<string, string> = {
-  contents: "Contents",
+  domains: "Domains",
   "user-agents": "AI Bots",
   catalogs: "Catalogs",
   integration: "Integration",
   settings: "Settings",
   new: "Create",
+  create: "Create",
   edit: "Edit",
   access: "Access",
   marketplace: "Marketplace",
@@ -39,17 +40,10 @@ export default function Breadcrumb() {
     crumbs.push({ label, href });
   }
 
-  // Contents page: domain drill-down via ?domain= query param
-  const domain = section === "contents" ? searchParams.get("domain") : null;
-  if (domain) {
-    crumbs.push({
-      label: domain,
-      href: `/dashboard/contents?domain=${encodeURIComponent(domain)}`,
-    });
-  }
-
-  // No breadcrumb if we're on a top-level section with no depth
-  if (crumbs.length === 0) return null;
+  // Show breadcrumb if we have crumbs OR if there are sub-segments (e.g. UUID detail pages)
+  // This ensures /domains/[uuid] still shows the "Domains" section link for navigation
+  const hasDepth = segments.length > 2;
+  if (crumbs.length === 0 && !hasDepth) return null;
 
   const sectionLabel = routeLabels[section] ?? section;
   const sectionHref = `/dashboard/${section}`;

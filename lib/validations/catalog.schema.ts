@@ -15,7 +15,7 @@ const pathOperatorEnum = z.enum([
 
 export type PathOperator = z.infer<typeof pathOperatorEnum>;
 
-const pathRuleSchema = z.object({
+export const pathRuleSchema = z.object({
   operator: pathOperatorEnum,
   value: z.string().trim().min(1, "value must not be empty").max(500),
 });
@@ -43,7 +43,7 @@ export type FilterRules = z.infer<typeof filterRulesSchema>;
 /**
  * Evaluate a single path rule against a pathname.
  */
-function evaluatePathRule(pathname: string, rule: PathRule): boolean {
+export function evaluatePathRule(pathname: string, rule: PathRule): boolean {
   switch (rule.operator) {
     case "contains":
       return pathname.includes(rule.value);

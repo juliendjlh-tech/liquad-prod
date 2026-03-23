@@ -5,6 +5,7 @@ import { createContext, useContext } from "react";
 interface WorkspaceContextValue {
   id: string;
   name: string;
+  max_pages: number;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);

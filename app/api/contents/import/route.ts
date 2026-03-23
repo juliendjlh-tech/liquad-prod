@@ -8,29 +8,20 @@ import type { Json } from "@/lib/db/types";
  * POST /api/contents/import
  *
  * Import contents from a sitemap.xml URL into a workspace (async).
+ * Supports optional path filters and max page limits.
  *
  * REQUEST BODY (JSON):
  * ```json
- * { "url": "https://example.com/sitemap.xml" }
+ * {
+ *   "url": "https://example.com/sitemap.xml",
+ *   "path_rules": [{ "operator": "starts_with", "value": "/blog" }],
+ *   "path_logic": "AND",
+ *   "max_pages": 500
+ * }
  * ```
  *
  * HEADERS:
  * - x-workspace-id: UUID of the workspace to import into
- *
- * FLOW:
- * 1. Validate request body with importSitemapSchema (Zod).
- * 2. Extract workspace_id from x-workspace-id header.
- * 3. Verify user is a member of the workspace.
- * 4. Create an import_jobs record with status "pending".
- * 5. Return { jobId, status: "pending" } immediately (202 Accepted).
- * 6. Process the import in background via after().
- *
- * RESPONSES:
- * - 202: `{ jobId, status: "pending" }` — import started
- * - 400: Validation error or missing workspace_id header
- * - 401: Unauthorized
- * - 403: User not a member of the workspace
- * - 500: Internal server error (failed to create job)
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
@@ -79,6 +70,19 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Step 3b: Fetch workspace max_pages to cap the import
+    const { path_rules, path_logic, max_pages: requestedMax } = validation.data;
+    let effectiveMax: number | undefined;
+    if (requestedMax !== undefined) {
+      const { data: workspace } = await supabase
+        .from("workspaces")
+        .select("max_pages")
+        .eq("id", workspaceId)
+        .single();
+      const wsMax = workspace?.max_pages ?? 2000;
+      effectiveMax = Math.min(requestedMax, wsMax);
+    }
+
     // Step 4: Create import job record
     const url = validation.data.url;
     const { data: job, error: jobError } = await supabase
@@ -87,6 +91,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         workspace_id: workspaceId,
         sitemap_url: url,
         status: "pending",
+        path_rules: path_rules as unknown as Json ?? null,
+        max_pages: effectiveMax ?? null,
       })
       .select("id")
       .single();
@@ -111,8 +117,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           .update({ status: "processing", updated_at: new Date().toISOString() })
           .eq("id", job.id);
 
-        // Run the actual import
-        const result = await importFromSitemap(workspaceId, url);
+        // Run the actual import with filters
+        const result = await importFromSitemap(workspaceId, url, {
+          pathRules: path_rules,
+          pathLogic: path_logic as "AND" | "OR" | undefined,
+          maxPages: effectiveMax,
+        });
 
         // Mark job as completed with result
         await bgSupabase

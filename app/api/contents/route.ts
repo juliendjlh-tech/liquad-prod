@@ -63,8 +63,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const limit = parseInt(searchParams.get("limit") ?? "50", 10);
     const search = searchParams.get("search") ?? undefined;
     const domain = searchParams.get("domain") ?? undefined;
+    const domainId = searchParams.get("domain_id") ?? undefined;
 
-    const result = await getContents({ workspaceId, page, limit, search, domain });
+    const result = await getContents({ workspaceId, page, limit, search, domain, domainId });
 
     return NextResponse.json(result, { status: 200 });
   } catch {

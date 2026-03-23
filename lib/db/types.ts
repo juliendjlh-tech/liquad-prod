@@ -148,6 +148,8 @@ export type Database = {
           status: string
           result: Json | null
           error_message: string | null
+          path_rules: Json | null
+          max_pages: number | null
           created_at: string | null
           updated_at: string | null
         }
@@ -158,6 +160,8 @@ export type Database = {
           status?: string
           result?: Json | null
           error_message?: string | null
+          path_rules?: Json | null
+          max_pages?: number | null
           created_at?: string | null
           updated_at?: string | null
         }
@@ -168,6 +172,8 @@ export type Database = {
           status?: string
           result?: Json | null
           error_message?: string | null
+          path_rules?: Json | null
+          max_pages?: number | null
           created_at?: string | null
           updated_at?: string | null
         }
@@ -485,6 +491,7 @@ export type Database = {
           created_at: string | null
           id: string
           jwt_signing_secret: string
+          max_pages: number
           name: string
           updated_at: string | null
         }
@@ -495,6 +502,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           jwt_signing_secret?: string
+          max_pages?: number
           name: string
           updated_at?: string | null
         }
@@ -505,6 +513,7 @@ export type Database = {
           created_at?: string | null
           id?: string
           jwt_signing_secret?: string
+          max_pages?: number
           name?: string
           updated_at?: string | null
         }

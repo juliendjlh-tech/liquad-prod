@@ -13,7 +13,7 @@ interface SidebarProps {
 
 const licenseLinks = [
   { label: "Overview", href: "/dashboard" },
-  { label: "Contents", href: "/dashboard/contents" },
+  { label: "Domains", href: "/dashboard/domains" },
   { label: "AI Bots", href: "/dashboard/user-agents" },
   { label: "Catalogs", href: "/dashboard/catalogs" },
   { label: "Integration", href: "/dashboard/integration" },

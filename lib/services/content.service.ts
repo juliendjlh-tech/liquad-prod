@@ -1,5 +1,7 @@
 import { XMLParser } from "fast-xml-parser";
 import { createServerClient } from "@/lib/db/supabase-server";
+import type { Json } from "@/lib/db/types";
+import { evaluatePathRule, type PathRule, type FilterRules } from "@/lib/validations/catalog.schema";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -39,6 +41,7 @@ export interface GetContentsParams {
   limit?: number;
   search?: string;
   domain?: string;
+  domainId?: string;
 }
 
 export interface DomainWithCount {
@@ -200,9 +203,16 @@ export async function ensureDomainExists(
  * Idempotent: uses UPSERT on UNIQUE(workspace_id, source_url) —
  * new URLs are inserted, existing URLs get their lastmod updated.
  */
+export interface ImportOptions {
+  pathRules?: PathRule[];
+  pathLogic?: "AND" | "OR";
+  maxPages?: number;
+}
+
 export async function importFromSitemap(
   workspaceId: string,
-  sitemapUrl: string
+  sitemapUrl: string,
+  options?: ImportOptions
 ): Promise<ImportResult> {
   const supabase = await createServerClient();
 
@@ -213,8 +223,35 @@ export async function importFromSitemap(
     return { imported: 0, upserted: 0 };
   }
 
+  // Step 1b: Apply path rule filters if provided
+  let filtered = entries;
+  if (options?.pathRules && options.pathRules.length > 0) {
+    const logic = options.pathLogic ?? "AND";
+    filtered = entries.filter((entry) => {
+      const pathname = new URL(entry.loc).pathname;
+      return logic === "AND"
+        ? options.pathRules!.every((rule) => evaluatePathRule(pathname, rule))
+        : options.pathRules!.some((rule) => evaluatePathRule(pathname, rule));
+    });
+  }
+
+  // Step 1c: Apply max pages cap (workspace budget)
+  if (options?.maxPages !== undefined) {
+    const { count } = await supabase
+      .from("contents")
+      .select("id", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId);
+    const currentCount = count ?? 0;
+    const remaining = Math.max(0, options.maxPages - currentCount);
+    filtered = filtered.slice(0, remaining);
+  }
+
+  if (filtered.length === 0) {
+    return { imported: 0, upserted: 0 };
+  }
+
   // Step 2-3: Extract unique domains, ensure they exist, and build hostname→UUID map
-  const uniqueDomains = [...new Set(entries.map((e) => extractDomain(e.loc)))];
+  const uniqueDomains = [...new Set(filtered.map((e) => extractDomain(e.loc)))];
   const domainIdPairs = await Promise.all(
     uniqueDomains.map(async (domain) => {
       const id = await ensureDomainExists(workspaceId, domain);
@@ -227,7 +264,7 @@ export async function importFromSitemap(
   // Uses UNIQUE(workspace_id, source_url) constraint — inserts new records,
   // updates lastmod on existing ones.
   const BATCH_SIZE = 1000;
-  const allRecords = entries.map((entry) => ({
+  const allRecords = filtered.map((entry) => ({
     workspace_id: workspaceId,
     source_url: entry.loc,
     domain_id: domainMap.get(extractDomain(entry.loc))!,
@@ -248,7 +285,7 @@ export async function importFromSitemap(
   }
 
   return {
-    imported: entries.length,
+    imported: filtered.length,
     upserted,
   };
 }
@@ -323,9 +360,9 @@ export async function getContents(
   const limit = Math.min(100, Math.max(1, params.limit ?? 50));
   const offset = (page - 1) * limit;
 
-  // Resolve domain hostname → domain_id if filter provided
-  let domainId: string | undefined;
-  if (params.domain) {
+  // Resolve domain filter — accept either domain_id directly or hostname
+  let domainId: string | undefined = params.domainId;
+  if (!domainId && params.domain) {
     const { data: domainRecord } = await supabase
       .from("domains")
       .select("id")
@@ -423,6 +460,132 @@ export async function deleteContent(
 
   if (error) {
     throw new Error(`Failed to delete content: ${error.message}`);
+  }
+
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Domain Deletion (with catalog cleanup)
+// ---------------------------------------------------------------------------
+
+export interface DomainDeleteImpact {
+  content_count: number;
+  affected_catalogs: Array<{ id: string; name: string }>;
+}
+
+/**
+ * Compute the impact of deleting a domain before actually deleting it.
+ * Returns content count and catalogs that reference this domain_id in their filter_rules.
+ */
+export async function getDomainDeleteImpact(
+  domainId: string,
+  workspaceId: string
+): Promise<DomainDeleteImpact | null> {
+  const supabase = await createServerClient();
+
+  // Verify domain exists and belongs to workspace
+  const { data: domain } = await supabase
+    .from("domains")
+    .select("id")
+    .eq("id", domainId)
+    .eq("workspace_id", workspaceId)
+    .single();
+
+  if (!domain) return null;
+
+  // Count contents that will be cascade-deleted
+  const { count } = await supabase
+    .from("contents")
+    .select("id", { count: "exact", head: true })
+    .eq("domain_id", domainId);
+
+  // Find catalogs whose filter_rules reference this domain_id
+  // filter_rules is JSONB: { domain_rules: [{ domain_id: "..." }, ...] }
+  const { data: catalogs } = await supabase
+    .from("catalogs")
+    .select("id, name, filter_rules")
+    .eq("workspace_id", workspaceId);
+
+  const affected: Array<{ id: string; name: string }> = [];
+  for (const catalog of catalogs ?? []) {
+    const rules = catalog.filter_rules as unknown as FilterRules | null;
+    if (rules?.domain_rules?.some((r) => r.domain_id === domainId)) {
+      affected.push({ id: catalog.id, name: catalog.name });
+    }
+  }
+
+  return {
+    content_count: count ?? 0,
+    affected_catalogs: affected,
+  };
+}
+
+/**
+ * Delete a domain and clean up catalog filter_rules that reference it.
+ *
+ * 1. Remove the domain_id from filter_rules of all catalogs in the workspace.
+ *    If a catalog ends up with zero domain_rules, it is deactivated.
+ * 2. Delete the domain (contents cascade-deleted via FK).
+ */
+export async function deleteDomain(
+  domainId: string,
+  workspaceId: string
+): Promise<boolean> {
+  const supabase = await createServerClient();
+
+  // Verify domain exists and belongs to workspace
+  const { data: domain } = await supabase
+    .from("domains")
+    .select("id")
+    .eq("id", domainId)
+    .eq("workspace_id", workspaceId)
+    .single();
+
+  if (!domain) return false;
+
+  // Clean up catalogs referencing this domain_id
+  const { data: catalogs } = await supabase
+    .from("catalogs")
+    .select("id, filter_rules, status")
+    .eq("workspace_id", workspaceId);
+
+  for (const catalog of catalogs ?? []) {
+    const rules = catalog.filter_rules as unknown as FilterRules | null;
+    if (!rules?.domain_rules?.some((r) => r.domain_id === domainId)) continue;
+
+    const cleanedRules = rules.domain_rules.filter(
+      (r) => r.domain_id !== domainId
+    );
+
+    if (cleanedRules.length === 0) {
+      // No domain rules left — deactivate catalog
+      await supabase
+        .from("catalogs")
+        .update({
+          filter_rules: { domain_rules: [] } as unknown as Json,
+          status: "inactive",
+        })
+        .eq("id", catalog.id);
+    } else {
+      await supabase
+        .from("catalogs")
+        .update({
+          filter_rules: { domain_rules: cleanedRules } as unknown as Json,
+        })
+        .eq("id", catalog.id);
+    }
+  }
+
+  // Delete domain (contents cascade via FK)
+  const { error } = await supabase
+    .from("domains")
+    .delete()
+    .eq("id", domainId)
+    .eq("workspace_id", workspaceId);
+
+  if (error) {
+    throw new Error(`Failed to delete domain: ${error.message}`);
   }
 
   return true;
