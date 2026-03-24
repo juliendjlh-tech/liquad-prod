@@ -147,7 +147,7 @@ export default function CatalogsPage() {
                 </div>
                 <div className="mt-1 flex gap-4 text-xs text-gray-500">
                   <span>{catalog.price_eur.toFixed(2)} EUR</span>
-                  <span>{catalog.agent_count} bot(s)</span>
+                  <span>{catalog.agent_count} active bot(s)</span>
                   <span>{catalog.content_count} content(s)</span>
                 </div>
               </div>

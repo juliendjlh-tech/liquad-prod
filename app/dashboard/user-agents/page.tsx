@@ -179,13 +179,10 @@ export default function UserAgentsPage() {
         body: JSON.stringify({ is_active: !agent.is_active }),
       });
       if (res.ok) {
-        const json = await res.json();
-        if (wasActive && json.catalogCount > 0) {
-          showToast(
-            `Bot deactivated (removed from ${json.catalogCount} catalog(s))`,
-            "success"
-          );
-        }
+        showToast(
+          wasActive ? "Bot deactivated" : "Bot activated",
+          "success"
+        );
         void fetchAgents();
       }
     } finally {

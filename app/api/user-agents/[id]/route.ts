@@ -5,7 +5,6 @@ import {
   getUserAgentById,
   updateUserAgent,
   deleteUserAgent,
-  removeCatalogEntriesForAgent,
 } from "@/lib/services/user-agent.service";
 
 /**
@@ -180,13 +179,7 @@ export async function PATCH(
       );
     }
 
-    // If toggling off, remove all catalog_agents entries for this agent
-    let catalogCount = 0;
-    if (validation.data.is_active === false) {
-      catalogCount = await removeCatalogEntriesForAgent(userAgentId);
-    }
-
-    return NextResponse.json({ ...updated, catalogCount }, { status: 200 });
+    return NextResponse.json(updated, { status: 200 });
   } catch {
     return NextResponse.json(
       { error: "Internal server error" },

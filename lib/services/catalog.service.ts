@@ -245,10 +245,21 @@ export async function getCatalogs(
 
   const results: CatalogListItem[] = [];
   for (const catalog of catalogs ?? []) {
-    const { count } = await supabase
+    // Count only ACTIVE bots linked to this catalog
+    const { data: linkedAgentIds } = await supabase
       .from("catalog_agents")
-      .select("user_agent_id", { count: "exact", head: true })
+      .select("user_agent_id")
       .eq("catalog_id", catalog.id);
+
+    let count = 0;
+    if (linkedAgentIds && linkedAgentIds.length > 0) {
+      const { count: activeCount } = await supabase
+        .from("user_agents")
+        .select("id", { count: "exact", head: true })
+        .in("id", linkedAgentIds.map((l) => l.user_agent_id))
+        .eq("is_active", true);
+      count = activeCount ?? 0;
+    }
 
     const filterRules = catalog.filter_rules as unknown as FilterRules;
     const contentCount = countMatchedContents(contents, filterRules, domainMap);

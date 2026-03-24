@@ -119,7 +119,7 @@ export default function EditCatalogPage({
       ]);
       if (agentsRes.ok) {
         const data = (await agentsRes.json()) as UserAgent[];
-        setAgents(data.filter((a) => a.is_active));
+        setAgents(data);
       }
       if (domainsRes.ok) {
         setDomains(await domainsRes.json());
@@ -281,18 +281,31 @@ export default function EditCatalogPage({
             Authorized Bots
           </label>
           <div className="space-y-2">
-            {agents.map((agent) => (
+            {agents
+              .filter(
+                (agent) =>
+                  agent.is_active || selectedAgents.includes(agent.id)
+              )
+              .map((agent) => (
               <label
                 key={agent.id}
-                className="flex items-center gap-2 text-sm"
+                className={`flex items-center gap-2 text-sm ${
+                  !agent.is_active ? "opacity-60" : ""
+                }`}
               >
                 <input
                   type="checkbox"
                   checked={selectedAgents.includes(agent.id)}
                   onChange={() => toggleAgent(agent.id)}
-                  className="rounded border-gray-300"
+                  disabled={!agent.is_active}
+                  className="rounded border-gray-300 disabled:cursor-not-allowed"
                 />
                 <span className="text-gray-700">{agent.name}</span>
+                {!agent.is_active && (
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
+                    Inactive
+                  </span>
+                )}
               </label>
             ))}
           </div>
