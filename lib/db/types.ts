@@ -299,6 +299,7 @@ export type Database = {
           domain: string
           id: string
           last_event_at: string | null
+          sitemap_url: string | null
           status: string
           verified_at: string | null
           workspace_id: string
@@ -308,6 +309,7 @@ export type Database = {
           domain: string
           id?: string
           last_event_at?: string | null
+          sitemap_url?: string | null
           status?: string
           verified_at?: string | null
           workspace_id: string
@@ -317,6 +319,7 @@ export type Database = {
           domain?: string
           id?: string
           last_event_at?: string | null
+          sitemap_url?: string | null
           status?: string
           verified_at?: string | null
           workspace_id?: string

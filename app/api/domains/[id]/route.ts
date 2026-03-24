@@ -53,12 +53,28 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const supabase = await createServerClient();
+    const { data: domainRow } = await supabase
+      .from("domains")
+      .select("domain, sitemap_url")
+      .eq("id", domainId)
+      .eq("workspace_id", workspaceId)
+      .maybeSingle();
+
+    if (!domainRow) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
+
     const impact = await getDomainDeleteImpact(domainId, workspaceId);
     if (!impact) {
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    return NextResponse.json(impact);
+    return NextResponse.json({
+      domain: domainRow.domain,
+      sitemap_url: domainRow.sitemap_url,
+      ...impact,
+    });
   } catch {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }

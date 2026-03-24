@@ -37,6 +37,19 @@ export default function DomainDetailPage() {
   const [contentsLoading, setContentsLoading] = useState(true);
   const [domainName, setDomainName] = useState<string | null>(null);
 
+  // Fetch domain name upfront so it displays even when there are no contents
+  useEffect(() => {
+    void (async () => {
+      const res = await fetch(`/api/domains/${domainId}`, {
+        headers: { "x-workspace-id": workspaceId },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDomainName(data.domain);
+      }
+    })();
+  }, [domainId, workspaceId]);
+
   // Confirm dialog for content deletion
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
@@ -70,9 +83,6 @@ export default function DomainDetailPage() {
       if (res.ok) {
         const data = await res.json();
         setContents(data);
-        if (data.items.length > 0 && !domainName) {
-          setDomainName(data.items[0].domain);
-        }
       }
     } finally {
       setContentsLoading(false);
@@ -197,6 +207,12 @@ export default function DomainDetailPage() {
               {contents.total} content(s)
             </span>
           )}
+          <Button
+            size="sm"
+            onClick={() => router.push(`/dashboard/domains/${domainId}/import`)}
+          >
+            Import contents
+          </Button>
           <Button
             variant="secondary"
             size="sm"

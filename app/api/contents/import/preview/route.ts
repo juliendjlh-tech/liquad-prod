@@ -6,11 +6,13 @@ import { evaluatePathRule, pathRuleSchema } from "@/lib/validations/catalog.sche
 
 const previewSchema = z.object({
   url: z
+    .string()
     .url("Invalid URL format")
     .refine(
       (url) => url.startsWith("http://") || url.startsWith("https://"),
       "URL must use http or https protocol"
     ),
+  domain_id: z.string().uuid().optional(),
   path_rules: z.array(pathRuleSchema).optional(),
   path_logic: z.enum(["AND", "OR"]).default("AND").optional(),
 });
@@ -62,8 +64,28 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
+    const { url, domain_id, path_rules, path_logic } = validation.data;
+
+    // Check if domain already exists in this workspace (skip if domain_id is provided,
+    // meaning we're importing for an existing domain)
+    if (!domain_id) {
+      const hostname = new URL(url).hostname;
+      const { data: existingDomain } = await supabase
+        .from("domains")
+        .select("id")
+        .eq("workspace_id", workspaceId)
+        .eq("domain", hostname)
+        .maybeSingle();
+
+      if (existingDomain) {
+        return NextResponse.json(
+          { error: "DOMAIN_EXISTS", domain: hostname },
+          { status: 409 }
+        );
+      }
+    }
+
     // Fetch and parse sitemap
-    const { url, path_rules, path_logic } = validation.data;
     const entries = await fetchAndParseSitemap(url);
 
     // Apply filters
