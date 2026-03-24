@@ -24,6 +24,7 @@ export const AI_BOT_PRESETS: Array<{
   ua_pattern: string;
   operator: string;
   dns_patterns: string[];
+  description?: string;
 }> = [
   // --- OpenAI bots ---
   {
@@ -31,12 +32,32 @@ export const AI_BOT_PRESETS: Array<{
     ua_pattern: "GPTBot",
     operator: "OpenAI",
     dns_patterns: ["*.openai.com"],
+    description:
+      "Used by OpenAI to crawl web content that may be used to improve future AI models.",
+  },
+  {
+    name: "OAI-SearchBot",
+    ua_pattern: "OAI-SearchBot",
+    operator: "OpenAI",
+    dns_patterns: ["*.openai.com"],
+    description:
+      "Used by OpenAI search features to discover and index publicly available web content.",
   },
   {
     name: "ChatGPT-User",
     ua_pattern: "ChatGPT-User",
     operator: "OpenAI",
     dns_patterns: ["*.openai.com"],
+    description:
+      "Used when ChatGPT visits a URL on behalf of a user action, such as browsing or retrieval.",
+  },
+  {
+    name: "OAI-SearchAgent",
+    ua_pattern: "OAI-SearchAgent",
+    operator: "OpenAI",
+    dns_patterns: ["*.openai.com"],
+    description:
+      "Used by OpenAI agents to fetch and process web pages in response to user requests.",
   },
 
   // --- Anthropic ---
@@ -45,6 +66,100 @@ export const AI_BOT_PRESETS: Array<{
     ua_pattern: "ClaudeBot",
     operator: "Anthropic",
     dns_patterns: ["*.anthropic.com"],
+    description:
+      "Used by Anthropic to crawl web content for Claude-related indexing and model quality workflows.",
+  },
+  {
+    name: "Claude-SearchBot",
+    ua_pattern: "Claude-SearchBot",
+    operator: "Anthropic",
+    dns_patterns: ["*.anthropic.com"],
+    description:
+      "Used for Claude web search discovery and retrieval of relevant public pages.",
+  },
+  {
+    name: "Claude-User",
+    ua_pattern: "Claude-User",
+    operator: "Anthropic",
+    dns_patterns: ["*.anthropic.com"],
+    description:
+      "Used when Claude accesses a URL as part of an explicit user-initiated action.",
+  },
+  {
+    name: "anthropic-ai",
+    ua_pattern: "anthropic-ai",
+    operator: "Anthropic",
+    dns_patterns: ["*.anthropic.com"],
+    description:
+      "General Anthropic AI crawler identity used for service-level automated retrieval tasks.",
+  },
+
+  // --- Google ---
+  {
+    name: "Googlebot",
+    ua_pattern: "Googlebot",
+    operator: "Google",
+    dns_patterns: ["*.googlebot.com", "*.google.com"],
+    description:
+      "Google's main crawler used for Search indexing and serving search results.",
+  },
+  {
+    name: "Google-Extended",
+    ua_pattern: "Google-Extended",
+    operator: "Google",
+    dns_patterns: ["*.googlebot.com", "*.google.com"],
+    description:
+      "Google product token publishers can use to manage whether site content is used for Gemini and Vertex AI generative features.",
+  },
+  {
+    name: "GoogleOther",
+    ua_pattern: "GoogleOther",
+    operator: "Google",
+    dns_patterns: ["*.googlebot.com", "*.google.com"],
+    description:
+      "General-purpose Google crawler used for product improvements, research, and quality checks outside core Search crawling.",
+  },
+  {
+    name: "Gemini-Deep-Research",
+    ua_pattern: "Gemini-Deep-Research",
+    operator: "Google",
+    dns_patterns: ["*.googlebot.com", "*.google.com"],
+    description:
+      "Used by Gemini deep research features to retrieve and analyze web content for user queries.",
+  },
+  {
+    name: "Google-CloudVertexBot",
+    ua_pattern: "Google-CloudVertexBot",
+    operator: "Google",
+    dns_patterns: ["*.googlebot.com", "*.google.com"],
+    description:
+      "Used by Google Cloud Vertex AI services to access web resources for configured enterprise AI workflows.",
+  },
+
+  // --- Microsoft ---
+  {
+    name: "bingbot",
+    ua_pattern: "bingbot",
+    operator: "Microsoft",
+    dns_patterns: ["*.search.msn.com"],
+    description:
+      "Microsoft Bing's primary crawler used to index web pages for Bing Search.",
+  },
+  {
+    name: "BingPreview",
+    ua_pattern: "BingPreview",
+    operator: "Microsoft",
+    dns_patterns: ["*.search.msn.com"],
+    description:
+      "Used by Bing to fetch page previews, snapshots, and rendering data for search experiences.",
+  },
+  {
+    name: "AdIdxBot",
+    ua_pattern: "AdIdxBot",
+    operator: "Microsoft",
+    dns_patterns: ["*.search.msn.com"],
+    description:
+      "Microsoft advertising crawler used to review landing pages and ad quality signals.",
   },
 
   // --- Perplexity ---
@@ -53,44 +168,24 @@ export const AI_BOT_PRESETS: Array<{
     ua_pattern: "PerplexityBot",
     operator: "Perplexity",
     dns_patterns: ["*.perplexity.ai"],
-  },
-
-  // --- Google ---
-  {
-    name: "Google-Extended",
-    ua_pattern: "Google-Extended",
-    operator: "Google",
-    dns_patterns: ["*.googlebot.com", "*.google.com"],
+    description:
+      "Perplexity crawler used to discover and index public web content for answer generation.",
   },
   {
-    name: "Googlebot",
-    ua_pattern: "Googlebot",
-    operator: "Google",
-    dns_patterns: ["*.googlebot.com", "*.google.com"],
+    name: "Perplexity-User",
+    ua_pattern: "Perplexity-User",
+    operator: "Perplexity",
+    dns_patterns: ["*.perplexity.ai"],
+    description:
+      "Used when Perplexity accesses a page in direct response to a user request.",
   },
-
-  // --- Microsoft ---
   {
-    name: "BingBot",
-    ua_pattern: "bingbot",
-    operator: "Microsoft",
-    dns_patterns: ["*.search.msn.com"],
-  },
-
-  // --- ByteDance ---
-  {
-    name: "Bytespider",
-    ua_pattern: "Bytespider",
-    operator: "ByteDance",
-    dns_patterns: ["*.bytedance.com"],
-  },
-
-  // --- Common Crawl ---
-  {
-    name: "CCBot",
-    ua_pattern: "CCBot",
-    operator: "Common Crawl",
-    dns_patterns: ["*.commoncrawl.org"],
+    name: "Perplexity-Search",
+    ua_pattern: "Perplexity-Search",
+    operator: "Perplexity",
+    dns_patterns: ["*.perplexity.ai"],
+    description:
+      "Used by Perplexity web search systems to retrieve sources for real-time answers.",
   },
 
   // --- Amazon ---
@@ -99,6 +194,8 @@ export const AI_BOT_PRESETS: Array<{
     ua_pattern: "Amazonbot",
     operator: "Amazon",
     dns_patterns: ["*.amazonaws.com"],
+    description:
+      "Amazon crawler used to process web content for Amazon search and AI-powered services.",
   },
 
   // --- Apple ---
@@ -107,22 +204,16 @@ export const AI_BOT_PRESETS: Array<{
     ua_pattern: "Applebot",
     operator: "Apple",
     dns_patterns: ["*.applebot.apple.com"],
+    description:
+      "Apple's web crawler used by Siri and Spotlight suggestions and search-related features.",
   },
-
-  // --- Yandex ---
   {
-    name: "YandexBot",
-    ua_pattern: "YandexBot",
-    operator: "Yandex",
-    dns_patterns: ["*.yandex.ru", "*.yandex.net", "*.yandex.com"],
-  },
-
-  // --- DuckDuckGo ---
-  {
-    name: "DuckDuckBot",
-    ua_pattern: "DuckDuckBot",
-    operator: "DuckDuckGo",
-    dns_patterns: ["*.duckduckgo.com"],
+    name: "Applebot-Extended",
+    ua_pattern: "Applebot-Extended",
+    operator: "Apple",
+    dns_patterns: ["*.applebot.apple.com"],
+    description:
+      "Extended Apple crawler token for additional Apple Intelligence and generative feature usage controls.",
   },
 
   // --- Meta ---
@@ -131,6 +222,26 @@ export const AI_BOT_PRESETS: Array<{
     ua_pattern: "meta-externalagent",
     operator: "Meta",
     dns_patterns: ["*.facebook.com", "*.meta.com"],
+    description:
+      "Meta external retrieval agent used to access public web content for AI and assistant features.",
+  },
+
+  // --- Mistral ---
+  {
+    name: "MistralAI-User",
+    ua_pattern: "MistralAI-User",
+    operator: "Mistral AI",
+    dns_patterns: ["*.mistral.ai"],
+    description:
+      "Used when Mistral AI services access URLs on behalf of explicit user requests.",
+  },
+  {
+    name: "MistralAI-SearchBot",
+    ua_pattern: "MistralAI-SearchBot",
+    operator: "Mistral AI",
+    dns_patterns: ["*.mistral.ai"],
+    description:
+      "Mistral AI crawler used for web search, retrieval, and source discovery.",
   },
 ];
 
@@ -328,6 +439,37 @@ export async function updateUserAgent(
   }
 
   return updated as UserAgentRow;
+}
+
+/**
+ * Remove all catalog_agents entries for a given user-agent without deleting the agent.
+ * Used when toggling a bot off — the agent stays in user_agents but its catalog links are severed.
+ *
+ * @returns number of catalog entries removed
+ */
+export async function removeCatalogEntriesForAgent(
+  userAgentId: string
+): Promise<number> {
+  const supabase = await createServerClient();
+
+  const { count } = await supabase
+    .from("catalog_agents")
+    .select("catalog_id", { count: "exact", head: true })
+    .eq("user_agent_id", userAgentId);
+
+  const catalogCount = count ?? 0;
+  if (catalogCount === 0) return 0;
+
+  const { error } = await supabase
+    .from("catalog_agents")
+    .delete()
+    .eq("user_agent_id", userAgentId);
+
+  if (error) {
+    throw new Error(`Failed to remove catalog entries: ${error.message}`);
+  }
+
+  return catalogCount;
 }
 
 /**

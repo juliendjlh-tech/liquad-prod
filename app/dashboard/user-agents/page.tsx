@@ -27,6 +27,8 @@ interface Preset {
   operator: string;
   /** Pre-filled DNS patterns from the preset definition */
   dns_patterns: string[];
+  /** Optional official bot usage description */
+  description?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -50,7 +52,6 @@ export default function UserAgentsPage() {
   const [presets, setPresets] = useState<Preset[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddCustom, setShowAddCustom] = useState(false);
-  const [showAddPreset, setShowAddPreset] = useState(false);
   const [customName, setCustomName] = useState("");
   const [customPattern, setCustomPattern] = useState("");
   const [customDnsPatterns, setCustomDnsPatterns] = useState("");
@@ -64,6 +65,8 @@ export default function UserAgentsPage() {
 
   const [confirmTarget, setConfirmTarget] = useState<UserAgent | null>(null);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "preset" | "custom">("all");
+  const [search, setSearch] = useState("");
 
   const [toast, setToast] = useState<{
     message: string;
@@ -118,7 +121,6 @@ export default function UserAgentsPage() {
 
     if (res.ok) {
       showToast(`${preset.name} added`, "success");
-      setShowAddPreset(false);
       void fetchAgents();
     } else {
       const json = await res.json();
@@ -165,6 +167,7 @@ export default function UserAgentsPage() {
   // ---------------------------------------------------------------------------
 
   const toggleActive = async (agent: UserAgent) => {
+    const wasActive = agent.is_active;
     setTogglingId(agent.id);
     try {
       const res = await fetch(`/api/user-agents/${agent.id}`, {
@@ -175,9 +178,29 @@ export default function UserAgentsPage() {
         },
         body: JSON.stringify({ is_active: !agent.is_active }),
       });
-      if (res.ok) void fetchAgents();
+      if (res.ok) {
+        const json = await res.json();
+        if (wasActive && json.catalogCount > 0) {
+          showToast(
+            `Bot deactivated (removed from ${json.catalogCount} catalog(s))`,
+            "success"
+          );
+        }
+        void fetchAgents();
+      }
     } finally {
       setTogglingId(null);
+    }
+  };
+
+  const handlePresetToggle = async (
+    preset: Preset,
+    agent: UserAgent | undefined
+  ) => {
+    if (!agent) {
+      await addPresetBot(preset);
+    } else {
+      await toggleActive(agent);
     }
   };
 
@@ -195,6 +218,37 @@ export default function UserAgentsPage() {
       const json = await res.json();
       showToast(json.error ?? "Failed to duplicate bot", "error");
     }
+  };
+
+  const handleDuplicatePreset = async (
+    preset: Preset,
+    agent: UserAgent | undefined
+  ) => {
+    if (agent) {
+      await duplicateAgent(agent);
+      return;
+    }
+    // Preset not in workspace yet — create it first, then duplicate
+    const createRes = await fetch("/api/user-agents", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-workspace-id": workspaceId,
+      },
+      body: JSON.stringify({
+        name: preset.name,
+        ua_pattern: preset.ua_pattern,
+        is_preset: true,
+        dns_patterns: preset.dns_patterns,
+      }),
+    });
+    if (!createRes.ok) {
+      const json = await createRes.json();
+      showToast(json.error ?? "Failed to duplicate bot", "error");
+      return;
+    }
+    const created: UserAgent = await createRes.json();
+    await duplicateAgent(created);
   };
 
   const executeDelete = async (agent: UserAgent) => {
@@ -258,10 +312,53 @@ export default function UserAgentsPage() {
     }
   };
 
-  // Filter presets not already added
-  const availablePresets = presets.filter(
-    (p) => !agents.some((a) => a.name === p.name)
-  );
+  // All preset items paired with their workspace agent if one exists
+  const allPresetItems = presets.map((p) => ({
+    preset: p,
+    agent: agents.find((a) => a.name === p.name && a.is_preset),
+    isPreset: true as const,
+  }));
+
+  // Custom bots (non-preset) declared in this workspace
+  const customItems = agents
+    .filter((a) => !a.is_preset)
+    .map((a) => ({ agent: a, isPreset: false as const }));
+
+  // Unified list filtered by selection
+  const allItems = [
+    ...allPresetItems,
+    ...customItems,
+  ];
+
+  const q = search.toLowerCase().trim();
+
+  const matchesSearch = (item: (typeof allItems)[number]) => {
+    if (!q) return true;
+    if (item.isPreset) {
+      const { preset, agent } = item;
+      return (
+        preset.name.toLowerCase().includes(q) ||
+        preset.ua_pattern.toLowerCase().includes(q) ||
+        (preset.description?.toLowerCase().includes(q) ?? false) ||
+        preset.dns_patterns.some((dp) => dp.toLowerCase().includes(q)) ||
+        (agent?.dns_patterns.some((dp) => dp.toLowerCase().includes(q)) ?? false)
+      );
+    }
+    const { agent } = item;
+    return (
+      agent.name.toLowerCase().includes(q) ||
+      agent.ua_pattern.toLowerCase().includes(q) ||
+      agent.dns_patterns.some((dp) => dp.toLowerCase().includes(q))
+    );
+  };
+
+  const visibleItems = (
+    filter === "preset"
+      ? allPresetItems
+      : filter === "custom"
+      ? customItems
+      : allItems
+  ).filter(matchesSearch);
 
   // ---------------------------------------------------------------------------
   // Render
@@ -284,9 +381,6 @@ export default function UserAgentsPage() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900">AI Bots</h1>
         <div className="flex gap-2">
-          <Button onClick={() => setShowAddPreset(!showAddPreset)}>
-            Add AI Bot
-          </Button>
           <Button
             variant="secondary"
             onClick={() => setShowAddCustom(!showAddCustom)}
@@ -295,45 +389,6 @@ export default function UserAgentsPage() {
           </Button>
         </div>
       </div>
-
-      {/* Add preset dropdown */}
-      {showAddPreset && (
-        <div className="mb-4 rounded-lg border border-gray-200 bg-white p-4">
-          <h3 className="text-sm font-medium text-gray-900 mb-3">
-            Select a bot to add
-          </h3>
-          {availablePresets.length === 0 ? (
-            <p className="text-sm text-gray-500">
-              All preset bots have been added.
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-              {availablePresets.map((p) => (
-                <button
-                  key={p.name}
-                  onClick={() => addPresetBot(p)}
-                  className="rounded-md border border-gray-200 px-3 py-2 text-sm hover:bg-blue-50 hover:border-blue-300 text-left"
-                >
-                  <div className="font-medium text-gray-900">{p.name}</div>
-                  <div className="text-xs text-gray-500">{p.operator}</div>
-                  {p.dns_patterns.length > 0 && (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {p.dns_patterns.map((dp) => (
-                        <span
-                          key={dp}
-                          className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-600"
-                        >
-                          {dp}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Add custom form */}
       {showAddCustom && (
@@ -392,136 +447,96 @@ export default function UserAgentsPage() {
         </form>
       )}
 
+      {/* Search */}
+      <div className="mb-3">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search by name, UA, domain, description…"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent"
+        />
+      </div>
+
+      {/* Filters */}
+      <div className="flex gap-1 mb-4">
+        {(["all", "preset", "custom"] as const).map((f) => (
+          <button
+            key={f}
+            onClick={() => setFilter(f)}
+            className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+              filter === f
+                ? "bg-gray-900 text-white"
+                : "text-gray-500 hover:text-gray-900 hover:bg-gray-100"
+            }`}
+          >
+            {f === "all" ? "All" : f === "preset" ? "Preset" : "Custom"}
+          </button>
+        ))}
+      </div>
+
       {/* Bot list */}
       {loading ? (
         <div className="text-center py-12 text-gray-500">Loading...</div>
-      ) : agents.length === 0 ? (
-        <div className="text-center py-12">
-          <p className="text-gray-500 mb-4">No AI bots declared</p>
-          <Button variant="ghost" onClick={() => setShowAddPreset(true)}>
-            Add your first bot
-          </Button>
+      ) : visibleItems.length === 0 ? (
+        <div className="text-center py-12 text-gray-400 text-sm">
+          No bots match your search.
         </div>
       ) : (
         <div className="space-y-2">
-          {agents.map((agent) => (
-            <div
-              key={agent.id}
-              className="group rounded-lg border border-gray-200 bg-white px-4 py-3 hover:bg-gray-50 transition-colors"
-            >
-              {editingAgent === agent.id ? (
-                /* ---- Inline edit mode (custom bots only) ---- */
-                <div className="space-y-3">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        Name
-                      </label>
-                      <input
-                        type="text"
-                        value={editName}
-                        onChange={(e) => setEditName(e.target.value)}
-                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
-                        autoFocus
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">
-                        User-Agent Pattern
-                      </label>
-                      <input
-                        type="text"
-                        value={editPattern}
-                        onChange={(e) => setEditPattern(e.target.value)}
-                        className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-500 mb-1">
-                      DNS Patterns
-                    </label>
-                    <input
-                      type="text"
-                      value={editDnsValue}
-                      onChange={(e) => setEditDnsValue(e.target.value)}
-                      className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
-                      placeholder="*.example.com, *.example.net"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="sm" onClick={cancelEdit}>
-                      Cancel
-                    </Button>
-                    <Button size="sm" onClick={() => saveEdit(agent.id)}>
-                      Save
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                /* ---- Display mode ---- */
-                <>
-                  {/* Top row: name + controls */}
+          {visibleItems.map((item) => {
+            if (item.isPreset) {
+              const { preset, agent } = item;
+              return (
+                <div
+                  key={preset.name}
+                  className="group rounded-lg border border-gray-200 bg-white px-4 py-3 hover:bg-gray-50 transition-colors"
+                >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm font-medium text-gray-900">
-                            {agent.name}
+                            {preset.name}
                           </span>
-                          {agent.is_preset && (
-                            <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
-                              Preset
-                            </span>
-                          )}
+                          <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
+                            Preset
+                          </span>
                         </div>
                         <span className="text-xs text-gray-500">
-                          {agent.ua_pattern}
+                          {preset.ua_pattern}
                         </span>
+                        {preset.description && (
+                          <p className="text-xs text-gray-400 mt-0.5">
+                            {preset.description}
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <Toggle
-                        checked={agent.is_active}
-                        onChange={() => toggleActive(agent)}
-                        loading={togglingId === agent.id}
-                        label={`Toggle ${agent.name} ${agent.is_active ? "off" : "on"}`}
+                        checked={agent?.is_active ?? false}
+                        onChange={() => handlePresetToggle(preset, agent)}
+                        loading={agent ? togglingId === agent.id : false}
+                        label={`Toggle ${preset.name} ${agent?.is_active ? "off" : "on"}`}
                       />
                       <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                         <DropdownMenu
                           items={[
-                            ...(!agent.is_preset
-                              ? [
-                                  {
-                                    label: "Edit",
-                                    onClick: () => startEdit(agent),
-                                  },
-                                ]
-                              : []),
                             {
                               label: "Duplicate",
-                              onClick: () => duplicateAgent(agent),
-                            },
-                            {
-                              label: "Delete",
-                              onClick: () => setConfirmTarget(agent),
-                              variant: "danger" as const,
-                              separator: true,
+                              onClick: () => handleDuplicatePreset(preset, agent),
                             },
                           ]}
                         />
                       </div>
                     </div>
                   </div>
-
-                  {/* DNS Patterns row */}
                   <div className="mt-2 flex items-start gap-2">
-                    <span className="text-xs text-gray-400 mt-0.5 shrink-0">
-                      DNS:
-                    </span>
+                    <span className="text-xs text-gray-400 mt-0.5 shrink-0">DNS:</span>
                     <div className="flex-1 flex items-center gap-1 flex-wrap">
-                      {agent.dns_patterns.length > 0 ? (
-                        agent.dns_patterns.map((dp) => (
+                      {preset.dns_patterns.length > 0 ? (
+                        preset.dns_patterns.map((dp) => (
                           <span
                             key={dp}
                             className="rounded bg-purple-50 border border-purple-200 px-1.5 py-0.5 text-xs text-purple-700"
@@ -536,10 +551,125 @@ export default function UserAgentsPage() {
                       )}
                     </div>
                   </div>
-                </>
-              )}
-            </div>
-          ))}
+                </div>
+              );
+            }
+
+            // Custom bot
+            const { agent } = item;
+            return (
+              <div
+                key={agent.id}
+                className="group rounded-lg border border-gray-200 bg-white px-4 py-3 hover:bg-gray-50 transition-colors"
+              >
+                {editingAgent === agent.id ? (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          Name
+                        </label>
+                        <input
+                          type="text"
+                          value={editName}
+                          onChange={(e) => setEditName(e.target.value)}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                          autoFocus
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-500 mb-1">
+                          User-Agent Pattern
+                        </label>
+                        <input
+                          type="text"
+                          value={editPattern}
+                          onChange={(e) => setEditPattern(e.target.value)}
+                          className="w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">
+                        DNS Patterns
+                      </label>
+                      <input
+                        type="text"
+                        value={editDnsValue}
+                        onChange={(e) => setEditDnsValue(e.target.value)}
+                        className="w-full rounded border border-gray-300 px-2 py-1 text-xs"
+                        placeholder="*.example.com, *.example.net"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="ghost" size="sm" onClick={cancelEdit}>
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={() => saveEdit(agent.id)}>
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="text-sm font-medium text-gray-900">
+                          {agent.name}
+                        </span>
+                        <div>
+                          <span className="text-xs text-gray-500">
+                            {agent.ua_pattern}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Toggle
+                          checked={agent.is_active}
+                          onChange={() => toggleActive(agent)}
+                          loading={togglingId === agent.id}
+                          label={`Toggle ${agent.name} ${agent.is_active ? "off" : "on"}`}
+                        />
+                        <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                          <DropdownMenu
+                            items={[
+                              { label: "Edit", onClick: () => startEdit(agent) },
+                              { label: "Duplicate", onClick: () => duplicateAgent(agent) },
+                              {
+                                label: "Delete",
+                                onClick: () => setConfirmTarget(agent),
+                                variant: "danger" as const,
+                                separator: true,
+                              },
+                            ]}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                    <div className="mt-2 flex items-start gap-2">
+                      <span className="text-xs text-gray-400 mt-0.5 shrink-0">DNS:</span>
+                      <div className="flex-1 flex items-center gap-1 flex-wrap">
+                        {agent.dns_patterns.length > 0 ? (
+                          agent.dns_patterns.map((dp) => (
+                            <span
+                              key={dp}
+                              className="rounded bg-purple-50 border border-purple-200 px-1.5 py-0.5 text-xs text-purple-700"
+                            >
+                              {dp}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs text-gray-400 italic">
+                            No DNS patterns (IC skipped)
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
