@@ -16,6 +16,8 @@ interface CatalogItem {
   price_eur: number;
   agent_count: number;
   content_count: number;
+  rag_enabled: boolean;
+  rag_source_count: number;
 }
 
 export default function CatalogsPage() {
@@ -149,6 +151,12 @@ export default function CatalogsPage() {
                   <span>{catalog.price_eur.toFixed(2)} EUR</span>
                   <span>{catalog.agent_count} active bot(s)</span>
                   <span>{catalog.content_count} content(s)</span>
+                  {catalog.rag_enabled && (
+                    <span className="inline-flex items-center gap-1 text-purple-600">
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-purple-500" />
+                      RAG ({catalog.rag_source_count} sources)
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-3">

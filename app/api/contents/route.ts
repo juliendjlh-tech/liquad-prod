@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { getContents } from "@/lib/services/content.service";
+import { getSources } from "@/lib/services/content.service";
 
 /**
  * GET /api/contents
@@ -65,7 +65,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const domain = searchParams.get("domain") ?? undefined;
     const domainId = searchParams.get("domain_id") ?? undefined;
 
-    const result = await getContents({ workspaceId, page, limit, search, domain, domainId });
+    const result = await getSources({ workspaceId, page, limit, search, domain, domainId });
 
     return NextResponse.json(result, { status: 200 });
   } catch {

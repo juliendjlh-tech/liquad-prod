@@ -1,3 +1,7 @@
+// ---------------------------------------------------------------------------
+// Catalog service — CRUD operations
+// ---------------------------------------------------------------------------
+
 import { createServerClient } from "@/lib/db/supabase-server";
 import type { Json } from "@/lib/db/types";
 import type {
@@ -6,6 +10,7 @@ import type {
   FilterRules,
 } from "@/lib/validations/catalog.schema";
 import { matchContentAgainstRules } from "@/lib/validations/catalog.schema";
+import { syncCatalogSources } from "@/lib/services/catalog-linking.service";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -20,6 +25,8 @@ export interface CatalogListItem {
   status: string;
   agent_count: number;
   content_count: number;
+  rag_enabled: boolean;
+  rag_source_count: number;
   created_at: string;
 }
 
@@ -30,6 +37,8 @@ export interface CatalogDetail {
   filter_rules: FilterRules;
   price_eur: number;
   status: string;
+  rag_enabled: boolean;
+  rag_source_count: number;
   created_at: string;
   agents: Array<{
     id: string;
@@ -39,36 +48,15 @@ export interface CatalogDetail {
   }>;
 }
 
-export interface PreviewResult {
-  matched_count: number;
-  total_contents: number;
-  per_domain: Array<{
-    domain: string;
-    domain_id: string;
-    matched: number;
-    total: number;
-  }>;
-  matched_contents: Array<{
-    id: string;
-    source_url: string;
-    title: string | null;
-    matched: boolean;
-  }>;
-  warnings: string[];
-  page: number;
-  limit: number;
-  total_pages: number;
-}
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch ALL rows from a table, paginating through Supabase's default 1000-row
- * limit. Returns all rows matching the query.
+ * Fetch ALL source rows from a workspace, paginating through Supabase's
+ * default 1000-row limit.
  */
-async function fetchAllContentUrls(
+async function fetchAllSourceUrls(
   workspaceId: string,
   columns: string = "source_url"
 ): Promise<Array<Record<string, unknown>>> {
@@ -79,13 +67,13 @@ async function fetchAllContentUrls(
 
   while (true) {
     const { data, error } = await supabase
-      .from("contents")
+      .from("sources")
       .select(columns)
       .eq("workspace_id", workspaceId)
       .range(from, from + PAGE_SIZE - 1);
 
     if (error) {
-      throw new Error(`Failed to fetch contents: ${error.message}`);
+      throw new Error(`Failed to fetch sources: ${error.message}`);
     }
 
     if (!data || data.length === 0) break;
@@ -118,17 +106,17 @@ async function buildDomainMap(
 }
 
 /**
- * Count contents matching filter_rules using structured matching.
+ * Count sources matching filter_rules using structured matching.
  */
-function countMatchedContents(
-  contents: Array<{ source_url: string }>,
+function countMatchedSources(
+  sources: Array<{ source_url: string }>,
   filterRules: FilterRules,
   domainMap: Map<string, string>
 ): number {
   let count = 0;
-  for (const c of contents) {
+  for (const s of sources) {
     try {
-      const url = new URL(c.source_url);
+      const url = new URL(s.source_url);
       if (matchContentAgainstRules(url.hostname, url.pathname, filterRules, domainMap)) {
         count++;
       }
@@ -228,7 +216,7 @@ export async function getCatalogs(
 
   const { data: catalogs, error } = await supabase
     .from("catalogs")
-    .select("id, name, description, filter_rules, price_eur, status, created_at")
+    .select("id, name, description, filter_rules, price_eur, status, rag_enabled, rag_source_count, created_at")
     .eq("workspace_id", workspaceId)
     .order("created_at", { ascending: true });
 
@@ -236,8 +224,8 @@ export async function getCatalogs(
     throw new Error(`Failed to list catalogs: ${error.message}`);
   }
 
-  // Fetch all contents and domain map for matching
-  const contents = (await fetchAllContentUrls(
+  // Fetch all sources and domain map for matching
+  const sources = (await fetchAllSourceUrls(
     workspaceId,
     "source_url"
   )) as Array<{ source_url: string }>;
@@ -262,7 +250,7 @@ export async function getCatalogs(
     }
 
     const filterRules = catalog.filter_rules as unknown as FilterRules;
-    const contentCount = countMatchedContents(contents, filterRules, domainMap);
+    const contentCount = countMatchedSources(sources, filterRules, domainMap);
 
     results.push({
       id: catalog.id,
@@ -273,6 +261,8 @@ export async function getCatalogs(
       status: catalog.status,
       agent_count: count ?? 0,
       content_count: contentCount,
+      rag_enabled: catalog.rag_enabled ?? false,
+      rag_source_count: catalog.rag_source_count ?? 0,
       created_at: catalog.created_at!,
     });
   }
@@ -291,7 +281,7 @@ export async function getCatalogById(
 
   const { data: catalog, error } = await supabase
     .from("catalogs")
-    .select("id, name, description, filter_rules, price_eur, status, created_at")
+    .select("id, name, description, filter_rules, price_eur, status, rag_enabled, rag_source_count, created_at")
     .eq("id", catalogId)
     .eq("workspace_id", workspaceId)
     .single();
@@ -330,6 +320,8 @@ export async function getCatalogById(
     filter_rules: catalog.filter_rules as unknown as FilterRules,
     price_eur: Number(catalog.price_eur),
     status: catalog.status,
+    rag_enabled: catalog.rag_enabled ?? false,
+    rag_source_count: catalog.rag_source_count ?? 0,
     created_at: catalog.created_at!,
     agents,
   };
@@ -402,6 +394,7 @@ export async function updateCatalog(
   if (data.filter_rules !== undefined) updateFields.filter_rules = data.filter_rules;
   if (data.price_eur !== undefined) updateFields.price_eur = data.price_eur;
   if (data.status !== undefined) updateFields.status = data.status;
+  if (data.rag_enabled !== undefined) updateFields.rag_enabled = data.rag_enabled;
 
   if (Object.keys(updateFields).length > 0) {
     const { error } = await supabase
@@ -415,11 +408,32 @@ export async function updateCatalog(
     }
   }
 
+  // Handle RAG linking based on rag_enabled changes
+  if (data.rag_enabled === false) {
+    // Disabling RAG: remove all catalog_sources links and reset source count
+    await supabase
+      .from("catalog_sources")
+      .delete()
+      .eq("catalog_id", catalogId);
+
+    await supabase
+      .from("catalogs")
+      .update({ rag_source_count: 0 })
+      .eq("id", catalogId);
+  } else if (data.rag_enabled === true || data.filter_rules !== undefined) {
+    // Enabling RAG or changing filter_rules: re-link sources.
+    // Only run if the catalog is (now) RAG-enabled.
+    const currentCatalog = await getCatalogById(catalogId, workspaceId);
+    if (currentCatalog?.rag_enabled) {
+      await syncCatalogSources(workspaceId, catalogId);
+    }
+  }
+
   return getCatalogById(catalogId, workspaceId) as Promise<CatalogDetail>;
 }
 
 /**
- * Delete a catalog (cascade removes catalog_agents).
+ * Delete a catalog (cascade removes catalog_agents + catalog_sources).
  */
 export async function deleteCatalog(
   catalogId: string,
@@ -443,150 +457,4 @@ export async function deleteCatalog(
   }
 
   return true;
-}
-
-// ---------------------------------------------------------------------------
-// Preview
-// ---------------------------------------------------------------------------
-
-/**
- * Preview which contents match given filter rules.
- * Uses structured matching (no regex).
- */
-export async function previewCatalogMatch(
-  workspaceId: string,
-  filterRules: FilterRules,
-  page = 1,
-  limit = 50
-): Promise<PreviewResult> {
-  // Fetch all contents with domain info
-  const contents = (await fetchAllContentUrls(
-    workspaceId,
-    "id, source_url, title"
-  )) as Array<{ id: string; source_url: string; title: string | null }>;
-  const totalContents = contents.length;
-
-  // Build domain map
-  const domainMap = await buildDomainMap(workspaceId);
-
-  // Match each content and track per-domain stats
-  const perDomainStats = new Map<
-    string,
-    { domain: string; domain_id: string; matched: number; total: number }
-  >();
-  const matchedContents: Array<{
-    id: string;
-    source_url: string;
-    title: string | null;
-    matched: boolean;
-  }> = [];
-
-  for (const content of contents) {
-    try {
-      const url = new URL(content.source_url);
-      const hostname = url.hostname;
-      const pathname = url.pathname;
-
-      // Find domain_id for this hostname
-      let contentDomainId: string | undefined;
-      for (const [id, domain] of domainMap) {
-        if (domain === hostname) {
-          contentDomainId = id;
-          break;
-        }
-      }
-
-      // Update per-domain total
-      if (contentDomainId) {
-        if (!perDomainStats.has(contentDomainId)) {
-          perDomainStats.set(contentDomainId, {
-            domain: hostname,
-            domain_id: contentDomainId,
-            matched: 0,
-            total: 0,
-          });
-        }
-        perDomainStats.get(contentDomainId)!.total++;
-      }
-
-      const isMatched = matchContentAgainstRules(
-        hostname,
-        pathname,
-        filterRules,
-        domainMap
-      );
-
-      if (isMatched && contentDomainId) {
-        perDomainStats.get(contentDomainId)!.matched++;
-      }
-
-      matchedContents.push({
-        id: content.id,
-        source_url: content.source_url,
-        title: content.title,
-        matched: isMatched,
-      });
-    } catch {
-      // Skip invalid URLs
-    }
-  }
-
-  const matched = matchedContents.filter((c) => c.matched);
-  const matchedCount = matched.length;
-
-  // Generate warnings
-  const warnings: string[] = [];
-  if (matchedCount === 0) {
-    warnings.push("no_match");
-  }
-  if (totalContents > 0 && matchedCount / totalContents > 0.8) {
-    warnings.push("too_broad");
-  }
-
-  // Check for domains with 0 matches
-  for (const rule of filterRules.domain_rules) {
-    const stats = perDomainStats.get(rule.domain_id);
-    if (stats && stats.matched === 0) {
-      const hostname = domainMap.get(rule.domain_id) ?? rule.domain_id;
-      warnings.push(`domain_no_match:${hostname}`);
-    }
-  }
-
-  // Paginate matched contents (show matched first)
-  const safePage = Math.max(1, page);
-  const safeLimit = Math.min(100, Math.max(1, limit));
-  const offset = (safePage - 1) * safeLimit;
-  const paginatedContents = matched.slice(offset, offset + safeLimit);
-
-  return {
-    matched_count: matchedCount,
-    total_contents: totalContents,
-    per_domain: [...perDomainStats.values()],
-    matched_contents: paginatedContents,
-    warnings,
-    page: safePage,
-    limit: safeLimit,
-    total_pages: Math.ceil(matchedCount / safeLimit),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Domain Verification Helper
-// ---------------------------------------------------------------------------
-
-/**
- * Check if a workspace has at least one verified domain.
- */
-export async function hasVerifiedDomain(
-  workspaceId: string
-): Promise<boolean> {
-  const supabase = await createServerClient();
-
-  const { count } = await supabase
-    .from("domains")
-    .select("id", { count: "exact", head: true })
-    .eq("workspace_id", workspaceId)
-    .eq("status", "verified");
-
-  return (count ?? 0) > 0;
 }

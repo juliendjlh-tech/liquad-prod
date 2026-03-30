@@ -142,6 +142,9 @@ export const updateCatalogSchema = z.object({
       error: "status must be 'active' or 'inactive'",
     })
     .optional(),
+  // RAG opt-in: when true, content chunks are linked to this catalog
+  // for semantic search. When false, links are removed.
+  rag_enabled: z.boolean().optional(),
 });
 
 export type UpdateCatalogInput = z.infer<typeof updateCatalogSchema>;

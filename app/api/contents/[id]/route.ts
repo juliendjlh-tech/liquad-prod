@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { deleteContent } from "@/lib/services/content.service";
+import { deleteSource } from "@/lib/services/content.service";
 
 /**
  * DELETE /api/contents/:id
@@ -61,7 +61,7 @@ export async function DELETE(
     }
 
     // Delete the content
-    const deleted = await deleteContent(contentId, workspaceId);
+    const deleted = await deleteSource(contentId, workspaceId);
 
     if (!deleted) {
       return NextResponse.json(

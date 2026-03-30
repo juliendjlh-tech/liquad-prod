@@ -2,6 +2,7 @@ import { createServerClient } from "@/lib/db/supabase-server";
 import type { SdkEventInput } from "@/lib/validations/sdk-event.schema";
 import type { FilterRules } from "@/lib/validations/catalog.schema";
 import { sdkEventSchema } from "@/lib/validations/sdk-event.schema";
+import { normalizeUrl } from "@/lib/utils/url-normalize";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -29,15 +30,18 @@ export interface SdkRules {
   jwt_signing_secret: string;
   verified_domains: string[];
 
-  /** Active user-agents (bots) for this workspace */
-  user_agents: Array<{
+  /** Active agents (bots) for this workspace, each carrying its linked catalog IDs */
+  agents: Array<{
     id: string;
     name: string;
     ua_pattern: string;
     /** DNS hostname globs for Identity Check. Empty = IC skipped for this bot. */
     dns_patterns: string[];
+    /** Catalog IDs this agent is linked to */
+    catalog_ids: string[];
   }>;
 
+  /** Active catalogs (standalone — no agent references) */
   catalogs: Array<{
     id: string;
     name: string;
@@ -52,7 +56,6 @@ export interface SdkRules {
       }>;
     };
     price_eur: number;
-    agent_ids: string[];
   }>;
 
   /**
@@ -85,17 +88,33 @@ export interface IngestResult {
 // ---------------------------------------------------------------------------
 
 /**
+ * Optional filters for getWorkspaceRules.
+ * All filters are independent — agents and catalogs are filtered separately.
+ */
+export interface WorkspaceRulesFilters {
+  /** Only return these catalog IDs. Empty/undefined = all catalogs. */
+  catalog_ids?: string[];
+  /** Only return these agent IDs. Empty/undefined = all agents. */
+  agent_ids?: string[];
+  /** Only return catalogs with price_eur <= this value. Undefined = no price filter (all catalogs). */
+  max_price_eur?: number;
+}
+
+/**
  * Fetch all rules for a workspace (used by the deployed SDK).
  *
  * Returns only:
  * - Verified domains
- * - Active user-agents
- * - Active catalogs (ordered by created_at ASC — first match wins)
- * - Each catalog's linked agent_ids
+ * - Active agents (with their linked catalog_ids)
+ * - Active catalogs (ordered by created_at ASC)
+ *
+ * Accepts optional filters to narrow agents/catalogs returned.
  */
 export async function getWorkspaceRules(
-  workspaceId: string
+  workspaceId: string,
+  filters?: WorkspaceRulesFilters
 ): Promise<SdkRules> {
+  const maxPrice = filters?.max_price_eur;
   const supabase = await createServerClient();
 
   // 0. Workspace settings: jwt_signing_secret
@@ -112,12 +131,18 @@ export async function getWorkspaceRules(
     .eq("workspace_id", workspaceId)
     .eq("status", "verified");
 
-  // 2. Active user-agents (including dns_patterns for Identity Check)
-  const { data: agents } = await supabase
+  // 2. Active agents (including dns_patterns for Identity Check)
+  let agentsQuery = supabase
     .from("user_agents")
     .select("id, name, ua_pattern, dns_patterns")
     .eq("workspace_id", workspaceId)
     .eq("is_active", true);
+
+  if (filters?.agent_ids && filters.agent_ids.length > 0) {
+    agentsQuery = agentsQuery.in("id", filters.agent_ids);
+  }
+
+  const { data: agents } = await agentsQuery;
 
   // 3. All workspace domains (for resolving domain_ids in filter_rules)
   const { data: allDomains } = await supabase
@@ -129,56 +154,83 @@ export async function getWorkspaceRules(
     (allDomains ?? []).map((d) => [d.id, d.domain])
   );
 
-  // 4. Active catalogs (ordered by created_at ASC)
-  const { data: catalogs } = await supabase
+  // 4. Active catalogs (ordered by created_at ASC), filtered by price and optional IDs
+  let catalogsQuery = supabase
     .from("catalogs")
     .select("id, name, filter_rules, price_eur, created_at")
     .eq("workspace_id", workspaceId)
     .eq("status", "active")
     .order("created_at", { ascending: true });
 
-  // 5. Get agent_ids for each catalog and resolve domain_ids to hostnames
-  const catalogsWithAgents = await Promise.all(
-    (catalogs ?? []).map(async (catalog) => {
-      const { data: links } = await supabase
+  if (maxPrice !== undefined) {
+    catalogsQuery = catalogsQuery.lte("price_eur", maxPrice);
+  }
+
+  if (filters?.catalog_ids && filters.catalog_ids.length > 0) {
+    catalogsQuery = catalogsQuery.in("id", filters.catalog_ids);
+  }
+
+  const { data: catalogs } = await catalogsQuery;
+
+  // 5. Resolve catalog_ids per agent (single query instead of N+1)
+  const agentIds = (agents ?? []).map((a) => a.id);
+  const { data: allLinks } = agentIds.length > 0
+    ? await supabase
         .from("catalog_agents")
-        .select("user_agent_id")
-        .eq("catalog_id", catalog.id);
+        .select("user_agent_id, catalog_id")
+        .in("user_agent_id", agentIds)
+    : { data: [] as { user_agent_id: string; catalog_id: string }[] };
 
-      // Resolve domain_ids to hostnames in filter_rules
-      const rawRules = catalog.filter_rules as unknown as {
-        domain_rules: Array<{
-          domain_id: string;
-          path_rules?: Array<{ operator: string; value: string }>;
-          path_logic?: "AND" | "OR";
-        }>;
-      };
-
-      const resolvedFilterRules = {
-        domain_rules: (rawRules?.domain_rules ?? [])
-          .map((rule) => {
-            const hostname = domainIdToHostname.get(rule.domain_id);
-            if (!hostname) return null; // Domain deleted, skip gracefully
-            return {
-              domain: hostname,
-              ...(rule.path_rules && rule.path_rules.length > 0
-                ? { path_rules: rule.path_rules }
-                : {}),
-              ...(rule.path_logic ? { path_logic: rule.path_logic } : {}),
-            };
-          })
-          .filter((r): r is NonNullable<typeof r> => r !== null),
-      };
-
-      return {
-        id: catalog.id,
-        name: catalog.name,
-        filter_rules: resolvedFilterRules,
-        price_eur: Number(catalog.price_eur),
-        agent_ids: (links ?? []).map((l) => l.user_agent_id),
-      };
-    })
+  // Build price lookup for sorting catalog_ids per agent
+  const catalogPriceMap = new Map(
+    (catalogs ?? []).map((c) => [c.id, Number(c.price_eur)])
   );
+
+  const agentToCatalogIds = new Map<string, string[]>();
+  for (const link of allLinks ?? []) {
+    const existing = agentToCatalogIds.get(link.user_agent_id) ?? [];
+    existing.push(link.catalog_id);
+    agentToCatalogIds.set(link.user_agent_id, existing);
+  }
+
+  // Sort each agent's catalog_ids by price ASC
+  for (const [, ids] of agentToCatalogIds) {
+    ids.sort((a, b) => (catalogPriceMap.get(a) ?? 0) - (catalogPriceMap.get(b) ?? 0));
+  }
+
+  // 6. Resolve domain_ids to hostnames in catalog filter_rules
+  const resolvedCatalogs = (catalogs ?? []).map((catalog) => {
+    const rawRules = catalog.filter_rules as unknown as {
+      domain_rules: Array<{
+        domain_id: string;
+        path_rules?: Array<{ operator: string; value: string }>;
+        path_logic?: "AND" | "OR";
+      }>;
+    };
+
+    const resolvedFilterRules = {
+      domain_rules: (rawRules?.domain_rules ?? [])
+        .map((rule) => {
+          const hostname = domainIdToHostname.get(rule.domain_id);
+          if (!hostname) return null;
+          return {
+            domain: hostname,
+            ...(rule.path_rules && rule.path_rules.length > 0
+              ? { path_rules: rule.path_rules }
+              : {}),
+            ...(rule.path_logic ? { path_logic: rule.path_logic } : {}),
+          };
+        })
+        .filter((r): r is NonNullable<typeof r> => r !== null),
+    };
+
+    return {
+      id: catalog.id,
+      name: catalog.name,
+      filter_rules: resolvedFilterRules,
+      price_eur: Number(catalog.price_eur),
+    };
+  });
 
   // 6. Known content paths (for content existence check in SDK)
   //    Fetch all source_url from contents table, paginating through
@@ -189,7 +241,7 @@ export async function getWorkspaceRules(
 
   while (true) {
     const { data: contentBatch, error: contentError } = await supabase
-      .from("contents")
+      .from("sources")
       .select("source_url")
       .eq("workspace_id", workspaceId)
       .range(from, from + PAGE_SIZE - 1);
@@ -205,27 +257,21 @@ export async function getWorkspaceRules(
   }
 
   const knownContentPaths = allContentUrls
-    .map((sourceUrl) => {
-      try {
-        const url = new URL(sourceUrl);
-        return `${url.hostname}${url.pathname}`;
-      } catch {
-        return null;
-      }
-    })
+    .map((sourceUrl) => normalizeUrl(sourceUrl))
     .filter((p): p is string => p !== null);
 
   return {
     workspace_id: workspaceId,
     jwt_signing_secret: workspace?.jwt_signing_secret ?? "",
     verified_domains: (domains ?? []).map((d) => d.domain),
-    user_agents: (agents ?? []).map((a) => ({
+    agents: (agents ?? []).map((a) => ({
       id: a.id,
       name: a.name,
       ua_pattern: a.ua_pattern,
       dns_patterns: (a.dns_patterns as string[]) ?? [],
+      catalog_ids: agentToCatalogIds.get(a.id) ?? [],
     })),
-    catalogs: catalogsWithAgents,
+    catalogs: resolvedCatalogs,
     known_content_paths: knownContentPaths,
     // Identity Check configuration — DNS verification settings.
     // IC is always active; per-bot dns_patterns controls verification.
@@ -445,13 +491,13 @@ export async function getDashboardMetrics(
 
   // 1. Total contents
   const { count: totalContents } = await supabase
-    .from("contents")
+    .from("sources")
     .select("id", { count: "exact", head: true })
     .eq("workspace_id", workspaceId);
 
   // 2. Contents covered by at least one active catalog (structured matching)
   const { data: allContents } = await supabase
-    .from("contents")
+    .from("sources")
     .select("source_url")
     .eq("workspace_id", workspaceId);
 

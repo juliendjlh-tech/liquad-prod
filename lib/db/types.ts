@@ -99,6 +99,36 @@ export type Database = {
           },
         ]
       }
+      catalog_sources: {
+        Row: {
+          catalog_id: string
+          source_id: string
+        }
+        Insert: {
+          catalog_id: string
+          source_id: string
+        }
+        Update: {
+          catalog_id?: string
+          source_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "catalog_sources_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "catalogs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "catalog_sources_source_id_fkey"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       catalogs: {
         Row: {
           created_at: string | null
@@ -107,6 +137,8 @@ export type Database = {
           id: string
           name: string
           price_eur: number
+          rag_enabled: boolean
+          rag_source_count: number
           status: string
           workspace_id: string
         }
@@ -117,6 +149,8 @@ export type Database = {
           id?: string
           name: string
           price_eur?: number
+          rag_enabled?: boolean
+          rag_source_count?: number
           status?: string
           workspace_id: string
         }
@@ -127,6 +161,8 @@ export type Database = {
           id?: string
           name?: string
           price_eur?: number
+          rag_enabled?: boolean
+          rag_source_count?: number
           status?: string
           workspace_id?: string
         }
@@ -144,36 +180,54 @@ export type Database = {
         Row: {
           id: string
           workspace_id: string
+          domain_id: string | null
           sitemap_url: string
+          reindex: boolean
+          urls_to_index: string[]
           status: string
           result: Json | null
           error_message: string | null
           path_rules: Json | null
           max_pages: number | null
+          scrape_status: string
+          scrape_processed_pages: number
+          scrape_error_message: string | null
           created_at: string | null
           updated_at: string | null
         }
         Insert: {
           id?: string
           workspace_id: string
+          domain_id?: string | null
           sitemap_url: string
+          reindex?: boolean
+          urls_to_index?: string[]
           status?: string
           result?: Json | null
           error_message?: string | null
           path_rules?: Json | null
           max_pages?: number | null
+          scrape_status?: string
+          scrape_processed_pages?: number
+          scrape_error_message?: string | null
           created_at?: string | null
           updated_at?: string | null
         }
         Update: {
           id?: string
           workspace_id?: string
+          domain_id?: string | null
           sitemap_url?: string
+          reindex?: boolean
+          urls_to_index?: string[]
           status?: string
           result?: Json | null
           error_message?: string | null
           path_rules?: Json | null
           max_pages?: number | null
+          scrape_status?: string
+          scrape_processed_pages?: number
+          scrape_error_message?: string | null
           created_at?: string | null
           updated_at?: string | null
         }
@@ -187,47 +241,88 @@ export type Database = {
           },
         ]
       }
-      contents: {
+      sources: {
         Row: {
-          created_at: string | null
-          domain_id: string
           id: string
-          lastmod: string | null
+          workspace_id: string
           source_url: string
           title: string | null
-          workspace_id: string
+          lastmod: string | null
+          domain_id: string
+          created_at: string | null
         }
         Insert: {
-          created_at?: string | null
-          domain_id: string
           id?: string
-          lastmod?: string | null
+          workspace_id: string
           source_url: string
           title?: string | null
-          workspace_id: string
+          lastmod?: string | null
+          domain_id: string
+          created_at?: string | null
         }
         Update: {
-          created_at?: string | null
-          domain_id?: string
           id?: string
-          lastmod?: string | null
+          workspace_id?: string
           source_url?: string
           title?: string | null
-          workspace_id?: string
+          lastmod?: string | null
+          domain_id?: string
+          created_at?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "contents_workspace_id_fkey"
+            foreignKeyName: "sources_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "fk_contents_domain"
+            foreignKeyName: "fk_sources_domain"
             columns: ["domain_id"]
             isOneToOne: false
             referencedRelation: "domains"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      chunks: {
+        Row: {
+          id: string
+          source_id: string
+          import_job_id: string | null
+          chunk_index: number | null
+          chunk_text: string | null
+          heading_context: string | null
+          token_count: number | null
+          embedding: string | null
+        }
+        Insert: {
+          id?: string
+          source_id: string
+          import_job_id?: string | null
+          chunk_index?: number | null
+          chunk_text?: string | null
+          heading_context?: string | null
+          token_count?: number | null
+          embedding?: string | null
+        }
+        Update: {
+          id?: string
+          source_id?: string
+          import_job_id?: string | null
+          chunk_index?: number | null
+          chunk_text?: string | null
+          heading_context?: string | null
+          token_count?: number | null
+          embedding?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_chunks_source"
+            columns: ["source_id"]
+            isOneToOne: false
+            referencedRelation: "sources"
             referencedColumns: ["id"]
           },
         ]
@@ -486,6 +581,125 @@ export type Database = {
           },
         ]
       }
+      rag_query_logs: {
+        Row: {
+          id: string
+          consumer_workspace_id: string
+          query_text: string
+          search_config_id: string | null
+          total_cost_eur: number
+          results: Json | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          consumer_workspace_id: string
+          query_text: string
+          search_config_id?: string | null
+          total_cost_eur?: number
+          results?: Json | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          consumer_workspace_id?: string
+          query_text?: string
+          search_config_id?: string | null
+          total_cost_eur?: number
+          results?: Json | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rag_query_logs_consumer_workspace_id_fkey"
+            columns: ["consumer_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rag_query_logs_search_config_id_fkey"
+            columns: ["search_config_id"]
+            isOneToOne: false
+            referencedRelation: "search_configs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      search_configs: {
+        Row: {
+          id: string
+          workspace_id: string
+          name: string
+          path_filters: Json
+          max_price_eur: number | null
+          total_budget_eur: number | null
+          max_results: number
+          created_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          name: string
+          path_filters?: Json
+          max_price_eur?: number | null
+          total_budget_eur?: number | null
+          max_results?: number
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          id?: string
+          workspace_id?: string
+          name?: string
+          path_filters?: Json
+          max_price_eur?: number | null
+          total_budget_eur?: number | null
+          max_results?: number
+          created_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_configs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      search_config_catalogs: {
+        Row: {
+          search_config_id: string
+          catalog_id: string
+        }
+        Insert: {
+          search_config_id: string
+          catalog_id: string
+        }
+        Update: {
+          search_config_id?: string
+          catalog_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_config_catalogs_search_config_id_fkey"
+            columns: ["search_config_id"]
+            isOneToOne: false
+            referencedRelation: "search_configs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "search_config_catalogs_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "catalogs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspaces: {
         Row: {
           api_key_hash: string | null
@@ -546,6 +760,33 @@ export type Database = {
           p_url: string
         }
         Returns: Json
+      }
+      check_balance_and_debit_batch: {
+        Args: {
+          p_consumer_workspace_id: string
+          p_debits: Json
+        }
+        Returns: Json
+      }
+      vector_search: {
+        Args: {
+          p_query_embedding: string
+          p_catalog_ids: string[]
+          p_limit?: number
+        }
+        Returns: {
+          chunk_id: string
+          source_id: string
+          source_url: string
+          chunk_text: string
+          heading_context: string
+          token_count: number
+          distance: number
+          price_eur: number
+          catalog_id: string
+          catalog_name: string
+          publisher_workspace_id: string
+        }[]
       }
     }
     Enums: {

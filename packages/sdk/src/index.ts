@@ -42,6 +42,7 @@ import { matchRequest } from "./matcher";
 import { createIdentityChecker } from "./identity-check";
 import type { VerificationResult } from "./identity-check";
 import { jwtVerify } from "jose";
+import { normalizeUrl } from "./url-normalize";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -50,19 +51,6 @@ import { jwtVerify } from "jose";
 /**
  * Normalize a URL for JWT claim comparison.
  */
-function normalizeUrlForSdk(rawUrl: string): string {
-  try {
-    const url = new URL(rawUrl);
-    let path = url.pathname;
-    if (path.length > 1 && path.endsWith("/")) {
-      path = path.slice(0, -1);
-    }
-    return `${url.protocol}//${url.hostname}${path}`;
-  } catch {
-    return rawUrl;
-  }
-}
-
 /**
  * Create a JSON Response.
  */
@@ -229,7 +217,7 @@ export function createLiquadHandler(
           return { blocked: false };
 
         case "granted": {
-          const matchedAgent = rules.user_agents.find(
+          const matchedAgent = rules.agents.find(
             (a) => a.name === decision.event.user_agent_name
           );
           const dnsPatterns = matchedAgent?.dns_patterns ?? [];
@@ -297,7 +285,7 @@ export function createLiquadHandler(
                 const fullUrl = request.url.startsWith("http")
                   ? request.url
                   : `https://${domain}${url.startsWith("/") ? url : "/" + url}`;
-                const normalizedRequestUrl = normalizeUrlForSdk(fullUrl);
+                const normalizedRequestUrl = normalizeUrl(fullUrl) ?? fullUrl;
 
                 // Validate: publisher must match this workspace
                 if (jwtPayload.pub !== rules.workspace_id) {
@@ -332,7 +320,7 @@ export function createLiquadHandler(
                 }
 
                 // JWT valid → perform Identity Check
-                const matchedAgent = rules.user_agents.find(
+                const matchedAgent = rules.agents.find(
                   (a) => a.name === decision.event.user_agent_name
                 );
                 const dnsPatterns = matchedAgent?.dns_patterns ?? [];

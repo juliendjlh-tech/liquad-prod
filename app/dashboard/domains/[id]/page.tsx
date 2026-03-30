@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
 import Button from "@/app/components/ui/Button";
 import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
+import DomainIndexingStatus from "./DomainIndexingStatus";
 
 interface ContentRow {
   id: string;
@@ -37,18 +38,35 @@ export default function DomainDetailPage() {
   const [contentsLoading, setContentsLoading] = useState(true);
   const [domainName, setDomainName] = useState<string | null>(null);
 
-  // Fetch domain name upfront so it displays even when there are no contents
-  useEffect(() => {
-    void (async () => {
-      const res = await fetch(`/api/domains/${domainId}`, {
-        headers: { "x-workspace-id": workspaceId },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDomainName(data.domain);
-      }
-    })();
+  // Scrape status state
+  const [scrapeStatus, setScrapeStatus] = useState<string | null>(null);
+  const [scrapeTotalPages, setScrapeTotalPages] = useState<number | null>(null);
+  const [scrapeProcessedPages, setScrapeProcessedPages] = useState<number | null>(null);
+  const [scrapeChunkCount, setScrapeChunkCount] = useState<number | null>(null);
+  const [scrapeErrorMessage, setScrapeErrorMessage] = useState<string | null>(null);
+  const [lastScrapedAt, setLastScrapedAt] = useState<string | null>(null);
+  const [reindexing, setReindexing] = useState(false);
+
+  // Fetch domain info (name + scrape status)
+  const fetchDomainInfo = useCallback(async () => {
+    const res = await fetch(`/api/domains/${domainId}`, {
+      headers: { "x-workspace-id": workspaceId },
+    });
+    if (res.ok) {
+      const data = await res.json();
+      setDomainName(data.domain);
+      setScrapeStatus(data.scrape_status);
+      setScrapeTotalPages(data.scrape_total_pages);
+      setScrapeProcessedPages(data.scrape_processed_pages);
+      setScrapeChunkCount(data.scrape_chunk_count);
+      setScrapeErrorMessage(data.scrape_error_message);
+      setLastScrapedAt(data.last_scraped_at);
+    }
   }, [domainId, workspaceId]);
+
+  useEffect(() => {
+    void fetchDomainInfo();
+  }, [fetchDomainInfo]);
 
   // Confirm dialog for content deletion
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -160,6 +178,33 @@ export default function DomainDetailPage() {
         .join(" ")
     : "This action cannot be undone.";
 
+  // Trigger a full re-index for this domain
+  const handleReindex = async () => {
+    setReindexing(true);
+    try {
+      const res = await fetch("/api/contents/import", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-workspace-id": workspaceId,
+        },
+        body: JSON.stringify({ domain_id: domainId, reindex: true }),
+      });
+      if (res.ok) {
+        showToast("Re-indexing started", "success");
+        // Refresh domain info to show the new status
+        await fetchDomainInfo();
+      } else {
+        const json = await res.json();
+        showToast(json.error ?? "Failed to start re-indexing", "error");
+      }
+    } catch {
+      showToast("Failed to start re-indexing", "error");
+    } finally {
+      setReindexing(false);
+    }
+  };
+
   return (
     <div>
       {toast && (
@@ -223,6 +268,18 @@ export default function DomainDetailPage() {
           </Button>
         </div>
       </div>
+
+      {/* Indexing status section */}
+      <DomainIndexingStatus
+        scrapeStatus={scrapeStatus as any}
+        scrapeTotalPages={scrapeTotalPages}
+        scrapeProcessedPages={scrapeProcessedPages}
+        scrapeChunkCount={scrapeChunkCount}
+        scrapeErrorMessage={scrapeErrorMessage}
+        lastScrapedAt={lastScrapedAt}
+        reindexing={reindexing}
+        onReindex={handleReindex}
+      />
 
       {/* Contents table */}
       {contentsLoading ? (

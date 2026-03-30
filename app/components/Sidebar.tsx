@@ -22,6 +22,7 @@ const licenseLinks = [
 
 const accessLinks = [
   { label: "Overview", href: "/dashboard/access" },
+  { label: "Search Configs", href: "/dashboard/access/search" },
   //{ label: "Integration", href: "/dashboard/access/integration" },
   //{ label: "Marketplace", href: "/dashboard/access/marketplace" },
   //{ label: "Settings", href: "/dashboard/access/settings" },

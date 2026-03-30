@@ -1,5 +1,5 @@
 /**
- * Normalize a URL for deduplication.
+ * Normalize a URL for deduplication and matching.
  *
  * Rules:
  * - Scheme + hostname lowercased (automatic via URL constructor)
@@ -9,17 +9,12 @@
  * - Strip trailing slash (except for root "/")
  *
  * @param rawUrl - The raw URL string to normalize
- * @returns Normalized URL string: scheme + host + path
- *
- * @example
- * normalizeUrl("HTTPS://Example.COM/Article/?ref=1#top")
- * // → "https://example.com/article"
+ * @returns Normalized URL string or null if invalid
  */
 export function normalizeUrl(rawUrl: string): string | null {
   try {
     const url = new URL(rawUrl);
 
-    // pathname is already lowercased for hostname via URL constructor
     let path = url.pathname;
 
     // Strip trailing slash unless root path

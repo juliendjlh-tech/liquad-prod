@@ -6,13 +6,14 @@ import {
 } from "@/lib/services/content.service";
 
 /**
- * GET /api/domains/:id/impact
- * → handled via query param ?impact=true
+ * GET /api/domains/:id
+ *
+ * Returns domain info, deletion impact, and indexing status.
  *
  * DELETE /api/domains/:id
  *
  * Delete a domain with catalog cleanup.
- * Contents are cascade-deleted. Catalogs referencing this domain
+ * Sources + chunks are cascade-deleted. Catalogs referencing this domain
  * have their filter_rules cleaned (domain_id removed).
  */
 
@@ -70,10 +71,42 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
+    // Fetch the latest import job for this domain to get indexing status.
+    const { data: latestJob } = await supabase
+      .from("import_jobs")
+      .select(
+        "id, scrape_status, scrape_processed_pages, scrape_error_message, urls_to_index, updated_at"
+      )
+      .eq("domain_id", domainId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // Compute scrape_total_pages from urls_to_index.length
+    const urlsToIndex: string[] = (latestJob?.urls_to_index as string[]) ?? [];
+    const scrapeTotalPages = urlsToIndex.length;
+
+    // Compute scrape_chunk_count from chunks table
+    let scrapeChunkCount = 0;
+    if (latestJob?.id) {
+      const { count } = await supabase
+        .from("chunks")
+        .select("id", { count: "exact", head: true })
+        .eq("import_job_id", latestJob.id)
+        .not("embedding", "is", null);
+      scrapeChunkCount = count ?? 0;
+    }
+
     return NextResponse.json({
       domain: domainRow.domain,
       sitemap_url: domainRow.sitemap_url,
       ...impact,
+      scrape_status: latestJob?.scrape_status ?? null,
+      scrape_total_pages: scrapeTotalPages,
+      scrape_processed_pages: latestJob?.scrape_processed_pages ?? null,
+      scrape_chunk_count: scrapeChunkCount,
+      scrape_error_message: latestJob?.scrape_error_message ?? null,
+      last_scraped_at: latestJob?.updated_at ?? null,
     });
   } catch {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

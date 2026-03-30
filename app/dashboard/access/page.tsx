@@ -1,34 +1,168 @@
-export default function AccessOverviewPage() {
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { useWorkspace } from "@/app/dashboard/workspace-context";
+import Button from "@/app/components/ui/Button";
+
+interface RagQueryLog {
+  id: string;
+  query_text: string;
+  result_count: number;
+  total_cost_eur: number;
+  created_at: string;
+}
+
+interface PaginatedLogs {
+  items: RagQueryLog[];
+  total: number;
+  page: number;
+  totalPages: number;
+  totalResults: number;
+  totalSpentEur: number;
+}
+
+const PERIOD_OPTIONS = [
+  { label: "7 days", value: 7 },
+  { label: "30 days", value: 30 },
+  { label: "90 days", value: 90 },
+] as const;
+
+export default function QueryHistoryTab() {
+  const { id: workspaceId } = useWorkspace();
+  const [logs, setLogs] = useState<PaginatedLogs | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [days, setDays] = useState(30);
+
+  const fetchLogs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: "20",
+        days: days.toString(),
+      });
+      const res = await fetch(`/api/dashboard/rag-queries?${params}`, {
+        headers: { "x-workspace-id": workspaceId },
+      });
+      if (res.ok) setLogs(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  }, [workspaceId, page, days]);
+
+  useEffect(() => { void fetchLogs(); }, [fetchLogs]);
+
+  const handlePeriodChange = (newDays: number) => {
+    setDays(newDays);
+    setPage(1);
+  };
+
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Overview</h1>
-      <div className="rounded-lg border border-gray-200 bg-white p-8 text-center">
-        <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-blue-50">
-          <svg
-            className="h-6 w-6 text-blue-600"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z"
-            />
-          </svg>
+      <div className="flex items-center justify-between mb-6">
+        <div /> {/* spacer — title is in the parent tab bar */}
+        {/* Period filter */}
+        <div className="flex gap-1 rounded-lg border border-gray-200 bg-white p-1">
+          {PERIOD_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => handlePeriodChange(opt.value)}
+              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+                days === opt.value
+                  ? "bg-gray-900 text-white"
+                  : "text-gray-600 hover:bg-gray-100"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
-        <h2 className="text-lg font-semibold text-gray-900 mb-2">
-          Content Access Dashboard
-        </h2>
-        <p className="text-sm text-gray-500 max-w-md mx-auto">
-          Monitor your API consumption, track spending across publishers, and
-          manage your licensed content integrations &mdash; all in one place.
-        </p>
-        <span className="mt-4 inline-block rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-500">
-          Coming soon
-        </span>
       </div>
+
+      {loading ? (
+        <div className="text-center py-12 text-gray-500">Loading...</div>
+      ) : !logs || logs.items.length === 0 ? (
+        <div className="rounded-lg border border-gray-200 bg-white p-8 text-center">
+          <p className="text-gray-500 mb-2">No queries in the last {days} days</p>
+          <p className="text-xs text-gray-400">RAG queries made via the SDK will appear here.</p>
+        </div>
+      ) : (
+        <>
+          {/* Summary stats */}
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+              <div className="text-xs text-gray-500">Total Queries</div>
+              <div className="text-lg font-semibold text-gray-900">{logs.total}</div>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+              <div className="text-xs text-gray-500">Total Results</div>
+              <div className="text-lg font-semibold text-gray-900">{logs.totalResults}</div>
+            </div>
+            <div className="rounded-lg border border-gray-200 bg-white px-4 py-3">
+              <div className="text-xs text-gray-500">Total Spent</div>
+              <div className="text-lg font-semibold text-gray-900">
+                {logs.totalSpentEur.toFixed(4)} EUR
+              </div>
+            </div>
+          </div>
+
+          {/* Query log table */}
+          <div className="overflow-x-auto rounded-lg border border-gray-200">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead className="bg-gray-50">
+                <tr>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Query</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Results</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cost (EUR)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 bg-white">
+                {logs.items.map((log) => (
+                  <tr key={log.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 text-sm text-gray-600 whitespace-nowrap">
+                      {new Date(log.created_at).toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900 max-w-xs truncate">
+                      {log.query_text}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 text-right">{log.result_count}</td>
+                    <td className="px-4 py-3 text-sm text-gray-600 text-right">
+                      {log.total_cost_eur.toFixed(4)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination */}
+          {logs.totalPages > 1 && (
+            <div className="flex items-center justify-between mt-4">
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-gray-600">
+                Page {logs.page} of {logs.totalPages}
+              </span>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(logs.totalPages, p + 1))}
+                disabled={page >= logs.totalPages}
+              >
+                Next
+              </Button>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }

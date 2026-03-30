@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, use } from "react";
 import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
 import Button from "@/app/components/ui/Button";
+import Toggle from "@/app/components/ui/Toggle";
+import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
 import DomainSelector from "@/app/components/catalog/DomainSelector";
 import CatalogPreview from "@/app/components/catalog/CatalogPreview";
 import type { DomainRule, FilterRules } from "@/lib/validations/catalog.schema";
@@ -28,6 +30,8 @@ interface CatalogDetail {
   filter_rules: FilterRules;
   price_eur: number;
   status: "active" | "inactive";
+  rag_enabled: boolean;
+  rag_source_count: number;
   agents: Array<{ id: string; name: string }>;
 }
 
@@ -70,6 +74,10 @@ export default function EditCatalogPage({
   const [priceEur, setPriceEur] = useState("0.00");
   const [agents, setAgents] = useState<UserAgent[]>([]);
   const [domains, setDomains] = useState<DomainWithCount[]>([]);
+  const [ragEnabled, setRagEnabled] = useState(false);
+  const [ragChunkCount, setRagChunkCount] = useState(0);
+  const [ragToggling, setRagToggling] = useState(false);
+  const [showRagDisableConfirm, setShowRagDisableConfirm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [toast, setToast] = useState<{
@@ -102,6 +110,8 @@ export default function EditCatalogPage({
         setDomainRules(data.filter_rules.domain_rules);
         setSelectedAgents(data.agents.map((a) => a.id));
         setPriceEur(data.price_eur.toFixed(2));
+        setRagEnabled(data.rag_enabled ?? false);
+        setRagChunkCount(data.rag_source_count ?? 0);
       }
     } finally {
       setLoading(false);
@@ -179,6 +189,40 @@ export default function EditCatalogPage({
     setSelectedAgents((prev) =>
       prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
     );
+  };
+
+  // Toggle RAG on/off for this catalog via PATCH
+  const handleRagToggle = async (enabled: boolean) => {
+    setRagToggling(true);
+    try {
+      const res = await fetch(`/api/catalogs/${catalogId}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-workspace-id": workspaceId,
+        },
+        body: JSON.stringify({ rag_enabled: enabled }),
+      });
+
+      if (res.ok) {
+        setRagEnabled(enabled);
+        // If we just enabled RAG, refetch to get updated chunk count
+        if (enabled) {
+          await fetchCatalog();
+        } else {
+          setRagChunkCount(0);
+        }
+        showToast(
+          enabled ? "RAG enabled — indexing started" : "RAG disabled",
+          "success"
+        );
+      } else {
+        const json = await res.json();
+        showToast(json.error ?? "Failed to toggle RAG", "error");
+      }
+    } finally {
+      setRagToggling(false);
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -310,6 +354,53 @@ export default function EditCatalogPage({
             ))}
           </div>
         </div>
+
+        {/* RAG Toggle */}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <span className="text-sm font-medium text-gray-700">
+                Semantic Search (RAG)
+              </span>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Enable vector search on this catalog&apos;s content.
+                Consumers can query and pay per result.
+              </p>
+            </div>
+            <Toggle
+              checked={ragEnabled}
+              loading={ragToggling}
+              onChange={() => {
+                if (ragEnabled) {
+                  // Show confirmation before disabling
+                  setShowRagDisableConfirm(true);
+                } else {
+                  // Enable immediately
+                  handleRagToggle(true);
+                }
+              }}
+              label="Toggle RAG"
+            />
+          </div>
+          {ragEnabled && ragChunkCount > 0 && (
+            <div className="mt-2 text-xs text-purple-600">
+              {ragChunkCount} chunks indexed
+            </div>
+          )}
+        </div>
+
+        <ConfirmDialog
+          open={showRagDisableConfirm}
+          title="Disable RAG for this catalog?"
+          description="Disabling RAG will remove this catalog from semantic search. Consumers will no longer be able to search this catalog. The scraped content remains available for other catalogs."
+          confirmLabel="Disable RAG"
+          variant="danger"
+          onConfirm={() => {
+            setShowRagDisableConfirm(false);
+            handleRagToggle(false);
+          }}
+          onCancel={() => setShowRagDisableConfirm(false)}
+        />
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">

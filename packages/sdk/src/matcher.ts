@@ -1,5 +1,6 @@
 import type { CachedRules } from "./rules-cache";
 import type { SdkEvent, FilterRule, CatalogFilterRules } from "./types";
+import { normalizeUrl } from "./url-normalize";
 
 /**
  * Decision result from the matcher.
@@ -22,8 +23,8 @@ export type MatchDecision =
  */
 export function matchUserAgent(
   userAgentString: string,
-  declaredAgents: CachedRules["user_agents"]
-): CachedRules["user_agents"][number] | null {
+  declaredAgents: CachedRules["agents"]
+): CachedRules["agents"][number] | null {
   if (!userAgentString) return null;
 
   const uaLower = userAgentString.toLowerCase();
@@ -118,7 +119,7 @@ export function matchRequest(
   }
 
   // 2. Match user-agent
-  const matchedAgent = matchUserAgent(userAgent, rules.user_agents);
+  const matchedAgent = matchUserAgent(userAgent, rules.agents);
   if (!matchedAgent) {
     return { type: "passthrough" };
   }
@@ -137,8 +138,8 @@ export function matchRequest(
     url.startsWith("http") ? url : `https://${domain}${requestPath}`;
 
   // 3.5. Content existence check — only registered content is accessible.
-  const contentKey = `${domain}${requestPath}`;
-  if (!contentPathSet.has(contentKey)) {
+  const contentKey = normalizeUrl(`https://${domain}${requestPath}`);
+  if (!contentKey || !contentPathSet.has(contentKey)) {
     return {
       type: "blocked_no_catalog",
       event: {
@@ -157,9 +158,10 @@ export function matchRequest(
 
   // 4. Find ALL matching catalogs for this agent (not just first match)
   const matchingCatalogs: Array<typeof rules.catalogs[number]> = [];
+  const agentCatalogIds = new Set(matchedAgent.catalog_ids);
 
   for (const catalog of rules.catalogs) {
-    if (!catalog.agent_ids.includes(matchedAgent.id)) continue;
+    if (!agentCatalogIds.has(catalog.id)) continue;
     if (!matchFilterRules(domain, requestPath, catalog.filter_rules)) continue;
     matchingCatalogs.push(catalog);
   }

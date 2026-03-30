@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
 import Button from "@/app/components/ui/Button";
+import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
 import PathRuleRow from "@/app/components/catalog/PathRuleRow";
 import type { PathOperator } from "@/lib/validations/catalog.schema";
 
@@ -40,6 +41,10 @@ export default function ImportDomainPage() {
   // Domain info
   const [domainInfo, setDomainInfo] = useState<DomainInfo | null>(null);
   const [domainError, setDomainError] = useState<string | null>(null);
+
+  // Reindex toggle
+  const [reindex, setReindex] = useState(false);
+  const [showReindexConfirm, setShowReindexConfirm] = useState(false);
 
   // Filters
   const [pathRules, setPathRules] = useState<PathRule[]>([]);
@@ -224,12 +229,26 @@ export default function ImportDomainPage() {
     return () => stopPolling();
   }, [stopPolling]);
 
+  /**
+   * Start the import. If reindex=true and no filters are set,
+   * we require explicit confirmation via ConfirmDialog first.
+   */
   const handleImport = async () => {
     if (!domainInfo?.sitemap_url || importJob || isOverBudget) return;
 
+    // Guard: full reindex without filters requires confirmation
+    const validRules = pathRules.filter((r) => r.value.trim() !== "");
+    if (reindex && validRules.length === 0 && !showReindexConfirm) {
+      setShowReindexConfirm(true);
+      return;
+    }
+    setShowReindexConfirm(false);
+
     try {
-      const body: Record<string, unknown> = { url: domainInfo.sitemap_url };
-      const validRules = pathRules.filter((r) => r.value.trim() !== "");
+      const body: Record<string, unknown> = {
+        domain_id: domainId,
+        reindex,
+      };
       if (validRules.length > 0) {
         body.path_rules = validRules;
         body.path_logic = pathLogic;
@@ -249,6 +268,8 @@ export default function ImportDomainPage() {
       if (res.ok || res.status === 202) {
         setImportJob({ id: json.jobId, status: "pending" });
         startPolling(json.jobId);
+      } else if (res.status === 409) {
+        showToast("An import is already running for this domain.", "error");
       } else {
         showToast(json.error ?? "Import failed", "error");
       }
@@ -359,6 +380,29 @@ export default function ImportDomainPage() {
           </button>
         </div>
 
+        {/* Reindex toggle */}
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={reindex}
+              onChange={(e) => setReindex(e.target.checked)}
+              disabled={isImporting}
+              className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <div>
+              <span className="text-sm font-medium text-gray-900">
+                Re-index existing content
+              </span>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {pathRules.filter((r) => r.value.trim() !== "").length > 0
+                  ? "Only URLs matching the filters above will be wiped and re-scraped. Other content stays intact."
+                  : "All existing content for this domain will be wiped and re-scraped from scratch."}
+              </p>
+            </div>
+          </label>
+        </div>
+
         {/* Max pages */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -464,6 +508,17 @@ export default function ImportDomainPage() {
             )}
           </div>
         )}
+
+        {/* Full reindex confirmation dialog */}
+        <ConfirmDialog
+          open={showReindexConfirm}
+          title="Full re-index"
+          description={`All ${domainInfo.content_count} existing content items for this domain will be deleted and re-scraped. During re-indexing, RAG queries and /authorize calls for this domain will return no results.`}
+          confirmLabel="Re-index everything"
+          variant="danger"
+          onConfirm={handleImport}
+          onCancel={() => setShowReindexConfirm(false)}
+        />
 
         {/* Actions */}
         <div className="flex gap-3">

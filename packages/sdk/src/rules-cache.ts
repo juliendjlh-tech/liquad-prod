@@ -20,8 +20,8 @@ export interface CachedRules {
   jwt_signing_secret: string;
   verified_domains: string[];
 
-  /** Active user-agents with dns_patterns for Identity Check */
-  user_agents: Array<{
+  /** Active agents with dns_patterns for Identity Check, each carrying its linked catalog IDs */
+  agents: Array<{
     id: string;
     name: string;
     ua_pattern: string;
@@ -31,14 +31,16 @@ export interface CachedRules {
      * Empty array = Identity Check skipped for this bot.
      */
     dns_patterns: string[];
+    /** Catalog IDs this agent is linked to */
+    catalog_ids: string[];
   }>;
 
+  /** Active catalogs (standalone — no agent references) */
   catalogs: Array<{
     id: string;
     name: string;
     filter_rules: CatalogFilterRules;
     price_eur: number;
-    agent_ids: string[];
   }>;
 
   /**

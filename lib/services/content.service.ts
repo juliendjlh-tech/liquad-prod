@@ -15,9 +15,11 @@ export interface SitemapEntry {
 export interface ImportResult {
   imported: number;
   upserted: number;
+  /** All filtered URLs (before dedup). Used to populate import_jobs.urls_to_index. */
+  filteredUrls: string[];
 }
 
-export interface ContentRow {
+export interface SourceRow {
   id: string;
   workspace_id: string;
   source_url: string;
@@ -28,14 +30,14 @@ export interface ContentRow {
   created_at: string | null;
 }
 
-export interface PaginatedContents {
-  items: ContentRow[];
+export interface PaginatedSources {
+  items: SourceRow[];
   total: number;
   page: number;
   totalPages: number;
 }
 
-export interface GetContentsParams {
+export interface GetSourcesParams {
   workspaceId: string;
   page?: number;
   limit?: number;
@@ -188,20 +190,19 @@ export async function ensureDomainExists(
 }
 
 // ---------------------------------------------------------------------------
-// Content Import
+// Source Import (from sitemap)
 // ---------------------------------------------------------------------------
 
 /**
- * Import contents from a sitemap URL into a workspace.
+ * Import sources from a sitemap URL into a workspace.
  *
  * STEPS:
  * 1. Fetch and parse the sitemap (supports sitemap index).
  * 2. Extract unique domains from all URLs.
  * 3. Create domain records for new domains (status: "unverified").
- * 4. Upsert all entries in batches (insert or update on conflict).
+ * 4. Insert new sources (skip existing via UNIQUE constraint check).
  *
- * Idempotent: uses UPSERT on UNIQUE(workspace_id, source_url) —
- * new URLs are inserted, existing URLs get their lastmod updated.
+ * Idempotent: skips URLs that already have a source row.
  */
 export interface ImportOptions {
   pathRules?: PathRule[];
@@ -220,7 +221,7 @@ export async function importFromSitemap(
   const entries = await fetchAndParseSitemap(sitemapUrl);
 
   if (entries.length === 0) {
-    return { imported: 0, upserted: 0 };
+    return { imported: 0, upserted: 0, filteredUrls: [] };
   }
 
   // Step 1b: Apply path rule filters if provided
@@ -238,7 +239,7 @@ export async function importFromSitemap(
   // Step 1c: Apply max pages cap (workspace budget)
   if (options?.maxPages !== undefined) {
     const { count } = await supabase
-      .from("contents")
+      .from("sources")
       .select("id", { count: "exact", head: true })
       .eq("workspace_id", workspaceId);
     const currentCount = count ?? 0;
@@ -246,8 +247,10 @@ export async function importFromSitemap(
     filtered = filtered.slice(0, remaining);
   }
 
+  const filteredUrls = filtered.map((e) => e.loc);
+
   if (filtered.length === 0) {
-    return { imported: 0, upserted: 0 };
+    return { imported: 0, upserted: 0, filteredUrls };
   }
 
   // Step 2-3: Extract unique domains, ensure they exist, and build hostname→UUID map
@@ -260,9 +263,8 @@ export async function importFromSitemap(
   );
   const domainMap = new Map(domainIdPairs);
 
-  // Step 4: Upsert all entries in batches of 1000
-  // Uses UNIQUE(workspace_id, source_url) constraint — inserts new records,
-  // updates lastmod on existing ones.
+  // Step 4: Insert new sources in batches of 1000.
+  // Uses check against existing source_urls to skip duplicates.
   const BATCH_SIZE = 1000;
   const allRecords = filtered.map((entry) => ({
     workspace_id: workspaceId,
@@ -271,15 +273,33 @@ export async function importFromSitemap(
     lastmod: entry.lastmod,
   }));
 
+  // Fetch all existing source_urls in this workspace to check for dupes
+  const existingUrls = new Set<string>();
+  let page = 0;
+  while (true) {
+    const { data } = await supabase
+      .from("sources")
+      .select("source_url")
+      .eq("workspace_id", workspaceId)
+      .range(page * BATCH_SIZE, (page + 1) * BATCH_SIZE - 1);
+    if (!data || data.length === 0) break;
+    for (const row of data) existingUrls.add(row.source_url);
+    if (data.length < BATCH_SIZE) break;
+    page++;
+  }
+
+  // Filter out records that already exist
+  const newRecords = allRecords.filter((r) => !existingUrls.has(r.source_url));
+
   let upserted = 0;
-  for (let i = 0; i < allRecords.length; i += BATCH_SIZE) {
-    const batch = allRecords.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
+    const batch = newRecords.slice(i, i + BATCH_SIZE);
     const { error } = await supabase
-      .from("contents")
-      .upsert(batch, { onConflict: "workspace_id,source_url" });
+      .from("sources")
+      .insert(batch);
 
     if (error) {
-      throw new Error(`Failed to upsert contents: ${error.message}`);
+      throw new Error(`Failed to insert sources: ${error.message}`);
     }
     upserted += batch.length;
   }
@@ -287,6 +307,7 @@ export async function importFromSitemap(
   return {
     imported: filtered.length,
     upserted,
+    filteredUrls,
   };
 }
 
@@ -295,7 +316,7 @@ export async function importFromSitemap(
 // ---------------------------------------------------------------------------
 
 /**
- * List all domains for a workspace with their content count.
+ * List all domains for a workspace with their source count.
  * Optionally filter by domain name substring.
  */
 export async function getDomainsWithContentCount(
@@ -322,7 +343,7 @@ export async function getDomainsWithContentCount(
 
   if (!domains || domains.length === 0) return [];
 
-  // Get content counts per domain_id in a single GROUP BY query via RPC
+  // Get source counts per domain_id in a single GROUP BY query via RPC
   const { data: counts } = await supabase.rpc("get_domain_content_counts", {
     p_workspace_id: workspaceId,
   });
@@ -341,19 +362,19 @@ export async function getDomainsWithContentCount(
 }
 
 // ---------------------------------------------------------------------------
-// Content Listing (Paginated + Search)
+// Source Listing (Paginated + Search)
 // ---------------------------------------------------------------------------
 
 /**
- * List imported contents for a workspace with pagination and optional search.
+ * List sources for a workspace with pagination and optional search.
  *
  * - Paginates using offset-based pagination.
  * - Search filters source_url using ILIKE (case-insensitive partial match).
  * - Orders by created_at DESC (newest first).
  */
-export async function getContents(
-  params: GetContentsParams
-): Promise<PaginatedContents> {
+export async function getSources(
+  params: GetSourcesParams
+): Promise<PaginatedSources> {
   const supabase = await createServerClient();
 
   const page = Math.max(1, params.page ?? 1);
@@ -371,15 +392,14 @@ export async function getContents(
       .single();
 
     if (!domainRecord) {
-      // Domain not found → return empty result
       return { items: [], total: 0, page, totalPages: 0 };
     }
     domainId = domainRecord.id;
   }
 
-  // Build query with joined domain name
+  // Build query with joined domain name.
   let query = supabase
-    .from("contents")
+    .from("sources")
     .select("id, workspace_id, source_url, domain_id, title, lastmod, created_at, domains(domain)", {
       count: "exact",
     })
@@ -400,13 +420,13 @@ export async function getContents(
   const { data, count, error } = await query;
 
   if (error) {
-    throw new Error(`Failed to list contents: ${error.message}`);
+    throw new Error(`Failed to list sources: ${error.message}`);
   }
 
   const total = count ?? 0;
 
-  // Flatten the joined domain name into ContentRow shape
-  const items: ContentRow[] = (data ?? []).map((row) => ({
+  // Flatten the joined domain name into SourceRow shape
+  const items: SourceRow[] = (data ?? []).map((row) => ({
     id: row.id,
     workspace_id: row.workspace_id,
     source_url: row.source_url,
@@ -426,40 +446,40 @@ export async function getContents(
 }
 
 // ---------------------------------------------------------------------------
-// Content Deletion
+// Source Deletion
 // ---------------------------------------------------------------------------
 
 /**
- * Delete a single content record by ID, scoped to workspace.
+ * Delete a single source by ID, scoped to workspace.
+ * Chunks are cascade-deleted via FK.
  *
  * @returns true if deleted, false if not found or not in workspace
  */
-export async function deleteContent(
-  contentId: string,
+export async function deleteSource(
+  sourceId: string,
   workspaceId: string
 ): Promise<boolean> {
   const supabase = await createServerClient();
 
-  // First check if the content exists and belongs to the workspace
-  const { data: content } = await supabase
-    .from("contents")
+  const { data: source } = await supabase
+    .from("sources")
     .select("id")
-    .eq("id", contentId)
+    .eq("id", sourceId)
     .eq("workspace_id", workspaceId)
     .single();
 
-  if (!content) {
+  if (!source) {
     return false;
   }
 
   const { error } = await supabase
-    .from("contents")
+    .from("sources")
     .delete()
-    .eq("id", contentId)
+    .eq("id", sourceId)
     .eq("workspace_id", workspaceId);
 
   if (error) {
-    throw new Error(`Failed to delete content: ${error.message}`);
+    throw new Error(`Failed to delete source: ${error.message}`);
   }
 
   return true;
@@ -476,7 +496,7 @@ export interface DomainDeleteImpact {
 
 /**
  * Compute the impact of deleting a domain before actually deleting it.
- * Returns content count and catalogs that reference this domain_id in their filter_rules.
+ * Returns source count and catalogs that reference this domain_id in their filter_rules.
  */
 export async function getDomainDeleteImpact(
   domainId: string,
@@ -494,14 +514,13 @@ export async function getDomainDeleteImpact(
 
   if (!domain) return null;
 
-  // Count contents that will be cascade-deleted
+  // Count sources that will be cascade-deleted
   const { count } = await supabase
-    .from("contents")
+    .from("sources")
     .select("id", { count: "exact", head: true })
     .eq("domain_id", domainId);
 
   // Find catalogs whose filter_rules reference this domain_id
-  // filter_rules is JSONB: { domain_rules: [{ domain_id: "..." }, ...] }
   const { data: catalogs } = await supabase
     .from("catalogs")
     .select("id, name, filter_rules")
@@ -526,7 +545,7 @@ export async function getDomainDeleteImpact(
  *
  * 1. Remove the domain_id from filter_rules of all catalogs in the workspace.
  *    If a catalog ends up with zero domain_rules, it is deactivated.
- * 2. Delete the domain (contents cascade-deleted via FK).
+ * 2. Delete the domain (sources + chunks cascade-deleted via FK).
  */
 export async function deleteDomain(
   domainId: string,
@@ -577,7 +596,7 @@ export async function deleteDomain(
     }
   }
 
-  // Delete domain (contents cascade via FK)
+  // Delete domain (sources + chunks cascade via FK)
   const { error } = await supabase
     .from("domains")
     .delete()

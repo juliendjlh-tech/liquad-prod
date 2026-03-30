@@ -104,6 +104,14 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
+  // --- Internal routes bypass: /api/internal/* uses shared secret auth ---
+  // These routes are used for internal service-to-service communication
+  // (e.g. the scraping pipeline self-invocation). They authenticate via
+  // a shared secret, not session cookies.
+  if (pathname.startsWith("/api/internal")) {
+    return response;
+  }
+
   // --- Protected pages: redirect unauthenticated users to /login ---
   if (!user && (pathname.startsWith("/dashboard") || pathname.startsWith("/onboarding"))) {
     const loginUrl = request.nextUrl.clone();

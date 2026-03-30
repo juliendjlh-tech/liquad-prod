@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import {
-  getCatalogById,
-  previewCatalogMatch,
-} from "@/lib/services/catalog.service";
+import { getCatalogById } from "@/lib/services/catalog.service";
+import { previewCatalogMatch } from "@/lib/services/catalog-preview.service";
 
 /**
  * GET /api/catalogs/:id/preview
