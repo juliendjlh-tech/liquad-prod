@@ -4,7 +4,7 @@ import { createWorkspaceSchema } from "@/lib/validations/workspace.schema";
 import {
   createWorkspace,
   getUserWorkspaces,
-} from "@/lib/services/workspace.service";
+} from "@/lib/services/workspace-crud.service";
 
 /**
  * GET /api/workspaces

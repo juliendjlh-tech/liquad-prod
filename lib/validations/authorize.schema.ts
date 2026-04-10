@@ -1,19 +1,18 @@
 import { z } from "zod";
 
 /**
- * Schema for POST /api/sdk/authorize request body.
+ * Schema for POST /api/sdk/transaction request body.
  *
- * - url: Required, valid HTTP(S) URL of the content to access.
- * - max_price_eur: Optional price ceiling. If the catalog price exceeds
- *   this value, the request is rejected without debiting.
- *
- * Used by:
- * - `app/api/sdk/authorize/route.ts` — POST handler
- * - `lib/services/authorize.service.ts` — service layer
+ * - urls: Array of content URLs to pre-authorize (batch).
+ * - agent_id: UUID of the agent (bot) that will use the tokens.
+ * - max_price_eur: Optional price ceiling per URL.
+ * - ttl_minutes: Token validity duration (default 60min, max 24h).
  */
-export const authorizeSchema = z.object({
-  url: z.url(),
+export const transactionSchema = z.object({
+  urls: z.array(z.string().url()).min(1).max(100),
+  agent_id: z.string().uuid(),
   max_price_eur: z.number().min(0).max(100).optional(),
+  ttl_minutes: z.number().int().min(1).max(1440).default(60),
 });
 
-export type AuthorizeInput = z.infer<typeof authorizeSchema>;
+export type TransactionInput = z.infer<typeof transactionSchema>;

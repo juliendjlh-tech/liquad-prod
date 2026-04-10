@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { getSources } from "@/lib/services/content.service";
+import { getSources } from "@/lib/services/source-crud.service";
 
 /**
  * GET /api/contents

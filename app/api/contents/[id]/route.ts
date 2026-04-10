@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { deleteSource } from "@/lib/services/content.service";
+import { deleteSource } from "@/lib/services/source-crud.service";
 
 /**
  * DELETE /api/contents/:id

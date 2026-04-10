@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { fetchAndParseSitemap } from "@/lib/services/content.service";
+import { fetchAndParseSitemap } from "@/lib/services/sitemap-import.service";
 import { evaluatePathRule, pathRuleSchema } from "@/lib/validations/catalog.schema";
 
 const previewSchema = z.object({

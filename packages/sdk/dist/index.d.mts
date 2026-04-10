@@ -1,153 +1,86 @@
-import { I as IdentityCheckRulesConfig, S as SdkEvent, L as LiquadConfig, a as LiquadResult } from './express-BpjGnYL2.mjs';
-export { J as JwtPayload, t as toExpressMiddleware } from './express-BpjGnYL2.mjs';
+import { L as LiquadConfig, a as LiquadResult } from './express-B3hRx0o3.mjs';
+export { C as CatalogFilterRules, D as DomainRule, F as FilterRule, S as SdkEvent, t as toExpressMiddleware } from './express-B3hRx0o3.mjs';
+import { MatchableCatalog } from './matcher.mjs';
+export { MatchRequestInput, MatchResult, MatchableAgent, matchRequest, matchUserAgent } from './matcher.mjs';
+export { normalizeUrl } from './url-normalize.mjs';
 import 'http';
 
 /**
- * Cached rules structure (mirrors SdkRules from the API).
+ * Cached rules structure (mirrors WorkspaceRules from the API).
  *
- * This interface represents the workspace rules fetched from
- * GET /api/sdk/rules and cached locally by the SDK. It includes
- * all information needed for the SDK to make local decisions:
- * - Domain verification status
- * - Bot matching patterns
- * - Catalog pricing rules
- * - Identity Check configuration
+ * Contains everything the SDK needs for local decisions:
+ * - HMAC secret for token verification
+ * - Bot matching patterns with default behavior
+ * - Identity Check IP ranges
+ * - Free catalogs (price_eur=0) for local URL matching
  */
 interface CachedRules {
     workspace_id: string;
-    jwt_signing_secret: string;
+    /** Publisher's HMAC signing secret for local token verification */
+    hmac_secret: string;
     verified_domains: string[];
-    /** Active user-agents with dns_patterns for Identity Check */
-    user_agents: Array<{
+    agents: Array<{
         id: string;
         name: string;
         ua_pattern: string;
-        /**
-         * DNS hostname glob patterns for Identity Check.
-         * Example: ["*.openai.com"]
-         * Empty array = Identity Check skipped for this bot.
-         */
-        dns_patterns: string[];
+        /** Official IP ranges (CIDR) declared by the bot operator */
+        declared_ips: string[];
+        /** Catalog IDs this agent is linked to */
+        catalog_ids: string[];
     }>;
-    catalogs: Array<{
-        id: string;
-        name: string;
-        url_patterns: string[];
-        price_eur: number;
-        agent_ids: string[];
-    }>;
-    /**
-     * Identity Check configuration for this workspace.
-     *
-     * Provides DNS verification timeout/cache settings.
-     * IC is always active — per-bot `dns_patterns` controls verification.
-     *
-     * This field may be absent in rules fetched from older API versions.
-     * The SDK uses sensible defaults if missing.
-     */
-    identity_check?: IdentityCheckRulesConfig;
+    /** Free catalogs (price_eur=0) with resolved filter_rules for local matching */
+    catalogs: MatchableCatalog[];
 }
 
 /**
- * Decision result from the matcher.
+ * HMAC Token Verification — local, zero-network verification
+ *
+ * Verifies HMAC-SHA256 signed tokens using Web Crypto API.
+ * Works on Node 18+, Cloudflare Workers, Deno, Vercel Edge.
+ *
+ * Token format: base64url( grantId.expiryUnix.hmacSignatureHex )
+ * HMAC message: grantId + "." + normalizedUrl + "." + expiryUnix
+ *
+ * The URL is NOT in the token — reconstructed from the request.
+ * This binds each token to a specific URL (prevents cross-URL reuse).
  */
-type MatchDecision = {
-    type: "passthrough";
-} | {
-    type: "granted";
-    catalogId: string;
-    price: number;
-    event: SdkEvent;
-} | {
-    type: "denied";
-    catalogId: string;
-    price: number;
-    responseBody: object;
-    event: SdkEvent;
-} | {
-    type: "blocked_no_catalog";
-    event: SdkEvent;
-};
-
-/**
- * The result of a bot identity verification.
- */
-interface VerificationResult {
-    /** Whether the bot's identity was verified via DNS */
-    verified: boolean;
-    /** The hostname returned by reverse DNS lookup. Null if rDNS failed. */
-    hostname: string | null;
-    /** How long the verification took in milliseconds */
-    durationMs: number;
-    /** Whether this result came from the in-memory cache */
-    cached: boolean;
+interface TokenVerifyResult {
+    valid: boolean;
+    grantId?: string;
 }
 /**
- * The public interface of an Identity Checker instance.
+ * Verify an HMAC-signed access token.
+ *
+ * @param token         - Base64url-encoded token from ?_lq= param or Authorization header
+ * @param normalizedUrl - The normalized URL being requested (used to reconstruct HMAC message)
+ * @param secret        - Publisher's HMAC secret (base64-encoded, from workspace rules)
+ * @param nowMs         - Current time in ms (optional, for testing)
  */
-interface IdentityChecker {
-    /**
-     * Verify a bot's identity via DNS.
-     *
-     * @param ip - The bot's IP address (e.g. "66.249.66.1")
-     * @param botId - A unique identifier for the bot (used as cache key)
-     * @param dnsPatterns - Expected DNS hostname patterns (e.g. ["*.googlebot.com"])
-     * @returns A VerificationResult indicating pass/fail
-     */
-    verify: (ip: string, botId: string, dnsPatterns: string[]) => Promise<VerificationResult>;
-}
+declare function verifyToken(token: string, normalizedUrl: string, secret: string, nowMs?: number): Promise<TokenVerifyResult>;
 
 /**
  * Liquad SDK — Universal Handler for AI Content Licensing
  *
- * This is the main entry point for the Liquad SDK. It creates a handler
- * that takes a standard Web API Request and returns a LiquadResult.
- * Works identically on Node.js 18+, Cloudflare Workers, and Vercel Edge.
- *
- * ## Pipeline Flow:
- *
- * ```
- * Request arrives
- *   │
- *   ├─ No rules loaded? ──► { blocked: false } (passthrough)
- *   │
- *   ├─ Domain not verified? ──► passthrough
- *   │
- *   ├─ User-agent not matched? ──► passthrough
- *   │
- *   ├─ No matching catalog? ──► { blocked: true, response: 403 }
- *   │
- *   ├─ Price <= defaultPrice ──► "granted" ──┐
- *   │                                        │
- *   └─ Price > defaultPrice ──► JWT check ──►│ "authorized_paid" or 402
- *                                            │
- *                           ┌────────────────┘
- *                           ▼
- *                    Identity Check gate (DoH)
- *                           │
- *                    ├─ No dns_patterns? ──► passthrough + event
- *                    └─ Has dns_patterns ──► DNS verify via DoH
- *                           │
- *                    ├─ Verified ──► passthrough + event with IC metadata
- *                    └─ Unverified ──► { blocked: true, response: 403 }
- * ```
- *
  * @module liquad-sdk
+ *
+ * handleRequest flow:
+ *
+ *   1. Load cached workspace rules (agents + free catalogs + HMAC secret)
+ *   2. Extract User-Agent → match against known agents (matchUserAgent)
+ *      └── No match → pass through (unknown bot / human) — FAST PATH
+ *   3. Extract client IP
+ *      └── Declared ranges exist + IP missing or not in ranges → 403 (spoofed UA)
+ *   4. Normalize request URL
+ *   4a. Match URL against free catalogs (price_eur=0) for this agent
+ *      └── Match → pass through (decision: "granted", no token needed)
+ *   5. Extract token from ?_lq= param or Authorization: License header
+ *      └── Token present → verify HMAC locally (0.1ms, no API call)
+ *          └── Valid   → pass through
+ *          └── Invalid → 403
+ *      └── No token → 403 + authorize_url (opt_out)
+ *   6. Events buffered and flushed in batches (5s interval or 50 events)
  */
 
-/**
- * Create a Liquad handler that processes incoming requests
- * and applies AI content licensing rules.
- *
- * Usage:
- *   const handler = createLiquadHandler({ apiKey: 'lq_...' });
- *   const result = await handler(request);
- *   if (result.blocked) return result.response;
- *
- * @param config - SDK configuration
- * @returns An async function: Request → LiquadResult
- * @throws Error only if apiKey is missing (at creation time, not at runtime)
- */
 declare function createLiquadHandler(config: LiquadConfig): (request: Request) => Promise<LiquadResult>;
 
-export { type CachedRules, type IdentityChecker, LiquadConfig, LiquadResult, type MatchDecision, SdkEvent, type VerificationResult, createLiquadHandler };
+export { type CachedRules, LiquadConfig, LiquadResult, MatchableCatalog, type TokenVerifyResult, createLiquadHandler, verifyToken };

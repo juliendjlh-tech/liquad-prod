@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { getDomainsWithContentCount } from "@/lib/services/content.service";
+import { getDomainsWithContentCount } from "@/lib/services/domain-crud.service";
 
 const createDomainSchema = z.object({
   url: z
@@ -143,7 +143,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         workspace_id: workspaceId,
         domain: hostname,
         sitemap_url: url,
-        status: "unverified",
       })
       .select("id, domain, sitemap_url")
       .single();

@@ -4,7 +4,7 @@ import { inviteMemberSchema } from "@/lib/validations/member.schema";
 import {
   getWorkspaceMembers,
   inviteMember,
-} from "@/lib/services/workspace.service";
+} from "@/lib/services/workspace-members.service";
 
 /**
  * GET /api/workspaces/:id/members

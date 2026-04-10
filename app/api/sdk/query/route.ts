@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { querySchema } from "@/lib/validations/query.schema";
-import { executeRagQuery } from "@/lib/services/rag-query.service";
+import { executeRagQuery } from "@/lib/services/rag-query";
 
 /**
  * POST /api/sdk/query
@@ -9,7 +9,7 @@ import { executeRagQuery } from "@/lib/services/rag-query.service";
  * Searches content chunks using vector similarity and charges per result.
  *
  * AUTH:
- * Authorization: Bearer lq_...  (API key, same as /api/sdk/authorize)
+ * Authorization: Bearer lq_...  (API key, same as /api/sdk/transaction)
  * User-Agent: GPTBot/1.0       (used for access control per catalog)
  *
  * REQUEST BODY:

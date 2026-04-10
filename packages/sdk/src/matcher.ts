@@ -1,46 +1,61 @@
-import type { CachedRules } from "./rules-cache";
-import type { SdkEvent, FilterRule, CatalogFilterRules } from "./types";
-import { normalizeUrl } from "./url-normalize";
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
-/**
- * Decision result from the matcher.
- */
-export type MatchDecision =
-  | { type: "passthrough" }
-  | { type: "granted"; catalogId: string; price: number; event: SdkEvent }
-  | {
-      type: "denied";
-      catalogId: string;
-      price: number;
-      responseBody: object;
-      event: SdkEvent;
-    }
-  | { type: "blocked_no_catalog"; event: SdkEvent };
-
-/**
- * Match a user-agent string against the declared user-agents.
- * Uses case-insensitive substring matching.
- */
-export function matchUserAgent(
-  userAgentString: string,
-  declaredAgents: CachedRules["agents"]
-): CachedRules["agents"][number] | null {
-  if (!userAgentString) return null;
-
-  const uaLower = userAgentString.toLowerCase();
-
-  for (const agent of declaredAgents) {
-    if (uaLower.includes(agent.ua_pattern.toLowerCase())) {
-      return agent;
-    }
-  }
-
-  return null;
+interface FilterRule {
+  operator: string;
+  value: string;
 }
 
-/**
- * Evaluate a single path rule against a pathname.
- */
+interface DomainRule {
+  domain: string;
+  path_rules?: FilterRule[];
+  path_logic?: "AND" | "OR";
+}
+
+interface CatalogFilterRules {
+  domain_rules: DomainRule[];
+}
+
+/** Minimal agent shape needed for matching and gateway decisions */
+export interface MatchableAgent {
+  id: string;
+  name: string;
+  ua_pattern: string;
+  declared_ips: string[];
+  catalog_ids: string[];
+}
+
+/** Minimal catalog shape needed for matching */
+export interface MatchableCatalog {
+  id: string;
+  name: string;
+  filter_rules: CatalogFilterRules;
+  price_eur: number;
+}
+
+/** Input for matchRequest */
+/** Input for matchRequest */
+export type MatchRequestInput = {
+  normalizedUrl: string;
+  agents: MatchableAgent[];
+  catalogs: MatchableCatalog[];
+  maxPrice?: number;
+} & (
+  | { userAgent: string; agentIds?: never }
+  | { agentIds: string[]; userAgent?: never }
+);
+
+/** Result of matchRequest — pure, no SDK event coupling */
+export type MatchResult =
+  | { type: "no_match" }
+  | { type: "no_catalog"; agent_id: string; agent_name: string }
+  | { type: "matched"; catalog_id: string; agent_id: string; agent_name: string; price_eur: number };
+
+// ---------------------------------------------------------------------------
+// Internal utilities
+// ---------------------------------------------------------------------------
+
 function evaluatePathRule(pathname: string, rule: FilterRule): boolean {
   switch (rule.operator) {
     case "contains":
@@ -55,25 +70,21 @@ function evaluatePathRule(pathname: string, rule: FilterRule): boolean {
       return pathname === rule.value;
     case "ends_with":
       return pathname.endsWith(rule.value);
+    default:
+      return false;
   }
 }
 
-/**
- * Match a request domain and path against catalog filter rules.
- * Uses structured matching (no regex).
- */
-export function matchFilterRules(
+function matchFilterRules(
   requestDomain: string,
   requestPath: string,
   filterRules: CatalogFilterRules
 ): boolean {
-  // 1. Find domain rules matching the request domain
   const matchingRules = filterRules.domain_rules.filter(
     (r) => r.domain === requestDomain
   );
   if (matchingRules.length === 0) return false;
 
-  // 2. Evaluate path_rules
   for (const rule of matchingRules) {
     if (!rule.path_rules || rule.path_rules.length === 0) return true;
 
@@ -89,138 +100,128 @@ export function matchFilterRules(
   return false;
 }
 
+export function matchUserAgent(
+  userAgentString: string,
+  agents: MatchableAgent[]
+): MatchableAgent | null {
+  if (!userAgentString) return null;
+
+  const uaLower = userAgentString.toLowerCase();
+
+  for (const agent of agents) {
+    if (uaLower.includes(agent.ua_pattern.toLowerCase())) {
+      return agent;
+    }
+  }
+
+  return null;
+}
+
 /**
- * Match an incoming request against the cached rules and return a decision.
- *
- * Algorithm:
- * 1. Extract domain from host. If NOT in verified_domains → passthrough.
- * 2. Match user-agent against declared agents. If no match → passthrough.
- * 3. Check content existence — if NOT registered → blocked_no_catalog.
- * 4. Find ALL matching catalogs for the matched agent, pick the lowest price.
- * 5. If catalog found:
- *    - price <= defaultPrice → granted
- *    - price > defaultPrice → denied (402)
- * 6. If no catalog matches → blocked_no_catalog (403)
- *
- * @param contentPathSet - Pre-built Set of known content paths for O(1) lookup.
+ * Find the best matching catalog for an agent on a given domain/path.
+ * Filters by agent's catalog_ids, filter rules, and maxPrice.
+ * Returns the catalog with the lowest price_eur, or null if none match.
  */
-export function matchRequest(
-  rules: CachedRules,
-  request: { url: string; host: string; userAgent: string },
-  defaultPrice: number,
-  contentPathSet: Set<string>
-): MatchDecision {
-  const { url, host, userAgent } = request;
+function findBestCatalog(
+  catalogs: MatchableCatalog[],
+  agentCatalogIds: string[],
+  domain: string,
+  requestPath: string,
+  maxPrice?: number
+): MatchableCatalog | null {
+  const allowedIds = new Set(agentCatalogIds);
 
-  // 1. Check domain verification
-  const domain = host.replace(/:\d+$/, ""); // Remove port if present
-  if (!rules.verified_domains.includes(domain)) {
-    return { type: "passthrough" };
-  }
+  const matching = catalogs
+    .filter(
+      (catalog) =>
+        allowedIds.has(catalog.id) &&
+        (maxPrice === undefined || catalog.price_eur <= maxPrice) &&
+        matchFilterRules(domain, requestPath, catalog.filter_rules)
+    )
+    .sort((a, b) => a.price_eur - b.price_eur);
 
-  // 2. Match user-agent
-  const matchedAgent = matchUserAgent(userAgent, rules.agents);
-  if (!matchedAgent) {
-    return { type: "passthrough" };
-  }
+  return matching[0] ?? null;
+}
 
-  // 3. Extract path from URL
+// ---------------------------------------------------------------------------
+// matchRequest — single entry point for matching
+// ---------------------------------------------------------------------------
+
+/**
+ * Match a normalized URL + user-agent against agents and catalogs.
+ * Pure function — no I/O, no side effects.
+ *
+ * Steps:
+ *   1. Parse domain + path from normalizedUrl
+ *   2. Match user-agent against agents
+ *   3. Find best catalog (lowest price, within maxPrice ceiling)
+ *
+ * @param input.normalizedUrl - Already normalized URL (via normalizeUrl())
+ * @param input.userAgent - Raw User-Agent string (mode UA matching)
+ * @param input.agentIds - Agent IDs to match directly (mode direct, skips UA matching)
+ * @param input.agents - All agents for the workspace
+ * @param input.catalogs - All catalogs for the workspace
+ * @param input.maxPrice - Only match catalogs with price_eur <= maxPrice (undefined = no filter)
+ */
+export function matchRequest(input: MatchRequestInput): MatchResult {
+  const { normalizedUrl, agents, catalogs, maxPrice } = input;
+
+  // 1. Extract domain and path from normalized URL
+  let domain: string;
   let requestPath: string;
   try {
-    requestPath = new URL(url).pathname;
+    const urlObj = new URL(normalizedUrl);
+    domain = urlObj.hostname;
+    requestPath = urlObj.pathname;
   } catch {
-    // If URL parsing fails, try using the raw url as path
-    requestPath = url.startsWith("/") ? url : `/${url}`;
+    return { type: "no_match" };
   }
 
-  const timestamp = new Date().toISOString();
-  const requestUrl =
-    url.startsWith("http") ? url : `https://${domain}${requestPath}`;
+  // 2. Resolve agent(s) — either by UA matching or by direct IDs
+  let targetAgents: MatchableAgent[];
 
-  // 3.5. Content existence check — only registered content is accessible.
-  const contentKey = normalizeUrl(`https://${domain}${requestPath}`);
-  if (!contentKey || !contentPathSet.has(contentKey)) {
+  if (input.agentIds) {
+    const idSet = new Set(input.agentIds);
+    targetAgents = agents.filter((a) => idSet.has(a.id));
+  } else {
+    const matched = matchUserAgent(input.userAgent, agents);
+    targetAgents = matched ? [matched] : [];
+  }
+
+  if (targetAgents.length === 0) {
+    return { type: "no_match" };
+  }
+
+  // 3. Find best matching catalog across all target agents (lowest price)
+  let bestResult: { agent: MatchableAgent; catalog: MatchableCatalog } | null = null;
+
+  for (const agent of targetAgents) {
+    const catalog = findBestCatalog(
+      catalogs,
+      agent.catalog_ids,
+      domain,
+      requestPath,
+      maxPrice
+    );
+
+    if (catalog && (!bestResult || catalog.price_eur < bestResult.catalog.price_eur)) {
+      bestResult = { agent, catalog };
+    }
+  }
+
+  if (!bestResult) {
     return {
-      type: "blocked_no_catalog",
-      event: {
-        domain,
-        request_url: requestUrl,
-        user_agent_name: matchedAgent.name,
-        user_agent_raw: userAgent,
-        matched_catalog_id: null,
-        decision: "blocked_no_catalog",
-        price_applied: null,
-        consumer_workspace_id: null,
-        timestamp,
-      },
-    };
-  }
-
-  // 4. Find ALL matching catalogs for this agent (not just first match)
-  const matchingCatalogs: Array<typeof rules.catalogs[number]> = [];
-  const agentCatalogIds = new Set(matchedAgent.catalog_ids);
-
-  for (const catalog of rules.catalogs) {
-    if (!agentCatalogIds.has(catalog.id)) continue;
-    if (!matchFilterRules(domain, requestPath, catalog.filter_rules)) continue;
-    matchingCatalogs.push(catalog);
-  }
-
-  if (matchingCatalogs.length === 0) {
-    return {
-      type: "blocked_no_catalog",
-      event: {
-        domain,
-        request_url: requestUrl,
-        user_agent_name: matchedAgent.name,
-        user_agent_raw: userAgent,
-        matched_catalog_id: null,
-        decision: "blocked_no_catalog",
-        price_applied: null,
-        consumer_workspace_id: null,
-        timestamp,
-      },
-    };
-  }
-
-  // 5. Pick the catalog with the lowest price
-  matchingCatalogs.sort((a, b) => a.price_eur - b.price_eur);
-  const bestCatalog = matchingCatalogs[0];
-
-  const event: SdkEvent = {
-    domain,
-    request_url: requestUrl,
-    user_agent_name: matchedAgent.name,
-    user_agent_raw: userAgent,
-    matched_catalog_id: bestCatalog.id,
-    decision: bestCatalog.price_eur <= defaultPrice ? "granted" : "denied",
-    price_applied: bestCatalog.price_eur,
-    consumer_workspace_id: null,
-    timestamp,
-  };
-
-  if (bestCatalog.price_eur <= defaultPrice) {
-    return {
-      type: "granted",
-      catalogId: bestCatalog.id,
-      price: bestCatalog.price_eur,
-      event,
+      type: "no_catalog",
+      agent_id: targetAgents[0].id,
+      agent_name: targetAgents[0].name,
     };
   }
 
   return {
-    type: "denied",
-    catalogId: bestCatalog.id,
-    price: bestCatalog.price_eur,
-    responseBody: {
-      status: "licensing_required",
-      content: { source_url: requestUrl },
-      licensing: {
-        catalog_id: bestCatalog.id,
-        price_eur: bestCatalog.price_eur,
-        currency: "EUR",
-      },
-    },
-    event,
+    type: "matched",
+    catalog_id: bestResult.catalog.id,
+    agent_id: bestResult.agent.id,
+    agent_name: bestResult.agent.name,
+    price_eur: bestResult.catalog.price_eur,
   };
 }

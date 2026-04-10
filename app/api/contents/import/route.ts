@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse, after } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
 import { importSitemapSchema } from "@/lib/validations/content.schema";
-import { importFromSitemap } from "@/lib/services/content.service";
+import { importFromSitemap } from "@/lib/services/sitemap-import.service";
 import { evaluatePathRule, type PathRule } from "@/lib/validations/catalog.schema";
 import { startScrapePipeline } from "@/lib/services/scrape-pipeline.service";
 import type { Json } from "@/lib/db/types";

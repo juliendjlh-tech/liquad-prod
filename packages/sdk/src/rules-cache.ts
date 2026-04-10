@@ -1,65 +1,33 @@
-import type {
-  LiquadConfig,
-  IdentityCheckRulesConfig,
-  CatalogFilterRules,
-} from "./types";
+import type { LiquadConfig } from "./types";
+import type { MatchableCatalog } from "./matcher";
 
 /**
- * Cached rules structure (mirrors SdkRules from the API).
+ * Cached rules structure (mirrors WorkspaceRules from the API).
  *
- * This interface represents the workspace rules fetched from
- * GET /api/sdk/rules and cached locally by the SDK. It includes
- * all information needed for the SDK to make local decisions:
- * - Domain verification status
- * - Bot matching patterns
- * - Catalog pricing rules
- * - Identity Check configuration
+ * Contains everything the SDK needs for local decisions:
+ * - HMAC secret for token verification
+ * - Bot matching patterns with default behavior
+ * - Identity Check IP ranges
+ * - Free catalogs (price_eur=0) for local URL matching
  */
 export interface CachedRules {
   workspace_id: string;
-  jwt_signing_secret: string;
+  /** Publisher's HMAC signing secret for local token verification */
+  hmac_secret: string;
   verified_domains: string[];
 
-  /** Active agents with dns_patterns for Identity Check, each carrying its linked catalog IDs */
   agents: Array<{
     id: string;
     name: string;
     ua_pattern: string;
-    /**
-     * DNS hostname glob patterns for Identity Check.
-     * Example: ["*.openai.com"]
-     * Empty array = Identity Check skipped for this bot.
-     */
-    dns_patterns: string[];
+    /** Official IP ranges (CIDR) declared by the bot operator */
+    declared_ips: string[];
     /** Catalog IDs this agent is linked to */
     catalog_ids: string[];
   }>;
 
-  /** Active catalogs (standalone — no agent references) */
-  catalogs: Array<{
-    id: string;
-    name: string;
-    filter_rules: CatalogFilterRules;
-    price_eur: number;
-  }>;
-
-  /**
-   * Content paths registered in the workspace.
-   * Format: "hostname/pathname" (e.g. "example.com/blog/article-1").
-   * Used for content existence checks — only registered content is accessible.
-   */
-  known_content_paths: string[];
-
-  /**
-   * Identity Check configuration for this workspace.
-   *
-   * Provides DNS verification timeout/cache settings.
-   * IC is always active — per-bot `dns_patterns` controls verification.
-   *
-   * This field may be absent in rules fetched from older API versions.
-   * The SDK uses sensible defaults if missing.
-   */
-  identity_check?: IdentityCheckRulesConfig;
+  /** Free catalogs (price_eur=0) with resolved filter_rules for local matching */
+  catalogs: MatchableCatalog[];
 }
 
 const MIN_REFRESH_INTERVAL = 10_000; // 10s minimum
@@ -98,7 +66,6 @@ async function fetchRules(config: LiquadConfig): Promise<CachedRules> {
  */
 export function createRulesCache(config: LiquadConfig) {
   let rules: CachedRules | null = null;
-  let contentPathSet: Set<string> | null = null;
   let lastFetchedAt = 0;
   const interval = Math.max(
     config.refreshInterval ?? 300_000,
@@ -107,10 +74,6 @@ export function createRulesCache(config: LiquadConfig) {
   const onError = config.onError ?? (() => {});
 
   return {
-    /**
-     * Get rules from cache, or fetch them if stale/missing.
-     * This is the only way to access rules — no separate start() needed.
-     */
     async getOrRefresh(): Promise<CachedRules | null> {
       if (rules && Date.now() - lastFetchedAt < interval) {
         return rules;
@@ -118,7 +81,6 @@ export function createRulesCache(config: LiquadConfig) {
 
       try {
         rules = await fetchRules(config);
-        contentPathSet = new Set(rules.known_content_paths);
         lastFetchedAt = Date.now();
       } catch (err) {
         onError(
@@ -126,26 +88,9 @@ export function createRulesCache(config: LiquadConfig) {
             ? err
             : new Error("Unknown error fetching rules")
         );
-        // Keep existing rules (stale-while-revalidate)
       }
 
       return rules;
-    },
-
-    getJwtSecret(): string | null {
-      return rules?.jwt_signing_secret ?? null;
-    },
-
-    getIdentityCheckConfig(): IdentityCheckRulesConfig | null {
-      return rules?.identity_check ?? null;
-    },
-
-    /**
-     * Get the pre-built Set of known content paths for O(1) existence checks.
-     * Returns an empty Set before the first successful rules fetch.
-     */
-    getContentPathSet(): Set<string> {
-      return contentPathSet ?? new Set();
     },
   };
 }

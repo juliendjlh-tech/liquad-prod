@@ -11,6 +11,10 @@ import type {
 } from "@/lib/validations/catalog.schema";
 import { matchContentAgainstRules } from "@/lib/validations/catalog.schema";
 import { syncCatalogSources } from "@/lib/services/catalog-linking.service";
+import { getDomainMap } from "@/lib/db/queries/domains";
+import { getAllSourceUrls } from "@/lib/db/queries/sources";
+import { getWorkspaceAgents, getCatalogAgents } from "@/lib/db/queries/agents";
+import { getCatalogs as queryCatalogs } from "@/lib/db/queries/catalogs";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,66 +48,12 @@ export interface CatalogDetail {
     id: string;
     name: string;
     ua_pattern: string;
-    is_active: boolean;
   }>;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Fetch ALL source rows from a workspace, paginating through Supabase's
- * default 1000-row limit.
- */
-async function fetchAllSourceUrls(
-  workspaceId: string,
-  columns: string = "source_url"
-): Promise<Array<Record<string, unknown>>> {
-  const supabase = await createServerClient();
-  const PAGE_SIZE = 1000;
-  const allRows: Array<Record<string, unknown>> = [];
-  let from = 0;
-
-  while (true) {
-    const { data, error } = await supabase
-      .from("sources")
-      .select(columns)
-      .eq("workspace_id", workspaceId)
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (error) {
-      throw new Error(`Failed to fetch sources: ${error.message}`);
-    }
-
-    if (!data || data.length === 0) break;
-    const rows = data as unknown as Array<Record<string, unknown>>;
-    allRows.push(...rows);
-    if (data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  return allRows;
-}
-
-/**
- * Build a map of domain_id -> hostname for a workspace.
- */
-async function buildDomainMap(
-  workspaceId: string
-): Promise<Map<string, string>> {
-  const supabase = await createServerClient();
-  const { data: domains } = await supabase
-    .from("domains")
-    .select("id, domain")
-    .eq("workspace_id", workspaceId);
-
-  const map = new Map<string, string>();
-  for (const d of domains ?? []) {
-    map.set(d.id, d.domain);
-  }
-  return map;
-}
 
 /**
  * Count sources matching filter_rules using structured matching.
@@ -141,15 +91,11 @@ export async function createCatalog(
 ): Promise<CatalogDetail> {
   const supabase = await createServerClient();
 
-  // Validate agent_ids belong to the workspace
+  // Validate agent_ids are linked to the workspace via workspace_agents
   if (data.agent_ids.length > 0) {
-    const { data: validAgents } = await supabase
-      .from("user_agents")
-      .select("id")
-      .eq("workspace_id", workspaceId)
-      .in("id", data.agent_ids);
-
-    if ((validAgents?.length ?? 0) !== data.agent_ids.length) {
+    const wsAgents = await getWorkspaceAgents(workspaceId);
+    const wsAgentIds = new Set(wsAgents.map((a) => a.id));
+    if (!data.agent_ids.every((id) => wsAgentIds.has(id))) {
       throw new Error("INVALID_AGENT_IDS");
     }
   }
@@ -190,7 +136,7 @@ export async function createCatalog(
   if (data.agent_ids.length > 0) {
     const junctionRows = data.agent_ids.map((agentId) => ({
       catalog_id: catalog.id,
-      user_agent_id: agentId,
+      agent_id: agentId,
     }));
 
     const { error: linkError } = await supabase
@@ -212,62 +158,39 @@ export async function createCatalog(
 export async function getCatalogs(
   workspaceId: string
 ): Promise<CatalogListItem[]> {
-  const supabase = await createServerClient();
+  const catalogs = await queryCatalogs([], { workspaceId });
 
-  const { data: catalogs, error } = await supabase
-    .from("catalogs")
-    .select("id, name, description, filter_rules, price_eur, status, rag_enabled, rag_source_count, created_at")
-    .eq("workspace_id", workspaceId)
-    .order("created_at", { ascending: true });
+  // Fetch all sources and domain map for filter_rules matching
+  const sourceUrls = await getAllSourceUrls(workspaceId);
+  const sources = sourceUrls.map((url) => ({ source_url: url }));
+  const domainMap = await getDomainMap(workspaceId);
 
-  if (error) {
-    throw new Error(`Failed to list catalogs: ${error.message}`);
+  // Batch-fetch agent counts for all catalogs in one query
+  const catalogIds = catalogs.map((c) => c.id);
+  const allCatalogAgents = await getCatalogAgents(catalogIds);
+  const agentCountMap = new Map<string, number>();
+  for (const link of allCatalogAgents) {
+    agentCountMap.set(link.catalog_id, (agentCountMap.get(link.catalog_id) ?? 0) + 1);
   }
 
-  // Fetch all sources and domain map for matching
-  const sources = (await fetchAllSourceUrls(
-    workspaceId,
-    "source_url"
-  )) as Array<{ source_url: string }>;
-  const domainMap = await buildDomainMap(workspaceId);
-
-  const results: CatalogListItem[] = [];
-  for (const catalog of catalogs ?? []) {
-    // Count only ACTIVE bots linked to this catalog
-    const { data: linkedAgentIds } = await supabase
-      .from("catalog_agents")
-      .select("user_agent_id")
-      .eq("catalog_id", catalog.id);
-
-    let count = 0;
-    if (linkedAgentIds && linkedAgentIds.length > 0) {
-      const { count: activeCount } = await supabase
-        .from("user_agents")
-        .select("id", { count: "exact", head: true })
-        .in("id", linkedAgentIds.map((l) => l.user_agent_id))
-        .eq("is_active", true);
-      count = activeCount ?? 0;
-    }
-
+  return catalogs.map((catalog) => {
     const filterRules = catalog.filter_rules as unknown as FilterRules;
     const contentCount = countMatchedSources(sources, filterRules, domainMap);
 
-    results.push({
+    return {
       id: catalog.id,
       name: catalog.name,
       description: catalog.description,
       filter_rules: filterRules,
-      price_eur: Number(catalog.price_eur),
+      price_eur: catalog.price_eur,
       status: catalog.status,
-      agent_count: count ?? 0,
+      agent_count: agentCountMap.get(catalog.id) ?? 0,
       content_count: contentCount,
       rag_enabled: catalog.rag_enabled ?? false,
       rag_source_count: catalog.rag_source_count ?? 0,
       created_at: catalog.created_at!,
-    });
-  }
-
-  return results;
+    };
+  });
 }
 
 /**
@@ -277,48 +200,24 @@ export async function getCatalogById(
   catalogId: string,
   workspaceId: string
 ): Promise<CatalogDetail | null> {
-  const supabase = await createServerClient();
+  const results = await queryCatalogs([catalogId], { workspaceId });
+  const catalog = results[0];
+  if (!catalog) return null;
 
-  const { data: catalog, error } = await supabase
-    .from("catalogs")
-    .select("id, name, description, filter_rules, price_eur, status, rag_enabled, rag_source_count, created_at")
-    .eq("id", catalogId)
-    .eq("workspace_id", workspaceId)
-    .single();
-
-  if (error || !catalog) {
-    return null;
-  }
-
-  // Fetch linked agents
-  const { data: links } = await supabase
-    .from("catalog_agents")
-    .select("user_agent_id")
-    .eq("catalog_id", catalogId);
-
-  const agentIds = (links ?? []).map((l) => l.user_agent_id);
-
-  let agents: CatalogDetail["agents"] = [];
-  if (agentIds.length > 0) {
-    const { data: agentData } = await supabase
-      .from("user_agents")
-      .select("id, name, ua_pattern, is_active")
-      .in("id", agentIds);
-
-    agents = (agentData ?? []).map((a) => ({
-      id: a.id,
-      name: a.name,
-      ua_pattern: a.ua_pattern,
-      is_active: a.is_active ?? true,
-    }));
-  }
+  // Fetch linked agents in a single query
+  const links = await getCatalogAgents([catalogId]);
+  const agents = links.map((l) => ({
+    id: l.agent.id,
+    name: l.agent.name,
+    ua_pattern: l.agent.ua_pattern,
+  }));
 
   return {
     id: catalog.id,
     name: catalog.name,
     description: catalog.description,
     filter_rules: catalog.filter_rules as unknown as FilterRules,
-    price_eur: Number(catalog.price_eur),
+    price_eur: catalog.price_eur,
     status: catalog.status,
     rag_enabled: catalog.rag_enabled ?? false,
     rag_source_count: catalog.rag_source_count ?? 0,
@@ -345,13 +244,9 @@ export async function updateCatalog(
   // If agent_ids provided, validate and replace
   if (data.agent_ids !== undefined) {
     if (data.agent_ids.length > 0) {
-      const { data: validAgents } = await supabase
-        .from("user_agents")
-        .select("id")
-        .eq("workspace_id", workspaceId)
-        .in("id", data.agent_ids);
-
-      if ((validAgents?.length ?? 0) !== data.agent_ids.length) {
+      const wsAgents = await getWorkspaceAgents(workspaceId);
+      const wsAgentIds = new Set(wsAgents.map((a) => a.id));
+      if (!data.agent_ids.every((id) => wsAgentIds.has(id))) {
         throw new Error("INVALID_AGENT_IDS");
       }
     }
@@ -365,7 +260,7 @@ export async function updateCatalog(
       await supabase.from("catalog_agents").insert(
         data.agent_ids.map((agentId) => ({
           catalog_id: catalogId,
-          user_agent_id: agentId,
+          agent_id: agentId,
         }))
       );
     }

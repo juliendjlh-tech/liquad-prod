@@ -11,31 +11,14 @@
 --    that created it. Required for the diff-based progress tracking.
 -- ============================================================================
 
--- 1. Add domain_id FK (nullable for backwards compat with old jobs)
+-- Done 1. Add domain_id FK (nullable for backwards compat with old jobs)
 ALTER TABLE public.import_jobs
   ADD COLUMN IF NOT EXISTS domain_id UUID REFERENCES public.domains(id) ON DELETE SET NULL;
 
--- 2. Add reindex flag (default false = import new content only)
-ALTER TABLE public.import_jobs
-  ADD COLUMN IF NOT EXISTS reindex BOOLEAN NOT NULL DEFAULT false;
-
--- 3. Add urls_to_index — immutable after job creation
+-- 3. DONE - Add urls_to_index — immutable after job creation
 ALTER TABLE public.import_jobs
   ADD COLUMN IF NOT EXISTS urls_to_index TEXT[] NOT NULL DEFAULT '{}';
 
--- 4. Add import_job_id FK on contents
-ALTER TABLE public.contents
-  ADD COLUMN IF NOT EXISTS import_job_id UUID REFERENCES public.import_jobs(id) ON DELETE SET NULL;
-
--- Index for fast lookup: "is there a running job for this domain?"
-CREATE INDEX IF NOT EXISTS idx_import_jobs_domain_status
-  ON public.import_jobs (domain_id, status)
-  WHERE status IN ('pending', 'scrapping');
-
--- Index for fast diff: "which URLs from this job already have content?"
-CREATE INDEX IF NOT EXISTS idx_contents_import_job_id
-  ON public.contents (import_job_id)
-  WHERE import_job_id IS NOT NULL;
 
 -- 5. Add scrape pipeline columns
 --    scrape_status tracks the scraping phase (separate from import status).
@@ -47,6 +30,3 @@ CREATE INDEX IF NOT EXISTS idx_contents_import_job_id
 ALTER TABLE public.import_jobs
   ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending'
   CHECK (status IN ('pending', 'scraping', 'scraped', 'error'));
-
-ALTER TABLE public.import_jobs
-  ADD COLUMN IF NOT EXISTS scrape_error_message TEXT;

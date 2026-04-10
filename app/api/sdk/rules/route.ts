@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateSdkRequest } from "@/lib/services/sdk-auth.service";
-import { getWorkspaceRules } from "@/lib/services/sdk.service";
+import { getGatewayRules } from "@/lib/services/sdk-gateway.service";
 
 /**
  * GET /api/sdk/rules
@@ -20,7 +20,7 @@ import { getWorkspaceRules } from "@/lib/services/sdk.service";
  * - Cache-Control: private, max-age=300 (5 minutes)
  *
  * RESPONSES:
- * - 200: SdkRules object
+ * - 200: WorkspaceRules object
  * - 401: Invalid/missing API key
  * - 500: Internal server error
  */
@@ -36,7 +36,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const rules = await getWorkspaceRules(authResult.workspaceId);
+    const rules = await getGatewayRules(authResult.workspaceId);
 
     const response = NextResponse.json(rules, { status: 200 });
     response.headers.set("Cache-Control", "private, max-age=300");

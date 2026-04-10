@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateSdkRequest } from "@/lib/services/sdk-auth.service";
 import { sdkEventBatchSchema } from "@/lib/validations/sdk-event.schema";
-import { ingestEvents } from "@/lib/services/sdk.service";
+import { ingestEvents } from "@/lib/services/sdk-ingest.service";
 
 /**
  * POST /api/sdk/events

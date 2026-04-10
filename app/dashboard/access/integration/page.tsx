@@ -221,7 +221,7 @@ function APIGuide() {
               <p className="text-gray-500 text-xs mt-0.5">
                 Your bot calls{" "}
                 <code className="bg-gray-100 px-1 rounded font-mono">
-                  POST /api/sdk/authorize
+                  POST /api/sdk/transaction
                 </code>{" "}
                 with your API key and the URL it wants to access. Liquad checks
                 your license, debits your balance, and returns a signed JWT
@@ -295,7 +295,7 @@ function APIGuide() {
               Using curl:
             </p>
             <CodeBlock>
-              {`curl -X POST https://api.liquad.app/api/sdk/authorize \\
+              {`curl -X POST https://api.liquad.app/api/sdk/transaction \\
   -H "Authorization: Bearer lq_your_api_key_here" \\
   -H "Content-Type: application/json" \\
   -d '{"url": "https://example-publisher.com/article-123"}'`}
@@ -310,7 +310,7 @@ function APIGuide() {
               {`import requests
 
 response = requests.post(
-    "https://api.liquad.app/api/sdk/authorize",
+    "https://api.liquad.app/api/sdk/transaction",
     json={"url": "https://example-publisher.com/article-123"},
     headers={"Authorization": "Bearer lq_your_api_key_here"},
 )
@@ -414,7 +414,7 @@ TARGET_URL = "https://example-publisher.com/article-123"
 
 # Step 1: Get authorization token
 auth_response = requests.post(
-    "https://api.liquad.app/api/sdk/authorize",
+    "https://api.liquad.app/api/sdk/transaction",
     json={"url": TARGET_URL},
     headers={"Authorization": f"Bearer {API_KEY}"},
 )

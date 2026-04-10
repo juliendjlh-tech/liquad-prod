@@ -1,27 +1,9 @@
 /**
- * JWT payload claims for access tokens.
- * Signed by publisher's jwt_signing_secret, verified locally by SDK.
- */
-export interface JwtPayload {
-  sub: string; // consumer_workspace_id
-  pub: string; // publisher_workspace_id
-  url: string; // normalized content URL
-  cat: string; // catalog_id
-  amt: number; // price EUR
-  exp: number; // expiration timestamp
-  iat: number; // issued at
-  jti: string; // grant_id
-}
-
-/**
  * Configuration for the Liquad SDK.
  */
 export interface LiquadConfig {
   /** Required: workspace API key (starts with "lq_") */
   apiKey: string;
-
-  /** Default price threshold in EUR. Default: 0 */
-  defaultPrice?: number;
 
   /** Interval in ms to consider cached rules fresh. Default: 300000 (5 min) */
   refreshInterval?: number;
@@ -38,6 +20,7 @@ export interface LiquadConfig {
    * If omitted, async tasks are fire-and-forget (fine in Node.js long-lived processes).
    */
   waitUntil?: (promise: Promise<unknown>) => void;
+
 }
 
 /**
@@ -113,7 +96,8 @@ export interface SdkEvent {
     | "authorized_paid"
     | "denied_authorization_required"
     | "denied_invalid_token"
-    | "denied_identity_check";
+    | "denied_identity_check"
+    | "allowed_opt_in";
   price_applied: number | null;
   consumer_workspace_id: string | null;
   timestamp: string; // ISO 8601
@@ -133,27 +117,3 @@ export interface SdkEvent {
   ic_duration_ms?: number | null;
 }
 
-// ---------------------------------------------------------------------------
-// Identity Check Types (used by rules-cache and identity-check modules)
-// ---------------------------------------------------------------------------
-
-/**
- * Identity Check configuration received from the server as part of workspace rules.
- *
- * Provides recommended settings for DNS verification behavior.
- * IC is always active — the per-bot `dns_patterns` array controls whether
- * a specific bot is verified (empty array = IC skipped for that bot).
- */
-export interface IdentityCheckRulesConfig {
-  /**
-   * How long to cache DNS verification results (in milliseconds).
-   * Default from server: 3,600,000 (1 hour).
-   */
-  cache_ttl_ms: number;
-
-  /**
-   * Maximum time to wait for a DNS lookup (in milliseconds).
-   * Default from server: 500.
-   */
-  dns_timeout_ms: number;
-}

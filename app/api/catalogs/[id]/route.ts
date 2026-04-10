@@ -6,7 +6,7 @@ import {
   updateCatalog,
   deleteCatalog,
 } from "@/lib/services/catalog.service";
-import { hasVerifiedDomain } from "@/lib/services/domain.service";
+
 
 /**
  * GET /api/catalogs/:id
@@ -153,18 +153,7 @@ export async function PATCH(
       );
     }
 
-    // If activating, check for verified domains (warning only, not blocking)
-    const response: Record<string, unknown> = { ...updated };
-
-    if (validation.data.status === "active") {
-      const hasVerified = await hasVerifiedDomain(workspaceId);
-      if (!hasVerified) {
-        response.warning =
-          "No verified domains. This catalog will not take effect until at least one domain is verified.";
-      }
-    }
-
-    return NextResponse.json(response, { status: 200 });
+    return NextResponse.json(updated, { status: 200 });
   } catch (err) {
     if (err instanceof Error && err.message === "INVALID_AGENT_IDS") {
       return NextResponse.json(

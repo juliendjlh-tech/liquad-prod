@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { getWorkspaceById } from "@/lib/services/workspace.service";
+import { getWorkspaceById } from "@/lib/services/workspace-crud.service";
 
 /**
  * GET /api/workspaces/:id

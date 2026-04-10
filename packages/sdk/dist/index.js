@@ -21,7 +21,11 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var index_exports = {};
 __export(index_exports, {
   createLiquadHandler: () => createLiquadHandler,
-  toExpressMiddleware: () => toExpressMiddleware
+  matchRequest: () => matchRequest,
+  matchUserAgent: () => matchUserAgent,
+  normalizeUrl: () => normalizeUrl,
+  toExpressMiddleware: () => toExpressMiddleware,
+  verifyToken: () => verifyToken
 });
 module.exports = __toCommonJS(index_exports);
 
@@ -52,10 +56,6 @@ function createRulesCache(config) {
   const onError = config.onError ?? (() => {
   });
   return {
-    /**
-     * Get rules from cache, or fetch them if stale/missing.
-     * This is the only way to access rules — no separate start() needed.
-     */
     async getOrRefresh() {
       if (rules && Date.now() - lastFetchedAt < interval) {
         return rules;
@@ -69,275 +69,257 @@ function createRulesCache(config) {
         );
       }
       return rules;
-    },
-    getJwtSecret() {
-      return rules?.jwt_signing_secret ?? null;
-    },
-    getIdentityCheckConfig() {
-      return rules?.identity_check ?? null;
     }
   };
 }
 
 // src/matcher.ts
-function matchUserAgent(userAgentString, declaredAgents) {
+function evaluatePathRule(pathname, rule) {
+  switch (rule.operator) {
+    case "contains":
+      return pathname.includes(rule.value);
+    case "not_contains":
+      return !pathname.includes(rule.value);
+    case "starts_with":
+      return pathname.startsWith(rule.value);
+    case "not_starts_with":
+      return !pathname.startsWith(rule.value);
+    case "equals":
+      return pathname === rule.value;
+    case "ends_with":
+      return pathname.endsWith(rule.value);
+    default:
+      return false;
+  }
+}
+function matchFilterRules(requestDomain, requestPath, filterRules) {
+  const matchingRules = filterRules.domain_rules.filter(
+    (r) => r.domain === requestDomain
+  );
+  if (matchingRules.length === 0) return false;
+  for (const rule of matchingRules) {
+    if (!rule.path_rules || rule.path_rules.length === 0) return true;
+    const logic = rule.path_logic ?? "AND";
+    const matches = logic === "AND" ? rule.path_rules.every((pr) => evaluatePathRule(requestPath, pr)) : rule.path_rules.some((pr) => evaluatePathRule(requestPath, pr));
+    if (matches) return true;
+  }
+  return false;
+}
+function matchUserAgent(userAgentString, agents) {
   if (!userAgentString) return null;
   const uaLower = userAgentString.toLowerCase();
-  for (const agent of declaredAgents) {
+  for (const agent of agents) {
     if (uaLower.includes(agent.ua_pattern.toLowerCase())) {
       return agent;
     }
   }
   return null;
 }
-function matchUrlPatterns(requestPath, urlPatterns) {
-  for (const pattern of urlPatterns) {
-    try {
-      const regex = new RegExp(pattern);
-      if (regex.test(requestPath)) {
-        return true;
-      }
-    } catch {
-    }
-  }
-  return false;
+function findBestCatalog(catalogs, agentCatalogIds, domain, requestPath, maxPrice) {
+  const allowedIds = new Set(agentCatalogIds);
+  const matching = catalogs.filter(
+    (catalog) => allowedIds.has(catalog.id) && (maxPrice === void 0 || catalog.price_eur <= maxPrice) && matchFilterRules(domain, requestPath, catalog.filter_rules)
+  ).sort((a, b) => a.price_eur - b.price_eur);
+  return matching[0] ?? null;
 }
-function matchRequest(rules, request, defaultPrice) {
-  const { url, host, userAgent } = request;
-  const domain = host.replace(/:\d+$/, "");
-  if (!rules.verified_domains.includes(domain)) {
-    return { type: "passthrough" };
-  }
-  const matchedAgent = matchUserAgent(userAgent, rules.user_agents);
-  if (!matchedAgent) {
-    return { type: "passthrough" };
-  }
+function matchRequest(input) {
+  const { normalizedUrl, agents, catalogs, maxPrice } = input;
+  let domain;
   let requestPath;
   try {
-    requestPath = new URL(url).pathname;
+    const urlObj = new URL(normalizedUrl);
+    domain = urlObj.hostname;
+    requestPath = urlObj.pathname;
   } catch {
-    requestPath = url.startsWith("/") ? url : `/${url}`;
+    return { type: "no_match" };
   }
-  const timestamp = (/* @__PURE__ */ new Date()).toISOString();
-  const requestUrl = url.startsWith("http") ? url : `https://${domain}${requestPath}`;
-  for (const catalog of rules.catalogs) {
-    if (!catalog.agent_ids.includes(matchedAgent.id)) {
-      continue;
-    }
-    if (!matchUrlPatterns(requestPath, catalog.url_patterns)) {
-      continue;
-    }
-    const event = {
+  let targetAgents;
+  if (input.agentIds) {
+    const idSet = new Set(input.agentIds);
+    targetAgents = agents.filter((a) => idSet.has(a.id));
+  } else {
+    const matched = matchUserAgent(input.userAgent, agents);
+    targetAgents = matched ? [matched] : [];
+  }
+  if (targetAgents.length === 0) {
+    return { type: "no_match" };
+  }
+  let bestResult = null;
+  for (const agent of targetAgents) {
+    const catalog = findBestCatalog(
+      catalogs,
+      agent.catalog_ids,
       domain,
-      request_url: requestUrl,
-      user_agent_name: matchedAgent.name,
-      user_agent_raw: userAgent,
-      matched_catalog_id: catalog.id,
-      decision: catalog.price_eur <= defaultPrice ? "granted" : "denied",
-      price_applied: catalog.price_eur,
-      consumer_workspace_id: null,
-      timestamp
-    };
-    if (catalog.price_eur <= defaultPrice) {
-      return {
-        type: "granted",
-        catalogId: catalog.id,
-        price: catalog.price_eur,
-        event
-      };
+      requestPath,
+      maxPrice
+    );
+    if (catalog && (!bestResult || catalog.price_eur < bestResult.catalog.price_eur)) {
+      bestResult = { agent, catalog };
     }
+  }
+  if (!bestResult) {
     return {
-      type: "denied",
-      catalogId: catalog.id,
-      price: catalog.price_eur,
-      responseBody: {
-        status: "licensing_required",
-        content: { source_url: requestUrl },
-        licensing: {
-          catalog_id: catalog.id,
-          price_eur: catalog.price_eur,
-          currency: "EUR"
-        }
-      },
-      event
+      type: "no_catalog",
+      agent_id: targetAgents[0].id,
+      agent_name: targetAgents[0].name
     };
   }
   return {
-    type: "blocked_no_catalog",
-    event: {
-      domain,
-      request_url: requestUrl,
-      user_agent_name: matchedAgent.name,
-      user_agent_raw: userAgent,
-      matched_catalog_id: null,
-      decision: "blocked_no_catalog",
-      price_applied: null,
-      consumer_workspace_id: null,
-      timestamp
-    }
+    type: "matched",
+    catalog_id: bestResult.catalog.id,
+    agent_id: bestResult.agent.id,
+    agent_name: bestResult.agent.name,
+    price_eur: bestResult.catalog.price_eur
   };
 }
 
-// src/identity-check.ts
-var DEFAULT_CACHE_TTL_MS = 36e5;
-var DEFAULT_DNS_TIMEOUT_MS = 500;
-var MAX_CACHE_ENTRIES = 1e4;
-var DOH_RESOLVER = "https://cloudflare-dns.com/dns-query";
-function matchDnsPattern(hostname, pattern) {
-  try {
-    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\\\*/g, ".+");
-    const regex = new RegExp(`^${escaped}$`, "i");
-    return regex.test(hostname);
-  } catch {
-    return false;
+// src/ip-check.ts
+function ipv4ToInt(ip) {
+  const parts = ip.split(".");
+  if (parts.length !== 4) return NaN;
+  return parts.reduce((acc, octet) => {
+    const n = parseInt(octet, 10);
+    if (isNaN(n) || n < 0 || n > 255) return NaN;
+    return (acc << 8) + n;
+  }, 0) >>> 0;
+}
+function isIpv4InCidr(ip, cidr) {
+  const slashIndex = cidr.indexOf("/");
+  if (slashIndex === -1) {
+    return ip === cidr;
   }
+  const network = cidr.slice(0, slashIndex);
+  const prefix = parseInt(cidr.slice(slashIndex + 1), 10);
+  if (isNaN(prefix) || prefix < 0 || prefix > 32) return false;
+  const mask = prefix === 0 ? 0 : ~0 << 32 - prefix >>> 0;
+  const ipInt = ipv4ToInt(ip);
+  const netInt = ipv4ToInt(network);
+  if (isNaN(ipInt) || isNaN(netInt)) return false;
+  return (ipInt & mask) === (netInt & mask);
 }
-function matchAnyDnsPattern(hostname, patterns) {
-  return patterns.some((pattern) => matchDnsPattern(hostname, pattern));
-}
-function ipToArpa(ip) {
-  return ip.split(".").reverse().join(".") + ".in-addr.arpa";
-}
-async function reverseDns(ip, timeoutMs) {
-  const resp = await fetch(
-    `${DOH_RESOLVER}?name=${ipToArpa(ip)}&type=PTR`,
-    {
-      headers: { Accept: "application/dns-json" },
-      signal: AbortSignal.timeout(timeoutMs)
-    }
-  );
-  if (!resp.ok) return [];
-  const data = await resp.json();
-  return (data.Answer ?? []).filter((a) => a.type === 12).map((a) => a.data.replace(/\.$/, ""));
-}
-async function forwardDns(hostname, timeoutMs) {
-  const resp = await fetch(
-    `${DOH_RESOLVER}?name=${hostname}&type=A`,
-    {
-      headers: { Accept: "application/dns-json" },
-      signal: AbortSignal.timeout(timeoutMs)
-    }
-  );
-  if (!resp.ok) return [];
-  const data = await resp.json();
-  return (data.Answer ?? []).filter((a) => a.type === 1).map((a) => a.data);
-}
-function createIdentityChecker(config = {}) {
-  const cacheTtlMs = config.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
-  const dnsTimeoutMs = config.dnsTimeoutMs ?? DEFAULT_DNS_TIMEOUT_MS;
-  const onError = config.onError ?? (() => {
-  });
-  const cache = /* @__PURE__ */ new Map();
-  function evictIfOverCapacity() {
-    if (cache.size <= MAX_CACHE_ENTRIES) return;
-    const entriesToRemove = cache.size - MAX_CACHE_ENTRIES;
-    const keysToDelete = [];
-    let count = 0;
-    for (const key of cache.keys()) {
-      if (count >= entriesToRemove) break;
-      keysToDelete.push(key);
-      count++;
-    }
-    for (const key of keysToDelete) {
-      cache.delete(key);
-    }
-  }
-  async function verify(ip, botId, dnsPatterns) {
-    const startTime = Date.now();
+function isIpInRanges(ip, ranges) {
+  if (!ip || ranges.length === 0) return false;
+  if (ip.includes(":")) return false;
+  return ranges.some((range) => {
     try {
-      const cacheKey = `${ip}:${botId}`;
-      const cached = cache.get(cacheKey);
-      if (cached && Date.now() - cached.checkedAt <= cacheTtlMs) {
-        return {
-          ...cached.result,
-          cached: true,
-          durationMs: Date.now() - startTime
-        };
-      }
-      let hostnames;
-      try {
-        hostnames = await reverseDns(ip, dnsTimeoutMs);
-      } catch (err) {
-        onError(
-          err instanceof Error ? err : new Error(`rDNS failed for ${ip}`)
-        );
-        const failResult = {
-          verified: false,
-          hostname: null,
-          durationMs: Date.now() - startTime,
-          cached: false
-        };
-        cache.set(cacheKey, { result: failResult, checkedAt: Date.now() });
-        evictIfOverCapacity();
-        return failResult;
-      }
-      if (hostnames.length === 0) {
-        const failResult = {
-          verified: false,
-          hostname: null,
-          durationMs: Date.now() - startTime,
-          cached: false
-        };
-        cache.set(cacheKey, { result: failResult, checkedAt: Date.now() });
-        evictIfOverCapacity();
-        return failResult;
-      }
-      const hostname = hostnames[0];
-      if (!matchAnyDnsPattern(hostname, dnsPatterns)) {
-        const failResult = {
-          verified: false,
-          hostname,
-          durationMs: Date.now() - startTime,
-          cached: false
-        };
-        cache.set(cacheKey, { result: failResult, checkedAt: Date.now() });
-        evictIfOverCapacity();
-        return failResult;
-      }
-      let resolvedIps;
-      try {
-        resolvedIps = await forwardDns(hostname, dnsTimeoutMs);
-      } catch (err) {
-        onError(
-          err instanceof Error ? err : new Error(`fDNS failed for ${hostname}`)
-        );
-        const failResult = {
-          verified: false,
-          hostname,
-          durationMs: Date.now() - startTime,
-          cached: false
-        };
-        cache.set(cacheKey, { result: failResult, checkedAt: Date.now() });
-        evictIfOverCapacity();
-        return failResult;
-      }
-      const ipMatches = resolvedIps.includes(ip);
-      const finalResult = {
-        verified: ipMatches,
-        hostname,
-        durationMs: Date.now() - startTime,
-        cached: false
-      };
-      cache.set(cacheKey, { result: finalResult, checkedAt: Date.now() });
-      evictIfOverCapacity();
-      return finalResult;
-    } catch (err) {
-      onError(
-        err instanceof Error ? err : new Error("Unexpected error in identity check")
-      );
-      return {
-        verified: false,
-        hostname: null,
-        durationMs: Date.now() - startTime,
-        cached: false
-      };
+      return isIpv4InCidr(ip, range);
+    } catch {
+      return false;
     }
-  }
-  return { verify };
+  });
 }
 
-// src/index.ts
-var import_jose = require("jose");
+// src/url-normalize.ts
+function normalizeUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    let path = url.pathname;
+    if (path.length > 1 && path.endsWith("/")) {
+      path = path.slice(0, -1);
+    }
+    return `${url.protocol}//${url.hostname}${path}`;
+  } catch {
+    return null;
+  }
+}
+
+// src/token-verify.ts
+var cachedSecret = null;
+var cachedKey = null;
+async function verifyToken(token, normalizedUrl, secret, nowMs) {
+  let decoded;
+  try {
+    decoded = atob(token.replace(/-/g, "+").replace(/_/g, "/"));
+  } catch {
+    return { valid: false };
+  }
+  const dotIdx1 = decoded.indexOf(".");
+  const dotIdx2 = decoded.indexOf(".", dotIdx1 + 1);
+  if (dotIdx1 === -1 || dotIdx2 === -1) return { valid: false };
+  const grantId = decoded.slice(0, dotIdx1);
+  const expiryStr = decoded.slice(dotIdx1 + 1, dotIdx2);
+  const sigHex = decoded.slice(dotIdx2 + 1);
+  if (!grantId || !expiryStr || !sigHex) return { valid: false };
+  const expiryUnix = parseInt(expiryStr, 10);
+  if (isNaN(expiryUnix)) return { valid: false };
+  const expiryMs = expiryUnix * 1e3;
+  if ((nowMs ?? Date.now()) >= expiryMs) return { valid: false };
+  if (secret !== cachedSecret || !cachedKey) {
+    try {
+      const keyData = Uint8Array.from(atob(secret), (c) => c.charCodeAt(0));
+      cachedKey = await crypto.subtle.importKey(
+        "raw",
+        keyData,
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["verify"]
+      );
+      cachedSecret = secret;
+    } catch {
+      return { valid: false };
+    }
+  }
+  const message = `${grantId}.${normalizedUrl}.${expiryStr}`;
+  const hexPairs = sigHex.match(/.{2}/g);
+  if (!hexPairs || hexPairs.length !== 32) return { valid: false };
+  const sigBytes = new Uint8Array(hexPairs.map((h) => parseInt(h, 16)));
+  const valid = await crypto.subtle.verify(
+    "HMAC",
+    cachedKey,
+    sigBytes,
+    new TextEncoder().encode(message)
+  );
+  return valid ? { valid: true, grantId } : { valid: false };
+}
+
+// src/event-buffer.ts
+function createEventBuffer(config) {
+  const buffer = [];
+  let timer = null;
+  const flushInterval = config.flushIntervalMs ?? 5e3;
+  const maxSize = config.maxBufferSize ?? 50;
+  function flush() {
+    if (buffer.length === 0) return;
+    const batch = buffer.splice(0);
+    const promise = fetch(`${config.apiBaseUrl}/api/sdk/events`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ events: batch })
+    }).catch((err) => {
+      config.onError?.(
+        err instanceof Error ? err : new Error("Event flush error")
+      );
+    });
+    if (config.waitUntil) config.waitUntil(promise);
+  }
+  function scheduleFlush() {
+    if (timer) return;
+    timer = setTimeout(() => {
+      timer = null;
+      flush();
+    }, flushInterval);
+  }
+  return {
+    /** Add an event to the buffer. Flushes automatically when full or on timer. */
+    push(event) {
+      buffer.push(event);
+      if (buffer.length >= maxSize) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        flush();
+      } else {
+        scheduleFlush();
+      }
+    },
+    /** Force flush all buffered events (e.g. on graceful shutdown). */
+    flush
+  };
+}
 
 // src/express.ts
 function toExpressMiddleware(handler) {
@@ -370,18 +352,6 @@ function toExpressMiddleware(handler) {
 }
 
 // src/index.ts
-function normalizeUrlForSdk(rawUrl) {
-  try {
-    const url = new URL(rawUrl);
-    let path = url.pathname;
-    if (path.length > 1 && path.endsWith("/")) {
-      path = path.slice(0, -1);
-    }
-    return `${url.protocol}//${url.hostname}${path}`;
-  } catch {
-    return rawUrl;
-  }
-}
 function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), {
     status,
@@ -398,260 +368,159 @@ function extractSourceIp(request) {
   }
   return null;
 }
-function sendEvent(config, event) {
-  const url = `${config.apiBaseUrl ?? "https://liquad.app"}/api/sdk/events`;
-  const promise = fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({ events: [event] })
-  }).catch((err) => {
-    const onError = config.onError ?? (() => {
-    });
-    onError(
-      err instanceof Error ? err : new Error("Event send error")
-    );
-  });
-  if (config.waitUntil) {
-    config.waitUntil(promise);
+function extractToken(request) {
+  try {
+    const url = new URL(request.url);
+    const param = url.searchParams.get("_lq");
+    if (param) return param;
+  } catch {
   }
-}
-function enrichEventWithIcMetadata(event, sourceIp, icResult) {
-  if (!icResult) return event;
-  return {
-    ...event,
-    source_ip: sourceIp,
-    ic_verified: icResult.verified,
-    ic_hostname: icResult.hostname,
-    ic_duration_ms: icResult.durationMs
-  };
+  const auth = request.headers.get("authorization");
+  if (auth?.startsWith("License ")) {
+    const token = auth.slice(8).trim();
+    return token || null;
+  }
+  return null;
 }
 function createLiquadHandler(config) {
   if (!config.apiKey) {
     throw new Error("apiKey is required");
   }
-  const defaultPrice = config.defaultPrice ?? 0;
   const onError = config.onError ?? (() => {
   });
   const apiBaseUrl = config.apiBaseUrl ?? "https://liquad.app";
   const rulesCache = createRulesCache(config);
-  const identityChecker = createIdentityChecker({ onError });
-  async function performIdentityCheck(ip, botId, dnsPatterns) {
-    if (!dnsPatterns || dnsPatterns.length === 0) return null;
-    if (!ip) {
-      return {
-        verified: false,
-        hostname: null,
-        durationMs: 0,
-        cached: false
-      };
-    }
-    return identityChecker.verify(ip, botId, dnsPatterns);
-  }
+  const events = createEventBuffer({
+    apiKey: config.apiKey,
+    apiBaseUrl,
+    waitUntil: config.waitUntil,
+    onError: config.onError
+  });
   return async function handleRequest(request) {
     try {
       const rules = await rulesCache.getOrRefresh();
       if (!rules) {
         return { blocked: false };
       }
+      const ua = request.headers.get("user-agent") ?? "";
+      const agent = matchUserAgent(ua, rules.agents);
+      if (!agent) {
+        return { blocked: false };
+      }
+      const timestamp = (/* @__PURE__ */ new Date()).toISOString();
       const host = request.headers.get("host") ?? "";
-      const userAgent = request.headers.get("user-agent") ?? "";
-      const requestUrl = new URL(request.url);
-      const url = requestUrl.pathname + requestUrl.search;
-      const sourceIp = extractSourceIp(request);
-      const decision = matchRequest(
-        rules,
-        { url: request.url, host, userAgent },
-        defaultPrice
-      );
-      switch (decision.type) {
-        case "passthrough":
-          return { blocked: false };
-        case "granted": {
-          const matchedAgent = rules.user_agents.find(
-            (a) => a.name === decision.event.user_agent_name
-          );
-          const dnsPatterns = matchedAgent?.dns_patterns ?? [];
-          try {
-            const icResult = await performIdentityCheck(
-              sourceIp,
-              matchedAgent?.id ?? "",
-              dnsPatterns
-            );
-            if (icResult && !icResult.verified) {
-              sendEvent(
-                config,
-                enrichEventWithIcMetadata(
-                  { ...decision.event, decision: "denied_identity_check" },
-                  sourceIp,
-                  icResult
-                )
-              );
-              return {
-                blocked: true,
-                response: jsonResponse(403, {
-                  error: "bot_identity_unverified",
-                  message: "Bot identity could not be verified"
-                })
-              };
-            }
-            sendEvent(
-              config,
-              enrichEventWithIcMetadata(decision.event, sourceIp, icResult)
-            );
-            return { blocked: false };
-          } catch (icErr) {
-            onError(
-              icErr instanceof Error ? icErr : new Error("Identity Check error")
-            );
-            sendEvent(config, decision.event);
-            return { blocked: false };
-          }
-        }
-        case "denied": {
-          const authHeader = request.headers.get("authorization");
-          if (authHeader && authHeader.startsWith("License ")) {
-            const jwtSecret = rulesCache.getJwtSecret();
-            if (jwtSecret) {
-              try {
-                const token = authHeader.slice(8);
-                const secret = new TextEncoder().encode(jwtSecret);
-                const { payload } = await (0, import_jose.jwtVerify)(token, secret, {
-                  algorithms: ["HS256"]
-                });
-                const jwtPayload = payload;
-                const domain = host.replace(/:\d+$/, "");
-                const fullUrl = request.url.startsWith("http") ? request.url : `https://${domain}${url.startsWith("/") ? url : "/" + url}`;
-                const normalizedRequestUrl = normalizeUrlForSdk(fullUrl);
-                if (jwtPayload.pub !== rules.workspace_id) {
-                  sendEvent(config, {
-                    ...decision.event,
-                    decision: "denied_invalid_token",
-                    consumer_workspace_id: jwtPayload.sub ?? null
-                  });
-                  return {
-                    blocked: true,
-                    response: jsonResponse(402, {
-                      error: "invalid_token",
-                      reason: "invalid_publisher"
-                    })
-                  };
-                }
-                if (jwtPayload.url !== normalizedRequestUrl) {
-                  sendEvent(config, {
-                    ...decision.event,
-                    decision: "denied_invalid_token",
-                    consumer_workspace_id: jwtPayload.sub ?? null
-                  });
-                  return {
-                    blocked: true,
-                    response: jsonResponse(402, {
-                      error: "invalid_token",
-                      reason: "url_mismatch"
-                    })
-                  };
-                }
-                const matchedAgent = rules.user_agents.find(
-                  (a) => a.name === decision.event.user_agent_name
-                );
-                const dnsPatterns = matchedAgent?.dns_patterns ?? [];
-                try {
-                  const icResult = await performIdentityCheck(
-                    sourceIp,
-                    matchedAgent?.id ?? "",
-                    dnsPatterns
-                  );
-                  if (icResult && !icResult.verified) {
-                    sendEvent(
-                      config,
-                      enrichEventWithIcMetadata(
-                        {
-                          ...decision.event,
-                          decision: "denied_identity_check",
-                          consumer_workspace_id: jwtPayload.sub
-                        },
-                        sourceIp,
-                        icResult
-                      )
-                    );
-                    return {
-                      blocked: true,
-                      response: jsonResponse(403, {
-                        error: "bot_identity_unverified",
-                        message: "Bot identity could not be verified"
-                      })
-                    };
-                  }
-                  sendEvent(
-                    config,
-                    enrichEventWithIcMetadata(
-                      {
-                        ...decision.event,
-                        decision: "authorized_paid",
-                        consumer_workspace_id: jwtPayload.sub
-                      },
-                      sourceIp,
-                      icResult
-                    )
-                  );
-                  return { blocked: false };
-                } catch (icErr) {
-                  onError(
-                    icErr instanceof Error ? icErr : new Error("Identity Check error")
-                  );
-                  sendEvent(config, {
-                    ...decision.event,
-                    decision: "authorized_paid",
-                    consumer_workspace_id: jwtPayload.sub
-                  });
-                  return { blocked: false };
-                }
-              } catch (jwtErr) {
-                const reason = jwtErr instanceof Error && jwtErr.message.includes("expired") ? "token_expired" : "invalid_token";
-                sendEvent(config, {
-                  ...decision.event,
-                  decision: "denied_invalid_token",
-                  consumer_workspace_id: null
-                });
-                return {
-                  blocked: true,
-                  response: jsonResponse(402, {
-                    error: "invalid_token",
-                    reason
-                  })
-                };
-              }
-            }
-          }
-          sendEvent(config, {
-            ...decision.event,
-            decision: "denied_authorization_required",
-            consumer_workspace_id: null
+      const domain = host.replace(/:\d+$/, "");
+      const ip = extractSourceIp(request);
+      const declaredRanges = agent.declared_ips ?? [];
+      if (declaredRanges.length > 0) {
+        if (!ip || !isIpInRanges(ip, declaredRanges)) {
+          events.push({
+            domain,
+            request_url: request.url,
+            user_agent_name: agent.name,
+            user_agent_raw: ua,
+            matched_catalog_id: null,
+            decision: "denied_identity_check",
+            price_applied: null,
+            consumer_workspace_id: null,
+            timestamp,
+            source_ip: ip,
+            ic_verified: false
           });
           return {
             blocked: true,
-            response: jsonResponse(402, {
-              error: "authorization_required",
-              authorize_url: `${apiBaseUrl}/api/sdk/authorize`,
-              content_url: decision.event.request_url,
-              price_eur: decision.price
+            response: jsonResponse(403, {
+              error: "bot_identity_unverified",
+              message: "Request IP is not within the bot operator's declared ranges"
             })
           };
         }
-        case "blocked_no_catalog": {
-          sendEvent(config, decision.event);
-          return {
-            blocked: true,
-            response: jsonResponse(403, { error: "Access denied" })
-          };
+      }
+      const fullUrl = request.url.startsWith("http") ? request.url : `https://${domain}${request.url}`;
+      const normalizedUrl = normalizeUrl(fullUrl) ?? fullUrl;
+      if (rules.catalogs.length > 0 && agent.catalog_ids.length > 0) {
+        const freeMatch = matchRequest({
+          normalizedUrl,
+          agentIds: [agent.id],
+          agents: [agent],
+          catalogs: rules.catalogs,
+          maxPrice: 0
+        });
+        if (freeMatch.type === "matched") {
+          events.push({
+            domain,
+            request_url: normalizedUrl,
+            user_agent_name: agent.name,
+            user_agent_raw: ua,
+            matched_catalog_id: freeMatch.catalog_id,
+            decision: "granted",
+            price_applied: 0,
+            consumer_workspace_id: null,
+            timestamp,
+            source_ip: ip
+          });
+          return { blocked: false };
         }
       }
+      const token = extractToken(request);
+      if (token) {
+        const result = await verifyToken(token, normalizedUrl, rules.hmac_secret);
+        if (result.valid) {
+          events.push({
+            domain,
+            request_url: normalizedUrl,
+            user_agent_name: agent.name,
+            user_agent_raw: ua,
+            matched_catalog_id: null,
+            decision: "authorized_paid",
+            price_applied: null,
+            consumer_workspace_id: null,
+            timestamp,
+            source_ip: ip
+          });
+          return { blocked: false };
+        }
+        events.push({
+          domain,
+          request_url: normalizedUrl,
+          user_agent_name: agent.name,
+          user_agent_raw: ua,
+          matched_catalog_id: null,
+          decision: "denied_invalid_token",
+          price_applied: null,
+          consumer_workspace_id: null,
+          timestamp,
+          source_ip: ip
+        });
+        return {
+          blocked: true,
+          response: jsonResponse(403, {
+            error: "invalid_token"
+          })
+        };
+      }
+      events.push({
+        domain,
+        request_url: normalizedUrl,
+        user_agent_name: agent.name,
+        user_agent_raw: ua,
+        matched_catalog_id: null,
+        decision: "denied_authorization_required",
+        price_applied: null,
+        consumer_workspace_id: null,
+        timestamp,
+        source_ip: ip
+      });
+      return {
+        blocked: true,
+        response: jsonResponse(403, {
+          error: "grant_required",
+          authorize_url: `${apiBaseUrl}/api/sdk/transaction`,
+          content_url: normalizedUrl
+        })
+      };
     } catch (err) {
-      onError(
-        err instanceof Error ? err : new Error("Unknown SDK handler error")
-      );
+      onError(err instanceof Error ? err : new Error("Unknown SDK handler error"));
       return { blocked: false };
     }
   };
@@ -659,5 +528,9 @@ function createLiquadHandler(config) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   createLiquadHandler,
-  toExpressMiddleware
+  matchRequest,
+  matchUserAgent,
+  normalizeUrl,
+  toExpressMiddleware,
+  verifyToken
 });

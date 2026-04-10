@@ -5,9 +5,10 @@
 // Used by the catalog create/edit UI for real-time feedback.
 // ---------------------------------------------------------------------------
 
-import { createServerClient } from "@/lib/db/supabase-server";
 import type { FilterRules } from "@/lib/validations/catalog.schema";
 import { matchContentAgainstRules } from "@/lib/validations/catalog.schema";
+import { getDomainMap } from "@/lib/db/queries/domains";
+import { getAllSourcesCustom } from "@/lib/db/queries/sources";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,63 +36,6 @@ export interface PreviewResult {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Fetch ALL source rows from a workspace, paginating through Supabase's
- * default 1000-row limit.
- */
-async function fetchAllSources(
-  workspaceId: string,
-  columns: string
-): Promise<Array<Record<string, unknown>>> {
-  const supabase = await createServerClient();
-  const PAGE_SIZE = 1000;
-  const allRows: Array<Record<string, unknown>> = [];
-  let from = 0;
-
-  while (true) {
-    const { data, error } = await supabase
-      .from("sources")
-      .select(columns)
-      .eq("workspace_id", workspaceId)
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (error) {
-      throw new Error(`Failed to fetch sources: ${error.message}`);
-    }
-
-    if (!data || data.length === 0) break;
-    const rows = data as unknown as Array<Record<string, unknown>>;
-    allRows.push(...rows);
-    if (data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-
-  return allRows;
-}
-
-/**
- * Build a map of domain_id -> hostname for a workspace.
- */
-async function buildDomainMap(
-  workspaceId: string
-): Promise<Map<string, string>> {
-  const supabase = await createServerClient();
-  const { data: domains } = await supabase
-    .from("domains")
-    .select("id, domain")
-    .eq("workspace_id", workspaceId);
-
-  const map = new Map<string, string>();
-  for (const d of domains ?? []) {
-    map.set(d.id, d.domain);
-  }
-  return map;
-}
-
-// ---------------------------------------------------------------------------
 // Preview
 // ---------------------------------------------------------------------------
 
@@ -105,15 +49,16 @@ export async function previewCatalogMatch(
   page = 1,
   limit = 50
 ): Promise<PreviewResult> {
-  // Fetch all sources with domain info
-  const sources = (await fetchAllSources(
-    workspaceId,
-    "id, source_url, title"
-  )) as Array<{ id: string; source_url: string; title: string | null }>;
+  // Fetch all sources with domain info (shared query module)
+  const sources = await getAllSourcesCustom<{
+    id: string;
+    source_url: string;
+    title: string | null;
+  }>(workspaceId, "id, source_url, title");
   const totalContents = sources.length;
 
-  // Build domain map
-  const domainMap = await buildDomainMap(workspaceId);
+  // Build domain map (shared query module)
+  const domainMap = await getDomainMap(workspaceId);
 
   // Match each source and track per-domain stats
   const perDomainStats = new Map<

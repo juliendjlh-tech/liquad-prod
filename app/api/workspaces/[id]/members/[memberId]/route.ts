@@ -4,7 +4,7 @@ import { changeMemberRoleSchema } from "@/lib/validations/member.schema";
 import {
   removeMember,
   changeMemberRole,
-} from "@/lib/services/workspace.service";
+} from "@/lib/services/workspace-members.service";
 
 /**
  * DELETE /api/workspaces/:id/members/:memberId

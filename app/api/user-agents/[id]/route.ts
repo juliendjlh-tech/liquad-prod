@@ -2,33 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
 import { updateUserAgentSchema } from "@/lib/validations/user-agent.schema";
 import {
-  getUserAgentById,
-  updateUserAgent,
-  deleteUserAgent,
-} from "@/lib/services/user-agent.service";
+  getAgentById,
+  updateAgent,
+  removeAgentFromWorkspace,
+} from "@/lib/services/agent.service";
 
 /**
  * GET /api/user-agents/:id
  *
- * Get a single user-agent by ID, scoped to workspace.
- *
- * HEADERS:
- * - x-workspace-id: UUID of the workspace
- *
- * RESPONSES:
- * - 200: User-agent record
- * - 400: Missing header
- * - 401: Unauthorized
- * - 403: User not a member of the workspace
- * - 404: Not found or wrong workspace
- * - 500: Internal server error
+ * Get a single agent by ID.
  */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id: userAgentId } = await params;
+    const { id: agentId } = await params;
     const workspaceId = request.headers.get("x-workspace-id");
 
     if (!workspaceId) {
@@ -58,11 +47,11 @@ export async function GET(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const agent = await getUserAgentById(userAgentId, workspaceId);
+    const agent = await getAgentById(agentId);
 
     if (!agent) {
       return NextResponse.json(
-        { error: "User-agent not found" },
+        { error: "Agent not found" },
         { status: 404 }
       );
     }
@@ -79,28 +68,14 @@ export async function GET(
 /**
  * PATCH /api/user-agents/:id
  *
- * Update a user-agent (name, ua_pattern, is_active).
- * Supports partial updates.
- *
- * HEADERS:
- * - x-workspace-id: UUID of the workspace
- *
- * REQUEST BODY (JSON): any combination of { name, ua_pattern, is_active }
- *
- * RESPONSES:
- * - 200: Updated user-agent record
- * - 400: Validation error or missing header
- * - 401: Unauthorized
- * - 403: User not a member of the workspace
- * - 404: Not found or wrong workspace
- * - 500: Internal server error
+ * Update an agent (name, ua_pattern, declared_ips).
  */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id: userAgentId } = await params;
+    const { id: agentId } = await params;
     const workspaceId = request.headers.get("x-workspace-id");
 
     if (!workspaceId) {
@@ -110,7 +85,6 @@ export async function PATCH(
       );
     }
 
-    // Validate request body
     const body = await request.json();
     const validation = updateUserAgentSchema.safeParse(body);
 
@@ -141,40 +115,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Block editing name, ua_pattern, dns_patterns on preset bots
-    const existing = await getUserAgentById(userAgentId, workspaceId);
-    if (!existing) {
-      return NextResponse.json(
-        { error: "User-agent not found" },
-        { status: 404 }
-      );
-    }
-
-    if (
-      existing.is_preset &&
-      (validation.data.name !== undefined ||
-        validation.data.ua_pattern !== undefined ||
-        validation.data.dns_patterns !== undefined)
-    ) {
-      return NextResponse.json(
-        {
-          error: "PRESET_LOCKED",
-          message:
-            "Preset bots cannot be edited. Duplicate the bot to customize it.",
-        },
-        { status: 403 }
-      );
-    }
-
-    const updated = await updateUserAgent(
-      userAgentId,
-      workspaceId,
-      validation.data
-    );
+    const updated = await updateAgent(agentId, validation.data);
 
     if (!updated) {
       return NextResponse.json(
-        { error: "User-agent not found" },
+        { error: "Agent not found" },
         { status: 404 }
       );
     }
@@ -191,25 +136,14 @@ export async function PATCH(
 /**
  * DELETE /api/user-agents/:id
  *
- * Delete a user-agent. Catalog links are removed via CASCADE.
- *
- * HEADERS:
- * - x-workspace-id: UUID of the workspace
- *
- * RESPONSES:
- * - 200: `{ deleted: true, id, warning? }`
- * - 400: Missing header
- * - 401: Unauthorized
- * - 403: User not a member of the workspace
- * - 404: Not found or wrong workspace
- * - 500: Internal server error
+ * Remove an agent from a workspace. Does NOT delete the global agent.
  */
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id: userAgentId } = await params;
+    const { id: agentId } = await params;
     const workspaceId = request.headers.get("x-workspace-id");
 
     if (!workspaceId) {
@@ -239,22 +173,22 @@ export async function DELETE(
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const result = await deleteUserAgent(userAgentId, workspaceId);
+    const result = await removeAgentFromWorkspace(workspaceId, agentId);
 
-    if (!result.deleted) {
+    if (!result.removed) {
       return NextResponse.json(
-        { error: "User-agent not found" },
+        { error: "Agent not found in this workspace" },
         { status: 404 }
       );
     }
 
     const response: { deleted: boolean; id: string; warning?: string } = {
       deleted: true,
-      id: userAgentId,
+      id: agentId,
     };
 
     if (result.catalogCount > 0) {
-      response.warning = `This user-agent was linked to ${result.catalogCount} catalog(s). Those links have been removed.`;
+      response.warning = `This agent was linked to ${result.catalogCount} catalog(s). Those links have been removed.`;
     }
 
     return NextResponse.json(response, { status: 200 });

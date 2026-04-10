@@ -9,29 +9,12 @@
 import { createServerClient } from "@/lib/db/supabase-server";
 import type { FilterRules } from "@/lib/validations/catalog.schema";
 import { matchContentAgainstRules } from "@/lib/validations/catalog.schema";
+import { getDomainMap } from "@/lib/db/queries/domains";
+import { getAllSourcesWithDomain } from "@/lib/db/queries/sources";
+import { getCatalogSources } from "@/lib/db/queries/catalogs";
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Build a map of domain_id -> hostname for a workspace.
- */
-async function buildDomainMap(
-  workspaceId: string
-): Promise<Map<string, string>> {
-  const supabase = await createServerClient();
-  const { data: domains } = await supabase
-    .from("domains")
-    .select("id, domain")
-    .eq("workspace_id", workspaceId);
-
-  const map = new Map<string, string>();
-  for (const d of domains ?? []) {
-    map.set(d.id, d.domain);
-  }
-  return map;
-}
+/** Page size for Supabase range queries in batch operations. */
+const PAGE_SIZE = 1000;
 
 // ---------------------------------------------------------------------------
 // Incremental linking (post-scrape)
@@ -68,8 +51,8 @@ export async function linkNewSources(
 
   if (catErr || !catalogs || catalogs.length === 0) return;
 
-  // Build domain_id → hostname map
-  const domainMap = await buildDomainMap(workspaceId);
+  // Build domain_id → hostname map (shared query module)
+  const domainMap = await getDomainMap(workspaceId);
   if (domainMap.size === 0) return;
 
   // Fetch source details for the given IDs in pages
@@ -174,27 +157,12 @@ export async function syncCatalogSources(
   const { data: catalogs, error: catErr } = await catalogQuery;
   if (catErr || !catalogs || catalogs.length === 0) return;
 
-  // Build domain_id → hostname map for filter_rules matching
-  const domainMap = await buildDomainMap(workspaceId);
+  // Build domain_id → hostname map for filter_rules matching (shared query module)
+  const domainMap = await getDomainMap(workspaceId);
   if (domainMap.size === 0) return;
 
-  // Fetch all sources in this workspace in pages
-  const PAGE_SIZE = 1000;
-  const allSources: Array<{ id: string; source_url: string; domain_id: string }> = [];
-  let from = 0;
-
-  while (true) {
-    const { data: batch } = await supabase
-      .from("sources")
-      .select("id, source_url, domain_id")
-      .eq("workspace_id", workspaceId)
-      .range(from, from + PAGE_SIZE - 1);
-
-    if (!batch || batch.length === 0) break;
-    allSources.push(...batch);
-    if (batch.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
+  // Fetch all sources with domain info (shared query module)
+  const allSources = await getAllSourcesWithDomain(workspaceId);
 
   // Process each catalog with diff
   for (const catalog of catalogs) {
@@ -216,20 +184,8 @@ export async function syncCatalogSources(
     }
 
     // --- Existing set: source IDs currently linked ---
-    const existingIds = new Set<string>();
-    let existingFrom = 0;
-    while (true) {
-      const { data: links } = await supabase
-        .from("catalog_sources")
-        .select("source_id")
-        .eq("catalog_id", catalog.id)
-        .range(existingFrom, existingFrom + PAGE_SIZE - 1);
-
-      if (!links || links.length === 0) break;
-      for (const link of links) existingIds.add(link.source_id);
-      if (links.length < PAGE_SIZE) break;
-      existingFrom += PAGE_SIZE;
-    }
+    const existingLinks = await getCatalogSources([catalog.id]);
+    const existingIds = new Set<string>(existingLinks.map((l) => l.source_id));
 
     // --- Diff ---
     const toInsert: string[] = [];

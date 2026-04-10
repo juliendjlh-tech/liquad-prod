@@ -12,7 +12,6 @@ interface UserAgent {
   id: string;
   name: string;
   ua_pattern: string;
-  is_active: boolean;
 }
 
 interface DomainWithCount {
@@ -83,7 +82,7 @@ export default function NewCatalogPage() {
       ]);
       if (agentsRes.ok) {
         const data = (await agentsRes.json()) as UserAgent[];
-        setAgents(data.filter((a) => a.is_active));
+        setAgents(data);
       }
       if (domainsRes.ok) {
         setDomains(await domainsRes.json());

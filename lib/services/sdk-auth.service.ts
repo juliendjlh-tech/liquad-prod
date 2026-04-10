@@ -1,12 +1,12 @@
 import { createServerClient } from "@/lib/db/supabase-server";
-import { verifyApiKey } from "@/lib/services/workspace.service";
+import { verifyApiKey } from "@/lib/services/workspace-apikey.service";
 
 /**
  * Extract the API key from an Authorization header.
  * Expected format: "Bearer lq_..."
  *
  * @param authHeader - The Authorization header value
- * @returns The API key string, or null if missing/malformed
+ * @returns The API key string, or an error object if missing/malformed
  */
 export function extractApiKey(
   authHeader: string | null
@@ -30,11 +30,10 @@ export function extractApiKey(
 /**
  * Authenticate an SDK request by API key.
  *
- * Iterates over all workspaces with an api_key_hash and verifies
- * the provided key against each hash using scrypt (constant-time).
- *
- * MVP note: With 3-5 workspaces, iterating is fine.
- * For scale: add a key_prefix column for O(1) lookup.
+ * Uses the api_key_prefix column for O(1) lookup instead of iterating
+ * over all workspaces. The prefix (first 11 chars: "lq_" + 8 random)
+ * is stored in plaintext and acts as a lookup key. The full key is then
+ * verified against the scrypt hash using timing-safe comparison.
  *
  * @param authHeader - The full Authorization header value
  * @returns { workspaceId } if valid, or { error } if invalid
@@ -49,25 +48,24 @@ export async function authenticateSdkRequest(
 
   const supabase = await createServerClient();
 
-  // Fetch all workspaces with a key hash
-  const { data: workspaces, error } = await supabase
+  // O(1) lookup by prefix instead of O(N) iteration over all workspaces.
+  // The api_key_prefix column stores the first 11 chars of the API key
+  // (e.g., "lq_a1b2c3d4") and is populated by createWorkspace/regenerateApiKey.
+  const prefix = extracted.key.slice(0, 11);
+
+  const { data: workspace, error } = await supabase
     .from("workspaces")
     .select("id, api_key_hash")
-    .not("api_key_hash", "is", null);
+    .eq("api_key_prefix", prefix)
+    .single();
 
-  if (error || !workspaces) {
-    return { error: "Internal authentication error" };
+  if (error || !workspace?.api_key_hash) {
+    return { error: "Invalid API key" };
   }
 
-  // Iterate and verify (MVP: small N)
-  for (const ws of workspaces) {
-    if (!ws.api_key_hash) continue;
-
-    const isValid = await verifyApiKey(extracted.key, ws.api_key_hash);
-    if (isValid) {
-      return { workspaceId: ws.id };
-    }
-  }
-
-  return { error: "Invalid API key" };
+  // Verify the full key against the stored scrypt hash (timing-safe)
+  const isValid = await verifyApiKey(extracted.key, workspace.api_key_hash);
+  return isValid
+    ? { workspaceId: workspace.id }
+    : { error: "Invalid API key" };
 }

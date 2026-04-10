@@ -14,7 +14,6 @@ interface UserAgent {
   id: string;
   name: string;
   ua_pattern: string;
-  is_active: boolean;
 }
 
 interface DomainWithCount {
@@ -325,31 +324,18 @@ export default function EditCatalogPage({
             Authorized Bots
           </label>
           <div className="space-y-2">
-            {agents
-              .filter(
-                (agent) =>
-                  agent.is_active || selectedAgents.includes(agent.id)
-              )
-              .map((agent) => (
+            {agents.map((agent) => (
               <label
                 key={agent.id}
-                className={`flex items-center gap-2 text-sm ${
-                  !agent.is_active ? "opacity-60" : ""
-                }`}
+                className="flex items-center gap-2 text-sm"
               >
                 <input
                   type="checkbox"
                   checked={selectedAgents.includes(agent.id)}
                   onChange={() => toggleAgent(agent.id)}
-                  disabled={!agent.is_active}
-                  className="rounded border-gray-300 disabled:cursor-not-allowed"
+                  className="rounded border-gray-300"
                 />
                 <span className="text-gray-700">{agent.name}</span>
-                {!agent.is_active && (
-                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
-                    Inactive
-                  </span>
-                )}
               </label>
             ))}
           </div>

@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       access_grants: {
         Row: {
+          agent_id: string | null
           catalog_id: string
           consumer_workspace_id: string
           created_at: string | null
@@ -26,6 +27,7 @@ export type Database = {
           url: string
         }
         Insert: {
+          agent_id?: string | null
           catalog_id: string
           consumer_workspace_id: string
           created_at?: string | null
@@ -36,6 +38,7 @@ export type Database = {
           url: string
         }
         Update: {
+          agent_id?: string | null
           catalog_id?: string
           consumer_workspace_id?: string
           created_at?: string | null
@@ -72,15 +75,15 @@ export type Database = {
       catalog_agents: {
         Row: {
           catalog_id: string
-          user_agent_id: string
+          agent_id: string
         }
         Insert: {
           catalog_id: string
-          user_agent_id: string
+          agent_id: string
         }
         Update: {
           catalog_id?: string
-          user_agent_id?: string
+          agent_id?: string
         }
         Relationships: [
           {
@@ -91,10 +94,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "catalog_agents_user_agent_id_fkey"
-            columns: ["user_agent_id"]
+            foreignKeyName: "catalog_agents_agent_id_fkey"
+            columns: ["agent_id"]
             isOneToOne: false
-            referencedRelation: "user_agents"
+            referencedRelation: "agents"
             referencedColumns: ["id"]
           },
         ]
@@ -505,43 +508,56 @@ export type Database = {
           },
         ]
       }
-      user_agents: {
+      agents: {
         Row: {
-          created_at: string | null
-          dns_patterns: string[]
           id: string
-          is_active: boolean | null
-          is_preset: boolean | null
           name: string
           ua_pattern: string
-          workspace_id: string
+          declared_ips: string[]
+          created_at: string | null
         }
         Insert: {
-          created_at?: string | null
-          dns_patterns?: string[]
           id?: string
-          is_active?: boolean | null
-          is_preset?: boolean | null
           name: string
           ua_pattern: string
-          workspace_id: string
+          declared_ips?: string[]
+          created_at?: string | null
         }
         Update: {
-          created_at?: string | null
-          dns_patterns?: string[]
           id?: string
-          is_active?: boolean | null
-          is_preset?: boolean | null
           name?: string
           ua_pattern?: string
+          declared_ips?: string[]
+          created_at?: string | null
+        }
+        Relationships: []
+      }
+      workspace_agents: {
+        Row: {
+          workspace_id: string
+          agent_id: string
+        }
+        Insert: {
+          workspace_id: string
+          agent_id: string
+        }
+        Update: {
           workspace_id?: string
+          agent_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "user_agents_workspace_id_fkey"
+            foreignKeyName: "workspace_agents_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workspace_agents_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
             referencedColumns: ["id"]
           },
         ]
@@ -752,12 +768,13 @@ export type Database = {
       }
       check_cache_and_debit: {
         Args: {
-          p_catalog_id: string
           p_consumer_id: string
-          p_price_eur: number
           p_publisher_id: string
-          p_ttl_minutes?: number
           p_url: string
+          p_catalog_id: string
+          p_agent_id: string
+          p_price_eur: number
+          p_ttl_minutes?: number
         }
         Returns: Json
       }
