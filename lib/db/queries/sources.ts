@@ -94,6 +94,25 @@ export async function getAllSourcesWithDomain(
  * @param columns - Supabase select string (e.g., "id, source_url, title")
  * @returns Array of row objects matching the selected columns
  */
+/**
+ * Find sources matching a list of normalized URLs.
+ * Returns source_url → source_id pairs for URLs that exist.
+ */
+export async function findSourcesByUrls(
+  urls: string[]
+): Promise<Array<{ id: string; source_url: string }>> {
+  if (urls.length === 0) return [];
+
+  const supabase = await createServerClient();
+  const { data, error } = await supabase
+    .from("sources")
+    .select("id, source_url")
+    .in("source_url", urls);
+
+  if (error) throw new Error(`Failed to find sources: ${error.message}`);
+  return data ?? [];
+}
+
 export async function getAllSourcesCustom<T extends Record<string, unknown>>(
   workspaceId: string,
   columns: string

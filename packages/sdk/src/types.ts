@@ -13,14 +13,22 @@ export interface LiquadConfig {
 
   /** Liquad API base URL. Default: "https://liquad.app" */
   apiBaseUrl?: string;
+}
 
+/**
+ * Per-request options passed to the handler.
+ *
+ * Separated from LiquadConfig so the handler can be created once (singleton)
+ * while per-request context (like Cloudflare's ctx.waitUntil) is passed at
+ * call time.
+ */
+export interface HandleRequestOptions {
   /**
    * Edge runtime helper to run async tasks after the response is sent.
    * Pass `ctx.waitUntil.bind(ctx)` in Cloudflare Workers.
    * If omitted, async tasks are fire-and-forget (fine in Node.js long-lived processes).
    */
   waitUntil?: (promise: Promise<unknown>) => void;
-
 }
 
 /**
@@ -32,42 +40,6 @@ export interface LiquadResult {
 
   /** The HTTP response to send back (present when blocked is true) */
   response?: Response;
-}
-
-// ---------------------------------------------------------------------------
-// Filter Rules Types (structured matching, no regex)
-// ---------------------------------------------------------------------------
-
-/**
- * A single path rule with an operator and value.
- */
-export interface FilterRule {
-  operator:
-    | "contains"
-    | "not_contains"
-    | "starts_with"
-    | "not_starts_with"
-    | "equals"
-    | "ends_with";
-  value: string;
-}
-
-/**
- * A domain-level rule with optional path filtering.
- */
-export interface DomainRule {
-  /** Hostname (e.g. "example.com") — resolved from domain_id by the server */
-  domain: string;
-  path_rules?: FilterRule[];
-  path_logic?: "AND" | "OR";
-}
-
-/**
- * Structured filter rules for a catalog.
- * Replaces regex-based url_patterns.
- */
-export interface CatalogFilterRules {
-  domain_rules: DomainRule[];
 }
 
 // ---------------------------------------------------------------------------
@@ -96,8 +68,7 @@ export interface SdkEvent {
     | "authorized_paid"
     | "denied_authorization_required"
     | "denied_invalid_token"
-    | "denied_identity_check"
-    | "allowed_opt_in";
+    | "denied_identity_check";
   price_applied: number | null;
   consumer_workspace_id: string | null;
   timestamp: string; // ISO 8601

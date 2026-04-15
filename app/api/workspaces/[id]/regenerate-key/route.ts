@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { regenerateApiKey } from "@/lib/services/workspace-apikey.service";
+import { regenerateApiKey } from "@/lib/services/workspace.service";
 
 /**
  * POST /api/workspaces/:id/regenerate-key

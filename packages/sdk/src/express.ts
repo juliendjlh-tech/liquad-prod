@@ -13,9 +13,9 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "http";
-import type { LiquadResult } from "./types";
+import type { LiquadResult, HandleRequestOptions } from "./types";
 
-type LiquadHandler = (request: Request) => Promise<LiquadResult>;
+type LiquadHandler = (request: Request, options?: HandleRequestOptions) => Promise<LiquadResult>;
 
 /**
  * Wrap a Liquad handler as Express/Connect middleware.

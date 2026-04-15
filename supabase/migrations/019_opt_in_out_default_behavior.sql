@@ -14,6 +14,5 @@ ALTER TABLE public.sdk_events
     'authorized_paid',
     'denied_authorization_required',
     'denied_invalid_token',
-    'denied_identity_check',
-    'allowed_opt_in'
+    'denied_identity_check'
   ));

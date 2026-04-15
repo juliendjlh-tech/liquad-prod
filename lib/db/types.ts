@@ -24,6 +24,7 @@ export type Database = {
           id: string
           price_eur: number
           publisher_workspace_id: string
+          ua_pattern: string | null
           url: string
         }
         Insert: {
@@ -35,6 +36,7 @@ export type Database = {
           id?: string
           price_eur: number
           publisher_workspace_id: string
+          ua_pattern?: string | null
           url: string
         }
         Update: {
@@ -46,6 +48,7 @@ export type Database = {
           id?: string
           price_eur?: number
           publisher_workspace_id?: string
+          ua_pattern?: string | null
           url?: string
         }
         Relationships: [
@@ -143,6 +146,7 @@ export type Database = {
           rag_enabled: boolean
           rag_source_count: number
           status: string
+          ttl_minutes: number | null
           workspace_id: string
         }
         Insert: {
@@ -155,6 +159,7 @@ export type Database = {
           rag_enabled?: boolean
           rag_source_count?: number
           status?: string
+          ttl_minutes?: number | null
           workspace_id: string
         }
         Update: {
@@ -167,6 +172,7 @@ export type Database = {
           rag_enabled?: boolean
           rag_source_count?: number
           status?: string
+          ttl_minutes?: number | null
           workspace_id?: string
         }
         Relationships: [
@@ -765,6 +771,13 @@ export type Database = {
           domain_id: string
           content_count: number
         }[]
+      }
+      authorize_and_debit_batch: {
+        Args: {
+          p_consumer_id: string
+          p_debits: Json
+        }
+        Returns: Json
       }
       check_cache_and_debit: {
         Args: {

@@ -1,22 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createTransaction } from "@/lib/services/sdk-transaction.service";
-import { authenticateSdkRequest } from "@/lib/services/sdk-auth.service";
+import { authenticateApiKey } from "@/lib/services/auth.service";
+import { authorize } from "@/lib/services/consumer.service";
 import { transactionSchema } from "@/lib/validations/authorize.schema";
 
 /**
- * POST /api/sdk/transaction
+ * POST /api/consumer/authorize
  *
  * Pre-authorize access to paid content. Returns HMAC-signed tokens
  * that the publisher SDK verifies locally (no callback needed).
  *
  * Authentication: API key via Authorization: Bearer <key>
- * NOT protected by session middleware (/api/sdk/* is bypassed).
  *
  * REQUEST BODY:
  * - urls: string[] (required) — URLs of the content to access (max 100)
  * - agent_id: string (required) — UUID of the bot that will use the tokens
  * - max_price_eur: number (optional) — price ceiling per URL
- * - ttl_minutes: number (optional) — token validity in minutes (default 60, max 1440)
+ *
+ * Token validity (TTL) is controlled by the publisher via catalog.ttl_minutes.
  *
  * RESPONSES:
  * - 200: { results: [...], unmatched: [...], total_cost_eur, balance_remaining_eur }
@@ -28,8 +28,7 @@ import { transactionSchema } from "@/lib/validations/authorize.schema";
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    // 1. Authenticate consumer (extracted from service — cross-cutting concern)
-    const authResult = await authenticateSdkRequest(
+    const authResult = await authenticateApiKey(
       request.headers.get("authorization")
     );
     if ("error" in authResult) {
@@ -39,7 +38,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // 2. Parse and validate body
     let body: unknown;
     try {
       body = await request.json();
@@ -58,13 +56,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // 3. Call transaction service (receives workspaceId, not authHeader)
-    const result = await createTransaction(
-      authResult.workspaceId,
-      parsed.data
-    );
+    const result = await authorize(authResult.workspaceId, parsed.data);
 
-    // 4. Map ServiceResult to HTTP response
     if (!result.ok) {
       return NextResponse.json(
         { error: result.error, ...(result.details ? { details: result.details } : {}) },

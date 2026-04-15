@@ -34,24 +34,6 @@ export interface MatchableCatalog {
   price_eur: number;
 }
 
-/** Input for matchRequest */
-/** Input for matchRequest */
-export type MatchRequestInput = {
-  normalizedUrl: string;
-  agents: MatchableAgent[];
-  catalogs: MatchableCatalog[];
-  maxPrice?: number;
-} & (
-  | { userAgent: string; agentIds?: never }
-  | { agentIds: string[]; userAgent?: never }
-);
-
-/** Result of matchRequest — pure, no SDK event coupling */
-export type MatchResult =
-  | { type: "no_match" }
-  | { type: "no_catalog"; agent_id: string; agent_name: string }
-  | { type: "matched"; catalog_id: string; agent_id: string; agent_name: string; price_eur: number };
-
 // ---------------------------------------------------------------------------
 // Internal utilities
 // ---------------------------------------------------------------------------
@@ -122,7 +104,7 @@ export function matchUserAgent(
  * Filters by agent's catalog_ids, filter rules, and maxPrice.
  * Returns the catalog with the lowest price_eur, or null if none match.
  */
-function findBestCatalog(
+export function findBestCatalog(
   catalogs: MatchableCatalog[],
   agentCatalogIds: string[],
   domain: string,
@@ -143,85 +125,3 @@ function findBestCatalog(
   return matching[0] ?? null;
 }
 
-// ---------------------------------------------------------------------------
-// matchRequest — single entry point for matching
-// ---------------------------------------------------------------------------
-
-/**
- * Match a normalized URL + user-agent against agents and catalogs.
- * Pure function — no I/O, no side effects.
- *
- * Steps:
- *   1. Parse domain + path from normalizedUrl
- *   2. Match user-agent against agents
- *   3. Find best catalog (lowest price, within maxPrice ceiling)
- *
- * @param input.normalizedUrl - Already normalized URL (via normalizeUrl())
- * @param input.userAgent - Raw User-Agent string (mode UA matching)
- * @param input.agentIds - Agent IDs to match directly (mode direct, skips UA matching)
- * @param input.agents - All agents for the workspace
- * @param input.catalogs - All catalogs for the workspace
- * @param input.maxPrice - Only match catalogs with price_eur <= maxPrice (undefined = no filter)
- */
-export function matchRequest(input: MatchRequestInput): MatchResult {
-  const { normalizedUrl, agents, catalogs, maxPrice } = input;
-
-  // 1. Extract domain and path from normalized URL
-  let domain: string;
-  let requestPath: string;
-  try {
-    const urlObj = new URL(normalizedUrl);
-    domain = urlObj.hostname;
-    requestPath = urlObj.pathname;
-  } catch {
-    return { type: "no_match" };
-  }
-
-  // 2. Resolve agent(s) — either by UA matching or by direct IDs
-  let targetAgents: MatchableAgent[];
-
-  if (input.agentIds) {
-    const idSet = new Set(input.agentIds);
-    targetAgents = agents.filter((a) => idSet.has(a.id));
-  } else {
-    const matched = matchUserAgent(input.userAgent, agents);
-    targetAgents = matched ? [matched] : [];
-  }
-
-  if (targetAgents.length === 0) {
-    return { type: "no_match" };
-  }
-
-  // 3. Find best matching catalog across all target agents (lowest price)
-  let bestResult: { agent: MatchableAgent; catalog: MatchableCatalog } | null = null;
-
-  for (const agent of targetAgents) {
-    const catalog = findBestCatalog(
-      catalogs,
-      agent.catalog_ids,
-      domain,
-      requestPath,
-      maxPrice
-    );
-
-    if (catalog && (!bestResult || catalog.price_eur < bestResult.catalog.price_eur)) {
-      bestResult = { agent, catalog };
-    }
-  }
-
-  if (!bestResult) {
-    return {
-      type: "no_catalog",
-      agent_id: targetAgents[0].id,
-      agent_name: targetAgents[0].name,
-    };
-  }
-
-  return {
-    type: "matched",
-    catalog_id: bestResult.catalog.id,
-    agent_id: bestResult.agent.id,
-    agent_name: bestResult.agent.name,
-    price_eur: bestResult.catalog.price_eur,
-  };
-}

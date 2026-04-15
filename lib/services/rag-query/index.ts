@@ -2,21 +2,19 @@
 // RAG Query Pipeline — Public API
 //
 // Composes the 11 pipeline steps into the executeRagQuery function.
-// The public signature is IDENTICAL to the original rag-query.service.ts,
-// so all existing callers continue to work without changes.
 //
 // Pipeline steps (in order):
 //   1. authenticate     — Validate API key, extract workspace ID
 //   2. resolveParams    — Merge inline + search_config parameters
 //   3. validateCatalogs — Verify catalogs are active + RAG-enabled
-//   4. matchAgents      — Match User-Agent against catalog agents
+//   4. matchAgents      — Resolve agent by ID, ua_pattern reconciliation
 //   5. embedQuery       — Generate vector embedding for query text
 //   6. vectorSearch     — Execute pgvector similarity search
 //   7. dedupResults     — Keep best chunk per source URL
 //   8. applyFilters     — Apply path_filters and max_price_eur
 //   9. budgetCap        — Accumulate until budget, cap at max_results
-//  10. debit            — Verify balance and debit atomically
-//  11. logAndReturn     — Log query and return final results
+//  10. debit            — Authorize + debit atomically (cache + grants)
+//  11. logAndReturn     — Sign tokens, log query, return results
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
@@ -43,33 +41,28 @@ export type { QueryResult, QueryResultItem, QuerySuccess, QueryDryRun, QueryErro
 /**
  * Execute a RAG semantic search query.
  *
- * This is the main entry point for POST /api/sdk/query.
+ * This is the main entry point for POST /api/consumer/query.
  * Internally, it runs an 11-step pipeline where each step either
  * advances the context or short-circuits with a typed result.
  *
  * CRITICAL: This function NEVER throws. All errors are returned as typed results.
  *
  * @param authHeader - Authorization header (Bearer lq_...)
- * @param userAgent - User-Agent header from the consumer bot
- * @param input - Validated query input
+ * @param input - Validated query input (includes agent_id)
  * @returns Typed result: success, dry_run, or error
  */
 export async function executeRagQuery(
   authHeader: string | null,
-  userAgent: string | null,
   input: QueryInput
 ): Promise<QueryResult> {
   const supabase = await createServerClient();
 
-  // Initialize the pipeline context with inputs
   const ctx: RagQueryContext = {
     authHeader,
-    userAgent,
     input,
     supabase,
   };
 
-  // Run all steps in sequence — any step can short-circuit with a result
   return runPipeline(ctx, [
     authenticate,
     resolveParams,

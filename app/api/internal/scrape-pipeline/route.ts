@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { processScrapeMicroBatch } from "@/lib/services/scrape-pipeline.service";
+import { processScrapeMicroBatch } from "@/lib/services/pipeline.service";
 
 /**
  * POST /api/internal/scrape-pipeline

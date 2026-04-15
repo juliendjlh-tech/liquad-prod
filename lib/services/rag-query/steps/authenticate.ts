@@ -2,7 +2,7 @@
 // Step 1: Authenticate consumer via API key
 // ---------------------------------------------------------------------------
 
-import { authenticateSdkRequest } from "@/lib/services/sdk-auth.service";
+import { authenticateApiKey } from "@/lib/services/auth.service";
 import type { PipelineStep } from "../types";
 
 /**
@@ -10,7 +10,7 @@ import type { PipelineStep } from "../types";
  * Sets ctx.consumerWorkspaceId on success.
  */
 export const authenticate: PipelineStep = async (ctx) => {
-  const authResult = await authenticateSdkRequest(ctx.authHeader);
+  const authResult = await authenticateApiKey(ctx.authHeader);
 
   if ("error" in authResult) {
     return { error: "invalid_api_key", status: 401 };

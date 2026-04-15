@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { getDashboardMetrics } from "@/lib/services/dashboard-metrics.service";
+import { getDashboardMetrics } from "@/lib/services/dashboard.service";
 
 const ALLOWED_PERIODS = [7, 30, 90];
 

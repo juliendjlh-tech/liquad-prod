@@ -1,60 +1,70 @@
 // ---------------------------------------------------------------------------
-// Steps 14-15: Verify balance and debit atomically via RPC
+// Step 10: Authorize + debit atomically via RPC
+//
+// Uses the consolidated authorize_and_debit_batch RPC which handles:
+//   - Cache check (existing grant = free reuse)
+//   - Balance verification + atomic debit
+//   - Grant creation with agent_id + ua_pattern
 // ---------------------------------------------------------------------------
 
 import type { Json } from "@/lib/db/types";
-import type { PipelineStep, DebitResult } from "../types";
+import type { PipelineStep, AuthorizeResult } from "../types";
 
 /**
- * Verify the consumer has sufficient balance and debit atomically.
+ * Verify balance, debit atomically, and create grants for each result.
  *
- * Uses the check_balance_and_debit_batch RPC which performs an atomic
- * balance check and debit in a single transaction. This prevents race
- * conditions with concurrent queries.
+ * Builds the debits array from accumulated results (post-filtering),
+ * including agent_id, ua_pattern, and ttl_minutes from the matched catalog.
  *
- * On insufficient balance, returns a 402 error with balance details.
- * On success, proceeds to the final step.
+ * On success, stores grants and new balance for the log-and-return step.
  */
 export const debit: PipelineStep = async (ctx) => {
-  const { supabase, consumerWorkspaceId, accumulated } = ctx;
+  const { supabase, consumerWorkspaceId, accumulated, agentId, uaPattern, catalogs } = ctx;
 
-  // Build the debits array for the batch RPC
+  // Build catalog lookup for ttl_minutes
+  const catalogTtl = new Map(
+    (catalogs ?? []).map((c) => [c.id, c.ttl_minutes])
+  );
+
   const debits = accumulated!.map((r) => ({
     publisher_workspace_id: r.publisher_workspace_id,
     catalog_id: r.catalog_id,
-    content_url: r.source_url,
+    agent_id: agentId!,
+    ua_pattern: uaPattern!,
+    url: r.source_url,
     price_eur: Number(r.price_eur),
+    ttl_minutes: catalogTtl.get(r.catalog_id) ?? 60,
   }));
 
-  const { data: debitData, error: debitError } = await supabase.rpc(
-    "check_balance_and_debit_batch",
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    "authorize_and_debit_batch",
     {
-      p_consumer_workspace_id: consumerWorkspaceId!,
+      p_consumer_id: consumerWorkspaceId!,
       p_debits: debits as unknown as Json,
     }
   );
 
-  if (debitError) {
+  if (rpcError) {
     return {
       error: "debit_error",
       status: 500,
-      details: { message: debitError.message },
+      details: { message: rpcError.message },
     };
   }
 
-  const debitResult = debitData as unknown as DebitResult;
+  const result = rpcData as unknown as AuthorizeResult;
 
-  if (!debitResult.success) {
+  if (!result.success) {
     return {
       error: "insufficient_balance",
       status: 402,
       details: {
-        required: debitResult.required,
-        balance: debitResult.balance,
+        required: result.required,
+        balance: result.balance,
       },
     };
   }
 
-  // Store the new balance for the log-and-return step
-  ctx._newBalance = debitResult.new_balance;
+  ctx._newBalance = result.new_balance;
+  ctx._grants = result.grants;
 };

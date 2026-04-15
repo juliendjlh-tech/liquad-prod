@@ -16,8 +16,6 @@ export interface EventBufferConfig {
   flushIntervalMs?: number;
   /** Max buffer size before forced flush (default 50) */
   maxBufferSize?: number;
-  /** Edge runtime helper for background tasks */
-  waitUntil?: (promise: Promise<unknown>) => void;
   /** Error handler (events must never crash the host) */
   onError?: (error: Error) => void;
 }
@@ -25,6 +23,7 @@ export interface EventBufferConfig {
 export function createEventBuffer(config: EventBufferConfig) {
   const buffer: SdkEvent[] = [];
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let currentWaitUntil: ((promise: Promise<unknown>) => void) | undefined;
   const flushInterval = config.flushIntervalMs ?? 5_000;
   const maxSize = config.maxBufferSize ?? 50;
 
@@ -47,7 +46,7 @@ export function createEventBuffer(config: EventBufferConfig) {
       );
     });
 
-    if (config.waitUntil) config.waitUntil(promise);
+    if (currentWaitUntil) currentWaitUntil(promise);
   }
 
   function scheduleFlush(): void {
@@ -59,6 +58,11 @@ export function createEventBuffer(config: EventBufferConfig) {
   }
 
   return {
+    /** Set the waitUntil function for the current request context. */
+    setWaitUntil(fn: ((promise: Promise<unknown>) => void) | undefined): void {
+      currentWaitUntil = fn;
+    },
+
     /** Add an event to the buffer. Flushes automatically when full or on timer. */
     push(event: SdkEvent): void {
       buffer.push(event);

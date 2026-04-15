@@ -17,10 +17,13 @@ import type { createServerClient } from "@/lib/db/supabase-server";
 /** A single result returned to the consumer. */
 export interface QueryResultItem {
   url: string;
+  token: string;
   catalog_id: string;
   catalog_name: string;
   price_eur: number;
   score: number;
+  expires_at: string;
+  cached: boolean;
   snippet?: string;
   heading_context?: string;
 }
@@ -30,6 +33,13 @@ export interface QuerySuccess {
   results: QueryResultItem[];
   total_cost_eur: number;
   balance_remaining_eur: number;
+}
+
+/** Grant info returned by the authorize RPC, attached to each result. */
+export interface GrantInfo {
+  grant_id: string;
+  expires_at: string;
+  cached: boolean;
 }
 
 /** Successful dry-run response (no snippets, no debit). */
@@ -59,19 +69,27 @@ export type QueryResult = QuerySuccess | QueryDryRun | QueryError;
 // RPC Types
 // ---------------------------------------------------------------------------
 
-export interface DebitSuccess {
-  success: true;
-  new_balance: number;
+export interface AuthorizeGrantResult {
+  url: string;
+  grant_id: string;
+  expires_at: string;
+  cached: boolean;
 }
 
-export interface DebitFailure {
+export interface AuthorizeSuccess {
+  success: true;
+  new_balance: number;
+  grants: AuthorizeGrantResult[];
+}
+
+export interface AuthorizeFailure {
   success: false;
   reason: string;
   balance: number;
   required: number;
 }
 
-export type DebitResult = DebitSuccess | DebitFailure;
+export type AuthorizeResult = AuthorizeSuccess | AuthorizeFailure;
 
 // ---------------------------------------------------------------------------
 // Vector Search Row (returned by the vector_search RPC)
@@ -100,7 +118,6 @@ export interface VectorSearchRow {
 export interface RagQueryContext {
   // --- Inputs (set before pipeline starts) ---
   authHeader: string | null;
-  userAgent: string | null;
   input: QueryInput;
   supabase: Awaited<ReturnType<typeof createServerClient>>;
 
@@ -108,6 +125,10 @@ export interface RagQueryContext {
 
   /** Consumer workspace ID (set by authenticate step) */
   consumerWorkspaceId?: string;
+
+  /** Resolved agent info (set by match-agents step) */
+  agentId?: string;
+  uaPattern?: string;
 
   /** Resolved catalog IDs after merging inline + search_config (set by resolve-params) */
   catalogIds?: string[];
@@ -133,6 +154,7 @@ export interface RagQueryContext {
     name: string;
     workspace_id: string;
     price_eur: number;
+    ttl_minutes: number | null;
     status: string;
     rag_enabled: boolean;
   }>;
@@ -157,6 +179,9 @@ export interface RagQueryContext {
 
   /** New balance after debit — set by debit step, read by log-and-return */
   _newBalance?: number;
+
+  /** Grants returned by authorize RPC (set by debit step, read by log-and-return) */
+  _grants?: AuthorizeGrantResult[];
 }
 
 // ---------------------------------------------------------------------------

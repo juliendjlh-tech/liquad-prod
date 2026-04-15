@@ -24,6 +24,8 @@ export interface CatalogRecord {
   description: string | null;
   filter_rules: unknown;
   price_eur: number;
+  /** Publisher-controlled token validity in minutes. Null = use default (60). */
+  ttl_minutes: number | null;
   status: string;
   workspace_id: string;
   rag_enabled: boolean;
@@ -55,7 +57,7 @@ export async function getCatalogs(
 
   let query = supabase
     .from("catalogs")
-    .select("id, name, description, filter_rules, price_eur, status, workspace_id, rag_enabled, rag_source_count, created_at")
+    .select("id, name, description, filter_rules, price_eur, ttl_minutes, status, workspace_id, rag_enabled, rag_source_count, created_at")
     .order("created_at", { ascending: true });
 
   if (catalogIds.length > 0) {
@@ -81,6 +83,25 @@ export async function getCatalogs(
     ...row,
     price_eur: Number(row.price_eur),
   })) as CatalogRecord[];
+}
+
+/**
+ * Fetch catalog_sources links for a set of source IDs.
+ * Reverse lookup: given sources, find which catalogs they belong to.
+ */
+export async function getCatalogIdsBySourceIds(
+  sourceIds: string[]
+): Promise<Array<{ catalog_id: string; source_id: string }>> {
+  if (sourceIds.length === 0) return [];
+
+  const supabase = await createServerClient();
+  const { data, error } = await supabase
+    .from("catalog_sources")
+    .select("catalog_id, source_id")
+    .in("source_id", sourceIds);
+
+  if (error) throw new Error(`Failed to fetch catalog sources by source IDs: ${error.message}`);
+  return data ?? [];
 }
 
 /**

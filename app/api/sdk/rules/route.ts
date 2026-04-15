@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateSdkRequest } from "@/lib/services/sdk-auth.service";
-import { getGatewayRules } from "@/lib/services/sdk-gateway.service";
+import { authenticateApiKey } from "@/lib/services/auth.service";
+import { getGatewayRules } from "@/lib/services/sdk.service";
 
 /**
  * GET /api/sdk/rules
@@ -27,7 +27,7 @@ import { getGatewayRules } from "@/lib/services/sdk-gateway.service";
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const authHeader = request.headers.get("authorization");
-    const authResult = await authenticateSdkRequest(authHeader);
+    const authResult = await authenticateApiKey(authHeader);
 
     if ("error" in authResult) {
       return NextResponse.json(

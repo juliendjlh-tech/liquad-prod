@@ -1,9 +1,8 @@
-import { L as LiquadConfig, a as LiquadResult } from './express-B3hRx0o3.mjs';
-export { C as CatalogFilterRules, D as DomainRule, F as FilterRule, S as SdkEvent, t as toExpressMiddleware } from './express-B3hRx0o3.mjs';
+import { a as LiquadConfig, H as HandleRequestOptions, L as LiquadResult } from './types-BQBdWPwx.mjs';
+export { S as SdkEvent } from './types-BQBdWPwx.mjs';
 import { MatchableCatalog } from './matcher.mjs';
-export { MatchRequestInput, MatchResult, MatchableAgent, matchRequest, matchUserAgent } from './matcher.mjs';
+export { MatchableAgent, findBestCatalog, matchUserAgent } from './matcher.mjs';
 export { normalizeUrl } from './url-normalize.mjs';
-import 'http';
 
 /**
  * Cached rules structure (mirrors WorkspaceRules from the API).
@@ -38,25 +37,33 @@ interface CachedRules {
  * Verifies HMAC-SHA256 signed tokens using Web Crypto API.
  * Works on Node 18+, Cloudflare Workers, Deno, Vercel Edge.
  *
- * Token format: base64url( grantId.expiryUnix.hmacSignatureHex )
- * HMAC message: grantId + "." + normalizedUrl + "." + expiryUnix
+ * Token format: base64url( grantId.uaPattern.expiryUnix.hmacSignatureHex )
+ * HMAC message: grantId + "." + uaPattern + "." + normalizedUrl + "." + expiryUnix
  *
  * The URL is NOT in the token — reconstructed from the request.
- * This binds each token to a specific URL (prevents cross-URL reuse).
+ * The uaPattern binds the token to a specific bot identity.
+ *
+ * Parsing strategy (option A): parse from the edges.
+ *   - First segment  = grantId (UUID)
+ *   - Last segment   = sigHex (64 hex chars)
+ *   - Second to last = expiryUnix (number)
+ *   - Everything between = uaPattern (may contain dots)
  */
 interface TokenVerifyResult {
     valid: boolean;
     grantId?: string;
+    uaPattern?: string;
 }
 /**
  * Verify an HMAC-signed access token.
  *
- * @param token         - Base64url-encoded token from ?_lq= param or Authorization header
- * @param normalizedUrl - The normalized URL being requested (used to reconstruct HMAC message)
- * @param secret        - Publisher's HMAC secret (base64-encoded, from workspace rules)
- * @param nowMs         - Current time in ms (optional, for testing)
+ * @param token            - Base64url-encoded token from ?_lq= param or Authorization header
+ * @param normalizedUrl    - The normalized URL being requested (used to reconstruct HMAC message)
+ * @param expectedUaPattern - The ua_pattern of the agent matched by the gateway (must match token)
+ * @param secret           - Publisher's HMAC secret (base64-encoded, from workspace rules)
+ * @param nowMs            - Current time in ms (optional, for testing)
  */
-declare function verifyToken(token: string, normalizedUrl: string, secret: string, nowMs?: number): Promise<TokenVerifyResult>;
+declare function verifyToken(token: string, normalizedUrl: string, expectedUaPattern: string, secret: string, nowMs?: number): Promise<TokenVerifyResult>;
 
 /**
  * Liquad SDK — Universal Handler for AI Content Licensing
@@ -81,6 +88,6 @@ declare function verifyToken(token: string, normalizedUrl: string, secret: strin
  *   6. Events buffered and flushed in batches (5s interval or 50 events)
  */
 
-declare function createLiquadHandler(config: LiquadConfig): (request: Request) => Promise<LiquadResult>;
+declare function createLiquadHandler(config: LiquadConfig): (request: Request, options?: HandleRequestOptions) => Promise<LiquadResult>;
 
-export { type CachedRules, LiquadConfig, LiquadResult, MatchableCatalog, type TokenVerifyResult, createLiquadHandler, verifyToken };
+export { type CachedRules, HandleRequestOptions, LiquadConfig, LiquadResult, MatchableCatalog, type TokenVerifyResult, createLiquadHandler, verifyToken };

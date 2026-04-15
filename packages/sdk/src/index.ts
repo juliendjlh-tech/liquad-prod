@@ -21,9 +21,9 @@
  *   6. Events buffered and flushed in batches (5s interval or 50 events)
  */
 
-import type { LiquadConfig, LiquadResult, SdkEvent } from "./types";
+import type { LiquadConfig, LiquadResult, SdkEvent, HandleRequestOptions } from "./types";
 import { createRulesCache } from "./rules-cache";
-import { matchUserAgent, matchRequest } from "./matcher";
+import { matchUserAgent, findBestCatalog } from "./matcher";
 import { isIpInRanges } from "./ip-check";
 import { normalizeUrl } from "./url-normalize";
 import { verifyToken } from "./token-verify";
@@ -87,7 +87,7 @@ function extractToken(request: Request): string | null {
 
 export function createLiquadHandler(
   config: LiquadConfig
-): (request: Request) => Promise<LiquadResult> {
+): (request: Request, options?: HandleRequestOptions) => Promise<LiquadResult> {
   if (!config.apiKey) {
     throw new Error("apiKey is required");
   }
@@ -102,14 +102,16 @@ export function createLiquadHandler(
   const events = createEventBuffer({
     apiKey: config.apiKey,
     apiBaseUrl,
-    waitUntil: config.waitUntil,
     onError: config.onError,
   });
 
   return async function handleRequest(
-    request: Request
+    request: Request,
+    options?: HandleRequestOptions
   ): Promise<LiquadResult> {
     try {
+      // Bind the per-request waitUntil so the event buffer can use it
+      events.setWaitUntil(options?.waitUntil);
       // ── Step 1: Load workspace rules ──────────────────────────────────────
       const rules = await rulesCache.getOrRefresh();
       if (!rules) {
@@ -168,24 +170,36 @@ export function createLiquadHandler(
       const normalizedUrl = normalizeUrl(fullUrl) ?? fullUrl;
 
       // ── Step 4a: Check free catalog match (local, no I/O) ────────────────
-      // If the URL matches a free catalog (price_eur=0) linked to this agent,
-      // grant access immediately — no token needed.
+      // Agent is already resolved — call findBestCatalog directly with its
+      // catalog_ids instead of going through matchRequest which would
+      // redundantly re-resolve the agent from the list.
       if (rules.catalogs.length > 0 && agent.catalog_ids.length > 0) {
-        const freeMatch = matchRequest({
-          normalizedUrl,
-          agentIds: [agent.id],
-          agents: [agent],
-          catalogs: rules.catalogs,
-          maxPrice: 0,
-        });
+        let reqDomain: string;
+        let reqPath: string;
+        try {
+          const urlObj = new URL(normalizedUrl);
+          reqDomain = urlObj.hostname;
+          reqPath = urlObj.pathname;
+        } catch {
+          reqDomain = "";
+          reqPath = "";
+        }
 
-        if (freeMatch.type === "matched") {
+        const freeCatalog = findBestCatalog(
+          rules.catalogs,
+          agent.catalog_ids,
+          reqDomain,
+          reqPath,
+          0,
+        );
+
+        if (freeCatalog) {
           events.push({
             domain,
             request_url:           normalizedUrl,
             user_agent_name:       agent.name,
             user_agent_raw:        ua,
-            matched_catalog_id:    freeMatch.catalog_id,
+            matched_catalog_id:    freeCatalog.id,
             decision:              "granted",
             price_applied:         0,
             consumer_workspace_id: null,
@@ -201,7 +215,7 @@ export function createLiquadHandler(
 
       if (token) {
         // ── Step 5a: Verify HMAC token locally ────────────────────────────
-        const result = await verifyToken(token, normalizedUrl, rules.hmac_secret);
+        const result = await verifyToken(token, normalizedUrl, agent.ua_pattern, rules.hmac_secret);
 
         if (result.valid) {
           events.push({
@@ -279,19 +293,14 @@ export type {
   LiquadConfig,
   LiquadResult,
   SdkEvent,
-  FilterRule,
-  DomainRule,
-  CatalogFilterRules,
+  HandleRequestOptions,
 } from "./types";
 export type { CachedRules } from "./rules-cache";
 export type {
-  MatchResult,
-  MatchRequestInput,
   MatchableAgent,
   MatchableCatalog,
 } from "./matcher";
-export { matchRequest, matchUserAgent } from "./matcher";
-export { toExpressMiddleware } from "./express";
+export { matchUserAgent, findBestCatalog } from "./matcher";
 export { normalizeUrl } from "./url-normalize";
 export { verifyToken } from "./token-verify";
 export type { TokenVerifyResult } from "./token-verify";

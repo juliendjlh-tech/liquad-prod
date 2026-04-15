@@ -3,7 +3,7 @@ import { createServerClient } from "@/lib/db/supabase-server";
 import {
   getDomainDeleteImpact,
   deleteDomain,
-} from "@/lib/services/domain-crud.service";
+} from "@/lib/services/content.service";
 
 /**
  * GET /api/domains/:id

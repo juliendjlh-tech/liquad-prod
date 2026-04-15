@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateSdkRequest } from "@/lib/services/sdk-auth.service";
+import { authenticateApiKey } from "@/lib/services/auth.service";
 import { createServerClient } from "@/lib/db/supabase-server";
 
 /**
- * GET /api/sdk/balance
+ * GET /api/consumer/balance
  *
  * Returns workspace balance and spending summary.
  * Authentication: API key via Authorization: Bearer <key>
@@ -18,16 +18,15 @@ import { createServerClient } from "@/lib/db/supabase-server";
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    // 1. Auth API key
-    const authHeader = request.headers.get("authorization");
-    const authResult = await authenticateSdkRequest(authHeader);
+    const authResult = await authenticateApiKey(
+      request.headers.get("authorization")
+    );
     if ("error" in authResult) {
       return NextResponse.json({ error: authResult.error }, { status: 401 });
     }
 
     const supabase = await createServerClient();
 
-    // 2. Get workspace balance
     const { data: workspace } = await supabase
       .from("workspaces")
       .select("id, balance_eur")
@@ -41,7 +40,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // 3. Get spending stats (sum of absolute debit amounts + count)
     const { data: debits } = await supabase
       .from("credit_transactions")
       .select("amount_eur")
@@ -54,7 +52,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       0
     );
 
-    // 4. Return balance summary
     return NextResponse.json({
       workspace_id: workspace.id,
       balance_eur: Number(workspace.balance_eur),

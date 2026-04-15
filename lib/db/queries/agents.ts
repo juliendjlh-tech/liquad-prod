@@ -36,6 +36,24 @@ export interface CatalogAgentRecord {
 // ---------------------------------------------------------------------------
 
 /**
+ * Fetch a single agent by ID.
+ */
+export async function getAgentById(
+  agentId: string
+): Promise<AgentRecord | null> {
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("agents")
+    .select("id, name, ua_pattern, declared_ips, created_at")
+    .eq("id", agentId)
+    .single();
+
+  if (error) return null;
+  return data as AgentRecord;
+}
+
+/**
  * Fetch all agents active for a workspace via the workspace_agents junction.
  */
 export async function getWorkspaceAgents(

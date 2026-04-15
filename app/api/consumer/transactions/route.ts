@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateSdkRequest } from "@/lib/services/sdk-auth.service";
+import { authenticateApiKey } from "@/lib/services/auth.service";
 import { createServerClient } from "@/lib/db/supabase-server";
 
 /**
- * GET /api/sdk/transactions
+ * GET /api/consumer/transactions
  *
  * Returns paginated transaction history for the authenticated workspace.
  * Cursor-based pagination using base64url-encoded created_at|id.
@@ -23,14 +23,13 @@ import { createServerClient } from "@/lib/db/supabase-server";
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    // 1. Auth API key
-    const authHeader = request.headers.get("authorization");
-    const authResult = await authenticateSdkRequest(authHeader);
+    const authResult = await authenticateApiKey(
+      request.headers.get("authorization")
+    );
     if ("error" in authResult) {
       return NextResponse.json({ error: authResult.error }, { status: 401 });
     }
 
-    // 2. Parse query params
     const { searchParams } = request.nextUrl;
     const limitParam = parseInt(searchParams.get("limit") ?? "50", 10);
     const cursor = searchParams.get("cursor");
@@ -44,7 +43,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const supabase = await createServerClient();
 
-    // 3. Build query with cursor-based pagination
     let query = supabase
       .from("credit_transactions")
       .select(
@@ -53,9 +51,8 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .eq("consumer_workspace_id", authResult.workspaceId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
-      .limit(limitParam + 1); // +1 to detect has_more
+      .limit(limitParam + 1);
 
-    // 4. Decode cursor and apply filter
     if (cursor) {
       try {
         const decoded = Buffer.from(cursor, "base64url").toString();
@@ -64,7 +61,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         const cursorCreatedAt = decoded.slice(0, separatorIndex);
         const cursorId = decoded.slice(separatorIndex + 1);
 
-        // (created_at, id) < (cursor_created_at, cursor_id) for DESC order
         query = query.or(
           `created_at.lt.${cursorCreatedAt},and(created_at.eq.${cursorCreatedAt},id.lt.${cursorId})`
         );
@@ -85,7 +81,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // 5. Detect has_more and build next_cursor
     const results = items ?? [];
     const hasMore = results.length > limitParam;
     if (hasMore) results.pop();
@@ -97,7 +92,6 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
           ).toString("base64url")
         : null;
 
-    // 6. Return paginated response
     return NextResponse.json({
       items: results.map((t) => ({
         ...t,

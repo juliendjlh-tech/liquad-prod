@@ -1,31 +1,40 @@
 // ---------------------------------------------------------------------------
-// SDK Transaction service
+// Consumer service
 //
-// Pre-authorize content access for a consumer bot.
-// Accepts batch URLs + explicit agent_id, debits balance per URL,
-// and returns HMAC-signed tokens for local verification by the SDK.
+// Business logic for the consumer API (crawler operators).
+// Handles content authorization (pre-purchase of signed tokens).
 //
-// Architecture: 2-pass design
-//   Pass 1: Resolve publishers, fetch match data, match URLs (read-only)
-//   Pass 2: Batch debit + sign tokens (single atomic RPC)
-//
-// Uses ServiceResult<T> for consistent error handling.
+// Design:
+//   - Source-based matching: only indexed URLs can be purchased
+//   - ua_pattern reconciliation: consumer agent matched to publisher catalogs
+//     via ua_pattern (not strict agent_id), so preset and operator agents unify
+//   - Bot-bound tokens: ua_pattern encoded in HMAC signature, gateway verifies
+//   - Publisher-controlled TTL: catalog.ttl_minutes, not consumer-provided
+//   - declared_ips required: agents without IP ranges cannot participate
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
 import { resolvePublisherDomains } from "@/lib/db/queries/domains";
-import { getPublisherMatchData, type PublisherMatchData } from "@/lib/db/queries/publisher-match-data";
-import { matchRequest } from "@liquad/sdk/matcher";
+import { getWorkspaceSecret } from "@/lib/db/queries/workspaces";
+import { findSourcesByUrls } from "@/lib/db/queries/sources";
+import { getCatalogIdsBySourceIds, getCatalogs } from "@/lib/db/queries/catalogs";
+import { getAgentById, getCatalogAgents } from "@/lib/db/queries/agents";
 import { normalizeUrl } from "@liquad/sdk/url-normalize";
 import { ok, err, type ServiceResult } from "@/lib/utils/service-result";
 import type { TransactionInput } from "@/lib/validations/authorize.schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const DEFAULT_TTL_MINUTES = 60;
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface TransactionUrlResult {
+interface AuthorizeUrlResult {
   url: string;
   token: string;
   price_eur: number;
@@ -39,8 +48,8 @@ interface UnmatchedUrl {
   reason: "no_match" | "no_catalog";
 }
 
-export interface TransactionSuccess {
-  results: TransactionUrlResult[];
+export interface AuthorizeSuccess {
+  results: AuthorizeUrlResult[];
   unmatched: UnmatchedUrl[];
   total_cost_eur: number;
   balance_remaining_eur: number;
@@ -61,20 +70,27 @@ async function importHmacKey(base64Secret: string): Promise<CryptoKey> {
   );
 }
 
+/**
+ * Sign an HMAC token with bot identity (ua_pattern) bound in the signature.
+ *
+ * Token format:  base64url( grantId.uaPattern.expiryUnix.sigHex )
+ * HMAC message:  grantId.uaPattern.normalizedUrl.expiryUnix
+ */
 async function signHmacToken(
   key: CryptoKey,
   grantId: string,
+  uaPattern: string,
   normalizedUrl: string,
   expiryUnix: number
 ): Promise<string> {
-  const message = `${grantId}.${normalizedUrl}.${expiryUnix}`;
+  const message = `${grantId}.${uaPattern}.${normalizedUrl}.${expiryUnix}`;
   const sig = await crypto.subtle.sign(
     "HMAC",
     key,
     new TextEncoder().encode(message)
   );
   const sigHex = Buffer.from(sig).toString("hex");
-  const raw = `${grantId}.${expiryUnix}.${sigHex}`;
+  const raw = `${grantId}.${uaPattern}.${expiryUnix}.${sigHex}`;
   return Buffer.from(raw).toString("base64url");
 }
 
@@ -86,6 +102,7 @@ interface BatchDebitInput {
   publisher_workspace_id: string;
   catalog_id: string;
   agent_id: string;
+  ua_pattern: string;
   url: string;
   price_eur: number;
   ttl_minutes: number;
@@ -119,7 +136,6 @@ async function batchDebitAndGrant(
   supabase: SupabaseClient
 ): Promise<BatchDebitResult> {
   if (debits.length === 0) {
-    // No debits needed (e.g., all unmatched). Fetch current balance.
     const { data: ws } = await supabase
       .from("workspaces")
       .select("balance_eur")
@@ -134,13 +150,14 @@ async function batchDebitAndGrant(
   }
 
   const { data: rpcData, error: rpcError } = await supabase.rpc(
-    "check_cache_and_debit_batch",
+    "authorize_and_debit_batch",
     {
       p_consumer_id: consumerWorkspaceId,
       p_debits: debits.map((d) => ({
         publisher_workspace_id: d.publisher_workspace_id,
         catalog_id: d.catalog_id,
         agent_id: d.agent_id,
+        ua_pattern: d.ua_pattern,
         url: d.url,
         price_eur: d.price_eur,
         ttl_minutes: d.ttl_minutes,
@@ -170,7 +187,6 @@ async function batchDebitAndGrant(
     };
   }
 
-  // Validate RPC response integrity
   if (!result.grants || !Array.isArray(result.grants)) {
     throw new Error("batchDebitAndGrant: RPC returned success but no grants array");
   }
@@ -191,18 +207,39 @@ async function batchDebitAndGrant(
 }
 
 // ---------------------------------------------------------------------------
-// createTransaction — main entry point
+// authorize — main entry point
 // ---------------------------------------------------------------------------
 
-export async function createTransaction(
+/**
+ * Pre-authorize content access for a consumer bot.
+ *
+ * 3-pass design:
+ *   Pass 1: Resolve agent, normalize URLs, verify sources exist
+ *   Pass 2: Find cheapest valid catalog per URL (ua_pattern reconciliation)
+ *   Pass 3: Batch debit + sign bot-bound HMAC tokens
+ */
+export async function authorize(
   consumerWorkspaceId: string,
   input: TransactionInput
-): Promise<ServiceResult<TransactionSuccess>> {
-  // -----------------------------------------------------------------------
-  // PASS 1: Resolve + Match (read-only, no debits)
-  // -----------------------------------------------------------------------
+): Promise<ServiceResult<AuthorizeSuccess>> {
+  // ── Pass 1: Resolve agent + normalize + verify sources ────────────────
 
-  // 1a. Normalize all URLs and extract unique domains
+  // Resolve consumer's agent — need ua_pattern for matching and token signing
+  const agent = await getAgentById(input.agent_id);
+  if (!agent) {
+    return err("agent_not_found", 404, { agent_id: input.agent_id });
+  }
+
+  // Require declared_ips for paid transactions (prevent unverifiable bot identity)
+  if (!agent.declared_ips || agent.declared_ips.length === 0) {
+    return err("agent_missing_ips", 422, {
+      agent_id: input.agent_id,
+      message: "Agent must have declared IP ranges to participate in paid transactions",
+    });
+  }
+
+  const uaPattern = agent.ua_pattern;
+
   const normalizedUrls: Array<{ normalizedUrl: string; domain: string }> = [];
   for (const rawUrl of input.urls) {
     const normalizedUrl = normalizeUrl(rawUrl);
@@ -214,96 +251,130 @@ export async function createTransaction(
   }
 
   const uniqueDomains = [...new Set(normalizedUrls.map((u) => u.domain))];
-
-  // 1b. Batch resolve all domains → publisher workspace IDs (1 query)
   const domainToPublisher = await resolvePublisherDomains(uniqueDomains);
 
-  // Check all domains are known
   for (const domain of uniqueDomains) {
     if (!domainToPublisher.has(domain)) {
       return err("domain_not_found", 404, { domain });
     }
   }
 
-  // 1c. Fetch publisher data for each unique publisher workspace (deduplicated)
-  const uniquePublisherIds = [
-    ...new Set(domainToPublisher.values()),
-  ];
-  const publisherDataMap = new Map<string, PublisherMatchData>();
+  // Find which URLs have an indexed source
+  const allNormalized = normalizedUrls.map((u) => u.normalizedUrl);
+  const foundSources = await findSourcesByUrls(allNormalized);
+  const sourceUrlToId = new Map(foundSources.map((s) => [s.source_url, s.id]));
 
-  await Promise.all(
-    uniquePublisherIds.map(async (publisherId) => {
-      const data = await getPublisherMatchData(publisherId, {
-        maxPriceEur: input.max_price_eur,
-      });
-      publisherDataMap.set(publisherId, data);
-    })
-  );
+  const indexed: typeof normalizedUrls = [];
+  const unmatched: UnmatchedUrl[] = [];
 
-  // Verify all publishers have HMAC secrets
-  for (const [publisherId, data] of publisherDataMap) {
-    if (!data.hmacSecret) {
-      return err("publisher_not_configured", 500, { publisher_workspace_id: publisherId });
+  for (const entry of normalizedUrls) {
+    if (sourceUrlToId.has(entry.normalizedUrl)) {
+      indexed.push(entry);
+    } else {
+      unmatched.push({ url: entry.normalizedUrl, reason: "no_match" });
     }
   }
 
-  // 1d. Match each URL against publisher's agents/catalogs
+  // ── Pass 2: Find cheapest valid catalog per URL (ua_pattern match) ────
+
+  const supabase = await createServerClient();
+
+  if (indexed.length === 0) {
+    const debitResult = await batchDebitAndGrant(consumerWorkspaceId, [], supabase);
+    return debitResult.success
+      ? ok({ results: [], unmatched, total_cost_eur: 0, balance_remaining_eur: debitResult.new_balance })
+      : err("insufficient_balance", 402, { balance_eur: debitResult.balance, required_eur: debitResult.required });
+  }
+
+  const sourceIds = indexed.map((e) => sourceUrlToId.get(e.normalizedUrl)!);
+  const sourceCatalogLinks = await getCatalogIdsBySourceIds(sourceIds);
+
+  // source_id → catalog_ids
+  const sourceIdToCatalogIds = new Map<string, string[]>();
+  for (const link of sourceCatalogLinks) {
+    const ids = sourceIdToCatalogIds.get(link.source_id) ?? [];
+    ids.push(link.catalog_id);
+    sourceIdToCatalogIds.set(link.source_id, ids);
+  }
+
+  // Get all unique catalog_ids from source links
+  const allCatalogIds = [...new Set(sourceCatalogLinks.map((l) => l.catalog_id))];
+
+  // Reconciliation: find catalogs linked to agents with matching ua_pattern
+  const catalogAgentLinks = await getCatalogAgents(allCatalogIds);
+  const catalogsWithMatchingAgent = new Set(
+    catalogAgentLinks
+      .filter((link) => link.agent.ua_pattern === uaPattern)
+      .map((link) => link.catalog_id)
+  );
+
+  // Fetch catalog details (active + price filter) only for matching catalogs
+  const relevantCatalogIds = allCatalogIds.filter((id) => catalogsWithMatchingAgent.has(id));
+
+  const catalogs = await getCatalogs(relevantCatalogIds, {
+    status: "active",
+    maxPriceEur: input.max_price_eur,
+  });
+  const catalogMap = new Map(catalogs.map((c) => [c.id, c]));
+
+  // Pick cheapest valid catalog per URL
   const matched: Array<{
     normalizedUrl: string;
     publisherWorkspaceId: string;
     catalogId: string;
-    agentId: string;
     priceEur: number;
+    ttlMinutes: number;
   }> = [];
-  const unmatched: UnmatchedUrl[] = [];
 
-  for (const { normalizedUrl, domain } of normalizedUrls) {
-    const publisherWsId = domainToPublisher.get(domain)!;
-    const publisherData = publisherDataMap.get(publisherWsId)!;
+  for (const entry of indexed) {
+    const sourceId = sourceUrlToId.get(entry.normalizedUrl)!;
+    const catalogIds = sourceIdToCatalogIds.get(sourceId) ?? [];
 
-    const match = matchRequest({
-      normalizedUrl,
-      agentIds: [input.agent_id],
-      agents: publisherData.agents,
-      catalogs: publisherData.catalogs,
-      maxPrice: input.max_price_eur,
-    });
-
-    if (match.type === "no_match") {
-      unmatched.push({ url: normalizedUrl, reason: "no_match" });
-      continue;
+    let bestCatalog: { id: string; price_eur: number; ttl_minutes: number | null } | null = null;
+    for (const catId of catalogIds) {
+      const cat = catalogMap.get(catId);
+      if (cat && (!bestCatalog || cat.price_eur < bestCatalog.price_eur)) {
+        bestCatalog = cat;
+      }
     }
 
-    if (match.type === "no_catalog") {
-      unmatched.push({ url: normalizedUrl, reason: "no_catalog" });
+    if (!bestCatalog) {
+      unmatched.push({ url: entry.normalizedUrl, reason: "no_catalog" });
       continue;
     }
 
     matched.push({
-      normalizedUrl,
-      publisherWorkspaceId: publisherWsId,
-      catalogId: match.catalog_id,
-      agentId: match.agent_id,
-      priceEur: match.price_eur,
+      normalizedUrl: entry.normalizedUrl,
+      publisherWorkspaceId: domainToPublisher.get(entry.domain)!,
+      catalogId: bestCatalog.id,
+      priceEur: bestCatalog.price_eur,
+      ttlMinutes: bestCatalog.ttl_minutes ?? DEFAULT_TTL_MINUTES,
     });
   }
 
-  // -----------------------------------------------------------------------
-  // PASS 2: Atomic batch debit + sign tokens
-  // -----------------------------------------------------------------------
+  // ── Pass 3: Atomic batch debit + sign bot-bound tokens ────────────────
 
-  const supabase = await createServerClient();
+  // Fetch HMAC secrets for involved publishers
+  const uniquePublisherIds = [...new Set(matched.map((m) => m.publisherWorkspaceId))];
+  const secretMap = new Map<string, string>();
 
-  // 2a. Batch debit (single atomic RPC)
+  await Promise.all(
+    uniquePublisherIds.map(async (pubId) => {
+      const secret = await getWorkspaceSecret(pubId);
+      secretMap.set(pubId, secret);
+    })
+  );
+
   const debitResult = await batchDebitAndGrant(
     consumerWorkspaceId,
     matched.map((m) => ({
       publisher_workspace_id: m.publisherWorkspaceId,
       catalog_id: m.catalogId,
-      agent_id: m.agentId,
+      agent_id: input.agent_id,
+      ua_pattern: uaPattern,
       url: m.normalizedUrl,
       price_eur: m.priceEur,
-      ttl_minutes: input.ttl_minutes,
+      ttl_minutes: m.ttlMinutes,
     })),
     supabase
   );
@@ -315,22 +386,18 @@ export async function createTransaction(
     });
   }
 
-  // 2b. Import HMAC keys once per publisher
+  // Sign bot-bound HMAC tokens
   const hmacKeyMap = new Map<string, CryptoKey>();
   await Promise.all(
-    uniquePublisherIds.map(async (publisherId) => {
-      const secret = publisherDataMap.get(publisherId)!.hmacSecret;
-      const key = await importHmacKey(secret);
-      hmacKeyMap.set(publisherId, key);
+    uniquePublisherIds.map(async (pubId) => {
+      const key = await importHmacKey(secretMap.get(pubId)!);
+      hmacKeyMap.set(pubId, key);
     })
   );
 
-  // 2c. Sign tokens (parallel)
-  const grantByUrl = new Map(
-    debitResult.grants.map((g) => [g.url, g])
-  );
+  const grantByUrl = new Map(debitResult.grants.map((g) => [g.url, g]));
 
-  const results: TransactionUrlResult[] = await Promise.all(
+  const results: AuthorizeUrlResult[] = await Promise.all(
     matched.map(async (m) => {
       const grant = grantByUrl.get(m.normalizedUrl)!;
       const expiryUnix = Math.floor(
@@ -340,6 +407,7 @@ export async function createTransaction(
       const token = await signHmacToken(
         hmacKey,
         grant.grant_id,
+        uaPattern,
         m.normalizedUrl,
         expiryUnix
       );
@@ -355,7 +423,6 @@ export async function createTransaction(
     })
   );
 
-  // Calculate total cost (cached grants are free)
   const totalCost = results.reduce(
     (sum, r) => sum + (r.cached ? 0 : r.price_eur),
     0

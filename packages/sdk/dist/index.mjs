@@ -1,10 +1,7 @@
 import {
-  toExpressMiddleware
-} from "./chunk-PEYN7Q5D.mjs";
-import {
-  matchRequest,
+  findBestCatalog,
   matchUserAgent
-} from "./chunk-WGQ54YKZ.mjs";
+} from "./chunk-EA4NYHMA.mjs";
 import {
   normalizeUrl
 } from "./chunk-VKCI3LJG.mjs";
@@ -92,20 +89,25 @@ function isIpInRanges(ip, ranges) {
 // src/token-verify.ts
 var cachedSecret = null;
 var cachedKey = null;
-async function verifyToken(token, normalizedUrl, secret, nowMs) {
+async function verifyToken(token, normalizedUrl, expectedUaPattern, secret, nowMs) {
   let decoded;
   try {
     decoded = atob(token.replace(/-/g, "+").replace(/_/g, "/"));
   } catch {
     return { valid: false };
   }
-  const dotIdx1 = decoded.indexOf(".");
-  const dotIdx2 = decoded.indexOf(".", dotIdx1 + 1);
-  if (dotIdx1 === -1 || dotIdx2 === -1) return { valid: false };
-  const grantId = decoded.slice(0, dotIdx1);
-  const expiryStr = decoded.slice(dotIdx1 + 1, dotIdx2);
-  const sigHex = decoded.slice(dotIdx2 + 1);
-  if (!grantId || !expiryStr || !sigHex) return { valid: false };
+  const firstDot = decoded.indexOf(".");
+  if (firstDot === -1) return { valid: false };
+  const lastDot = decoded.lastIndexOf(".");
+  if (lastDot === -1 || lastDot === firstDot) return { valid: false };
+  const secondToLastDot = decoded.lastIndexOf(".", lastDot - 1);
+  if (secondToLastDot === -1 || secondToLastDot <= firstDot) return { valid: false };
+  const grantId = decoded.slice(0, firstDot);
+  const uaPattern = decoded.slice(firstDot + 1, secondToLastDot);
+  const expiryStr = decoded.slice(secondToLastDot + 1, lastDot);
+  const sigHex = decoded.slice(lastDot + 1);
+  if (!grantId || !uaPattern || !expiryStr || !sigHex) return { valid: false };
+  if (uaPattern !== expectedUaPattern) return { valid: false };
   const expiryUnix = parseInt(expiryStr, 10);
   if (isNaN(expiryUnix)) return { valid: false };
   const expiryMs = expiryUnix * 1e3;
@@ -125,7 +127,7 @@ async function verifyToken(token, normalizedUrl, secret, nowMs) {
       return { valid: false };
     }
   }
-  const message = `${grantId}.${normalizedUrl}.${expiryStr}`;
+  const message = `${grantId}.${uaPattern}.${normalizedUrl}.${expiryStr}`;
   const hexPairs = sigHex.match(/.{2}/g);
   if (!hexPairs || hexPairs.length !== 32) return { valid: false };
   const sigBytes = new Uint8Array(hexPairs.map((h) => parseInt(h, 16)));
@@ -135,13 +137,14 @@ async function verifyToken(token, normalizedUrl, secret, nowMs) {
     sigBytes,
     new TextEncoder().encode(message)
   );
-  return valid ? { valid: true, grantId } : { valid: false };
+  return valid ? { valid: true, grantId, uaPattern } : { valid: false };
 }
 
 // src/event-buffer.ts
 function createEventBuffer(config) {
   const buffer = [];
   let timer = null;
+  let currentWaitUntil;
   const flushInterval = config.flushIntervalMs ?? 5e3;
   const maxSize = config.maxBufferSize ?? 50;
   function flush() {
@@ -159,7 +162,7 @@ function createEventBuffer(config) {
         err instanceof Error ? err : new Error("Event flush error")
       );
     });
-    if (config.waitUntil) config.waitUntil(promise);
+    if (currentWaitUntil) currentWaitUntil(promise);
   }
   function scheduleFlush() {
     if (timer) return;
@@ -169,6 +172,10 @@ function createEventBuffer(config) {
     }, flushInterval);
   }
   return {
+    /** Set the waitUntil function for the current request context. */
+    setWaitUntil(fn) {
+      currentWaitUntil = fn;
+    },
     /** Add an event to the buffer. Flushes automatically when full or on timer. */
     push(event) {
       buffer.push(event);
@@ -229,11 +236,11 @@ function createLiquadHandler(config) {
   const events = createEventBuffer({
     apiKey: config.apiKey,
     apiBaseUrl,
-    waitUntil: config.waitUntil,
     onError: config.onError
   });
-  return async function handleRequest(request) {
+  return async function handleRequest(request, options) {
     try {
+      events.setWaitUntil(options?.waitUntil);
       const rules = await rulesCache.getOrRefresh();
       if (!rules) {
         return { blocked: false };
@@ -275,20 +282,30 @@ function createLiquadHandler(config) {
       const fullUrl = request.url.startsWith("http") ? request.url : `https://${domain}${request.url}`;
       const normalizedUrl = normalizeUrl(fullUrl) ?? fullUrl;
       if (rules.catalogs.length > 0 && agent.catalog_ids.length > 0) {
-        const freeMatch = matchRequest({
-          normalizedUrl,
-          agentIds: [agent.id],
-          agents: [agent],
-          catalogs: rules.catalogs,
-          maxPrice: 0
-        });
-        if (freeMatch.type === "matched") {
+        let reqDomain;
+        let reqPath;
+        try {
+          const urlObj = new URL(normalizedUrl);
+          reqDomain = urlObj.hostname;
+          reqPath = urlObj.pathname;
+        } catch {
+          reqDomain = "";
+          reqPath = "";
+        }
+        const freeCatalog = findBestCatalog(
+          rules.catalogs,
+          agent.catalog_ids,
+          reqDomain,
+          reqPath,
+          0
+        );
+        if (freeCatalog) {
           events.push({
             domain,
             request_url: normalizedUrl,
             user_agent_name: agent.name,
             user_agent_raw: ua,
-            matched_catalog_id: freeMatch.catalog_id,
+            matched_catalog_id: freeCatalog.id,
             decision: "granted",
             price_applied: 0,
             consumer_workspace_id: null,
@@ -300,7 +317,7 @@ function createLiquadHandler(config) {
       }
       const token = extractToken(request);
       if (token) {
-        const result = await verifyToken(token, normalizedUrl, rules.hmac_secret);
+        const result = await verifyToken(token, normalizedUrl, agent.ua_pattern, rules.hmac_secret);
         if (result.valid) {
           events.push({
             domain,
@@ -363,9 +380,8 @@ function createLiquadHandler(config) {
 }
 export {
   createLiquadHandler,
-  matchRequest,
+  findBestCatalog,
   matchUserAgent,
   normalizeUrl,
-  toExpressMiddleware,
   verifyToken
 };

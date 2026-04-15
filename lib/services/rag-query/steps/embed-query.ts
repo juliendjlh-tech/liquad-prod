@@ -2,7 +2,7 @@
 // Step 6: Generate embedding for the query text
 // ---------------------------------------------------------------------------
 
-import { generateEmbeddings } from "@/lib/services/embedding.service";
+import { generateEmbeddings } from "@/lib/services/pipeline.service";
 import type { PipelineStep } from "../types";
 
 /**
