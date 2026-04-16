@@ -3,20 +3,29 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  --deck-bg: #0b1121;
+  --deck-card: #111827;
+  --deck-border: #1e293b;
+  --deck-blue: #4C8BF5;
+  --deck-blue-dim: #2563eb;
+  --deck-green: #22c55e;
+  --deck-text: #e2e8f0;
+  --deck-text-dim: #94a3b8;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-deck-bg: var(--deck-bg);
+  --color-deck-card: var(--deck-card);
+  --color-deck-border: var(--deck-border);
+  --color-deck-blue: var(--deck-blue);
+  --color-deck-blue-dim: var(--deck-blue-dim);
+  --color-deck-green: var(--deck-green);
+  --color-deck-text: var(--deck-text);
+  --color-deck-text-dim: var(--deck-text-dim);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {

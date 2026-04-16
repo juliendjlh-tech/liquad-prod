@@ -7,8 +7,14 @@ export default async function Navbar() {
   const headersList = await headers();
   const pathname = headersList.get("x-pathname") ?? "";
 
-  // Hide Navbar on dashboard pages — ModeNav handles navigation there
-  if (pathname.startsWith("/dashboard")) return null;
+  // Hide Navbar on dashboard, onboarding, and login pages (app vs. website separation)
+  if (
+    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/onboarding") ||
+    pathname.startsWith("/login")
+  ) {
+    return null;
+  }
 
   const supabase = await createServerClient();
   const {
@@ -16,34 +22,40 @@ export default async function Navbar() {
   } = await supabase.auth.getUser();
 
   return (
-    <header className="sticky top-0 z-50 border-b border-gray-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60">
+    <header className="sticky top-0 z-50 border-b border-deck-border bg-deck-bg/95 backdrop-blur supports-[backdrop-filter]:bg-deck-bg/60">
       <nav className="mx-auto max-w-7xl px-6 py-4">
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2">
-            <div className="h-8 w-8 rounded-lg bg-blue-600" />
-            <span className="text-lg font-semibold text-gray-900">
-              Liquad
-            </span>
+            <svg height="36" width="auto" viewBox="0 0 81 202" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M53.8636 173.182V135.818H53.2727C52.3636 137.758 51.0758 139.682 49.4091 141.591C47.7727 143.47 45.6364 145.03 43 146.273C40.3939 147.515 37.2121 148.136 33.4545 148.136C28.1515 148.136 23.3485 146.773 19.0455 144.045C14.7727 141.288 11.3788 137.242 8.86364 131.909C6.37879 126.545 5.13636 119.97 5.13636 112.182C5.13636 104.182 6.42424 97.5303 9 92.2273C11.5758 86.8939 15 82.9091 19.2727 80.2727C23.5758 77.6061 28.2879 76.2727 33.4091 76.2727C37.3182 76.2727 40.5758 76.9394 43.1818 78.2727C45.8182 79.5758 47.9394 81.2121 49.5455 83.1818C51.1818 85.1212 52.4242 87.0303 53.2727 88.9091H54.0909V77.1818H73.1818V173.182H53.8636ZM39.5909 132.727C42.7121 132.727 45.3485 131.879 47.5 130.182C49.6818 128.455 51.3485 126.045 52.5 122.955C53.6818 119.864 54.2727 116.242 54.2727 112.091C54.2727 107.939 53.697 104.333 52.5455 101.273C51.3939 98.2121 49.7273 95.8485 47.5455 94.1818C45.3636 92.5151 42.7121 91.6818 39.5909 91.6818C36.4091 91.6818 33.7273 92.5455 31.5455 94.2727C29.3636 96 27.7121 98.3939 26.5909 101.455C25.4697 104.515 24.9091 108.061 24.9091 112.091C24.9091 116.152 25.4697 119.742 26.5909 122.864C27.7424 125.955 29.3939 128.379 31.5455 130.136C33.7273 131.864 36.4091 132.727 39.5909 132.727Z" fill="white"/>
+              <path d="M53.8636 51.8182V89.1818H53.2727C52.3636 87.2424 51.0758 85.3182 49.4091 83.4091C47.7727 81.5303 45.6364 79.9697 43 78.7273C40.3939 77.4848 37.2121 76.8636 33.4545 76.8636C28.1515 76.8636 23.3485 78.2273 19.0455 80.9545C14.7727 83.7121 11.3788 87.7576 8.86364 93.0909C6.37879 98.4545 5.13636 105.03 5.13636 112.818C5.13636 120.818 6.42424 127.47 9 132.773C11.5758 138.106 15 142.091 19.2727 144.727C23.5758 147.394 28.2879 148.727 33.4091 148.727C37.3182 148.727 40.5758 148.061 43.1818 146.727C45.8182 145.424 47.9394 143.788 49.5455 141.818C51.1818 139.879 52.4242 137.97 53.2727 136.091H54.0909V147.818H73.1818V51.8182H53.8636ZM39.5909 92.2727C42.7121 92.2727 45.3485 93.1212 47.5 94.8182C49.6818 96.5455 51.3485 98.9545 52.5 102.045C53.6818 105.136 54.2727 108.758 54.2727 112.909C54.2727 117.061 53.697 120.667 52.5455 123.727C51.3939 126.788 49.7273 129.152 47.5455 130.818C45.3636 132.485 42.7121 133.318 39.5909 133.318C36.4091 133.318 33.7273 132.455 31.5455 130.727C29.3636 129 27.7121 126.606 26.5909 123.545C25.4697 120.485 24.9091 116.939 24.9091 112.909C24.9091 108.848 25.4697 105.258 26.5909 102.136C27.7424 99.0455 29.3939 96.6212 31.5455 94.8636C33.7273 93.1364 36.4091 92.2727 39.5909 92.2727Z" fill="white"/>
+              <path d="M53.7273 124V54.1818H73.0909V124H53.7273ZM63.4545 45.1818C60.5758 45.1818 58.1061 44.2273 56.0455 42.3182C54.0152 40.3788 53 38.0606 53 35.3636C53 32.697 54.0152 30.4091 56.0455 28.5C58.1061 26.5606 60.5758 25.5909 63.4545 25.5909C66.3333 25.5909 68.7879 26.5606 70.8182 28.5C72.8788 30.4091 73.9091 32.697 73.9091 35.3636C73.9091 38.0606 72.8788 40.3788 70.8182 42.3182C68.7879 44.2273 66.3333 45.1818 63.4545 45.1818Z" fill="white"/>
+            </svg>
+            <span className="text-lg font-semibold text-white">Liquad</span>
           </Link>
 
           <div className="flex items-center gap-6">
+            <Link
+              href="/publishers"
+              className="text-sm font-medium text-deck-text-dim hover:text-white transition-colors"
+            >
+              For Publishers
+            </Link>
+            <Link
+              href="/ai-companies"
+              className="text-sm font-medium text-deck-text-dim hover:text-white transition-colors"
+            >
+              For AI Companies
+            </Link>
             {user ? (
               <Link
                 href="/dashboard"
-                className="text-sm font-medium text-gray-700 hover:text-gray-900"
+                className="text-sm font-medium text-deck-text-dim hover:text-white"
               >
                 Dashboard
               </Link>
             ) : (
-              <>
-                <Link
-                  href="/login"
-                  className="text-sm font-medium text-gray-700 hover:text-gray-900"
-                >
-                  Login
-                </Link>
-                <Button href="/login">Get Started</Button>
-              </>
+              <Button href="/login">Sign in</Button>
             )}
           </div>
         </div>

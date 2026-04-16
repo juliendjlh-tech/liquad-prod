@@ -90,6 +90,13 @@ export async function middleware(request: NextRequest) {
 
   const { pathname } = request.nextUrl;
 
+  // --- Login redirect: if already authenticated, go straight to dashboard ---
+  if (user && pathname === "/login") {
+    const dashboardUrl = request.nextUrl.clone();
+    dashboardUrl.pathname = "/dashboard";
+    return NextResponse.redirect(dashboardUrl);
+  }
+
   // --- Auth routes bypass: /api/auth/* must be accessible without session ---
   // These routes handle signup, login, and logout — users obviously don't
   // have a session yet when signing up or logging in.
@@ -150,5 +157,13 @@ export async function middleware(request: NextRequest) {
  * - /favicon.ico — Browser favicon request
  */
 export const config = {
-  matcher: ["/dashboard/:path*", "/onboarding", "/api/:path*"],
+  matcher: [
+    "/dashboard/:path*",
+    "/onboarding",
+    "/login",
+    "/publishers",
+    "/ai-companies",
+    "/api/:path*",
+    "/",
+  ],
 };
