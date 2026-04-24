@@ -5,8 +5,9 @@ import { getWorkspaceAgents as queryWorkspaceAgents } from "@/lib/db/queries/age
 // AI Bot Presets
 // ---------------------------------------------------------------------------
 // Each preset represents a well-known AI bot. These are seeded into the
-// global agents table by migration 018. The list here is used by the
-// "presets" API endpoint to show which bots are available for subscription.
+// global agents table by migration 018 and typed as 'preset' by migration 027.
+// The list here is used to enrich the presets API with the operator field
+// (display-only, not stored in DB).
 
 export const AI_BOT_PRESETS: Array<{
   name: string;
@@ -208,6 +209,11 @@ export const AI_BOT_PRESETS: Array<{
   },
 ];
 
+// Lookup map for enriching DB preset rows with operator info (display-only)
+const PRESET_OPERATOR_MAP = new Map(
+  AI_BOT_PRESETS.map((p) => [p.name, p.operator])
+);
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -217,14 +223,20 @@ export interface AgentRow {
   name: string;
   ua_pattern: string;
   declared_ips: string[];
+  type: 'preset' | 'custom';
+  description?: string | null;
   created_at: string | null;
+  /** Sum of wallet balances for this workspace/agent (populated by getWorkspaceAgents). */
+  balance_eur?: number;
+  /** Number of non-archived wallets on this workspace/agent. */
+  wallet_count?: number;
 }
 
 // ---------------------------------------------------------------------------
 // CRUD Functions
 // ---------------------------------------------------------------------------
 
-const AGENT_SELECT_COLUMNS = "id, name, ua_pattern, declared_ips, created_at";
+const AGENT_SELECT_COLUMNS = "id, name, ua_pattern, declared_ips, type, description, created_at";
 
 /**
  * List all agents active for a workspace (via workspace_agents junction).
@@ -233,6 +245,26 @@ export async function getWorkspaceAgents(
   workspaceId: string
 ): Promise<AgentRow[]> {
   return queryWorkspaceAgents(workspaceId) as Promise<AgentRow[]>;
+}
+
+/**
+ * Get all preset agents from DB, enriched with operator from the in-memory list.
+ */
+export async function getPresetAgents(): Promise<Array<AgentRow & { operator?: string }>> {
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("agents")
+    .select(AGENT_SELECT_COLUMNS)
+    .eq("type", "preset")
+    .order("name");
+
+  if (error) throw new Error(`Failed to fetch preset agents: ${error.message}`);
+
+  return (data ?? []).map((row) => ({
+    ...(row as AgentRow),
+    operator: PRESET_OPERATOR_MAP.get(row.name),
+  }));
 }
 
 /**
@@ -254,60 +286,90 @@ export async function getAgentById(
 }
 
 /**
- * Add an agent to a workspace (subscribe).
- * If the agent doesn't exist yet (custom), create it first.
+ * Subscribe a workspace to a preset bot.
+ * The preset must already exist in the agents table (type = 'preset').
  */
-export async function addAgentToWorkspace(
+export async function subscribeToPreset(
   workspaceId: string,
-  data: { name: string; ua_pattern: string; declared_ips?: string[] }
+  name: string
 ): Promise<AgentRow> {
   const supabase = await createServerClient();
 
-  // Check if agent already exists globally
-  let { data: agent } = await supabase
+  const { data: agent } = await supabase
     .from("agents")
     .select(AGENT_SELECT_COLUMNS)
-    .eq("name", data.name)
+    .eq("name", name)
     .single();
 
-  if (!agent) {
-    // Create custom agent
-    const { data: created, error } = await supabase
-      .from("agents")
-      .insert({
-        name: data.name,
-        ua_pattern: data.ua_pattern,
-        declared_ips: data.declared_ips ?? [],
-      })
-      .select(AGENT_SELECT_COLUMNS)
-      .single();
+  if (!agent) throw new Error("PRESET_NOT_FOUND");
+  if ((agent as AgentRow).type !== "preset") throw new Error("NOT_A_PRESET");
 
-    if (error || !created) {
-      throw new Error(`Failed to create agent: ${error?.message}`);
-    }
-    agent = created;
-  }
-
-  // Link to workspace
   const { error: linkError } = await supabase
     .from("workspace_agents")
-    .insert({ workspace_id: workspaceId, agent_id: agent.id })
-    .select()
-    .single();
+    .insert({ workspace_id: workspaceId, agent_id: agent.id });
 
   if (linkError) {
-    // Ignore duplicate (already linked)
-    if (!linkError.message.includes("duplicate")) {
-      throw new Error(`Failed to link agent to workspace: ${linkError.message}`);
-    }
+    if (linkError.code === "23505") throw new Error("ALREADY_IN_WORKSPACE");
+    throw new Error(`Failed to subscribe to preset: ${linkError.message}`);
   }
 
   return agent as AgentRow;
 }
 
 /**
+ * Create a custom bot and link it to the workspace.
+ * Custom bots are owned by exactly one workspace: they are deleted when
+ * the workspace unsubscribes (removeAgentFromWorkspace).
+ */
+export async function createCustomAgent(
+  workspaceId: string,
+  data: { name: string; ua_pattern: string; description?: string; declared_ips: string[] }
+): Promise<AgentRow> {
+  const supabase = await createServerClient();
+
+  // Check name is not already taken
+  const { data: existing } = await supabase
+    .from("agents")
+    .select("id, type")
+    .eq("name", data.name)
+    .maybeSingle();
+
+  if (existing) {
+    if ((existing as { type: string }).type === "preset") throw new Error("NAME_CONFLICT_WITH_PRESET");
+    throw new Error("CUSTOM_AGENT_ALREADY_EXISTS");
+  }
+
+  const { data: created, error } = await supabase
+    .from("agents")
+    .insert({
+      name: data.name,
+      ua_pattern: data.ua_pattern,
+      description: data.description ?? null,
+      declared_ips: data.declared_ips,
+      type: "custom",
+    })
+    .select(AGENT_SELECT_COLUMNS)
+    .single();
+
+  if (error || !created) throw new Error(`Failed to create agent: ${error?.message}`);
+
+  const { error: linkError } = await supabase
+    .from("workspace_agents")
+    .insert({ workspace_id: workspaceId, agent_id: created.id });
+
+  if (linkError) {
+    // Rollback agent creation to avoid orphans
+    await supabase.from("agents").delete().eq("id", created.id);
+    throw new Error(`Failed to link agent to workspace: ${linkError.message}`);
+  }
+
+  return created as AgentRow;
+}
+
+/**
  * Remove an agent from a workspace (unsubscribe).
- * Does NOT delete the global agent record.
+ * For custom agents, also deletes the global agent record (and all associated
+ * data via DB cascade) since custom bots are owned by exactly one workspace.
  */
 export async function removeAgentFromWorkspace(
   workspaceId: string,
@@ -315,7 +377,7 @@ export async function removeAgentFromWorkspace(
 ): Promise<{ removed: boolean; catalogCount: number }> {
   const supabase = await createServerClient();
 
-  // Check the link exists
+  // Check the link exists and get agent type
   const { data: link } = await supabase
     .from("workspace_agents")
     .select("agent_id")
@@ -323,9 +385,13 @@ export async function removeAgentFromWorkspace(
     .eq("agent_id", agentId)
     .single();
 
-  if (!link) {
-    return { removed: false, catalogCount: 0 };
-  }
+  if (!link) return { removed: false, catalogCount: 0 };
+
+  const { data: agent } = await supabase
+    .from("agents")
+    .select("id, type")
+    .eq("id", agentId)
+    .single();
 
   // Count linked catalogs before removal
   const { count } = await supabase
@@ -352,28 +418,63 @@ export async function removeAgentFromWorkspace(
     }
   }
 
-  // Remove workspace_agents link
-  const { error } = await supabase
-    .from("workspace_agents")
-    .delete()
-    .eq("workspace_id", workspaceId)
-    .eq("agent_id", agentId);
+  if (agent && (agent as { type: string }).type === "custom") {
+    // Deleting the agents row cascades to workspace_agents, wallets, api_keys
+    const { error } = await supabase
+      .from("agents")
+      .delete()
+      .eq("id", agentId);
 
-  if (error) {
-    throw new Error(`Failed to remove agent from workspace: ${error.message}`);
+    if (error) throw new Error(`Failed to delete custom agent: ${error.message}`);
+  } else {
+    // Preset: only remove the workspace subscription
+    const { error } = await supabase
+      .from("workspace_agents")
+      .delete()
+      .eq("workspace_id", workspaceId)
+      .eq("agent_id", agentId);
+
+    if (error) throw new Error(`Failed to remove agent from workspace: ${error.message}`);
   }
 
   return { removed: true, catalogCount };
 }
 
 /**
- * Update an agent's properties (name, ua_pattern, declared_ips).
+ * Update a custom agent's properties.
+ * Presets cannot be edited by clients (pass callerWorkspaceId = null for admin).
  */
 export async function updateAgent(
   agentId: string,
-  data: { name?: string; ua_pattern?: string; declared_ips?: string[] }
+  data: { name?: string; ua_pattern?: string; description?: string; declared_ips?: string[] },
+  callerWorkspaceId: string | null
 ): Promise<AgentRow | null> {
   const supabase = await createServerClient();
+
+  // Fetch agent to check type and verify caller has access
+  const { data: agent } = await supabase
+    .from("agents")
+    .select("id, type")
+    .eq("id", agentId)
+    .single();
+
+  if (!agent) return null;
+
+  if ((agent as { type: string }).type === "preset") {
+    if (callerWorkspaceId !== null) throw new Error("PRESET_IMMUTABLE");
+  } else {
+    // Custom bot: verify the caller's workspace owns it (has it in workspace_agents)
+    if (callerWorkspaceId !== null) {
+      const { data: link } = await supabase
+        .from("workspace_agents")
+        .select("agent_id")
+        .eq("agent_id", agentId)
+        .eq("workspace_id", callerWorkspaceId)
+        .maybeSingle();
+
+      if (!link) throw new Error("NOT_OWNER");
+    }
+  }
 
   const { data: updated, error } = await supabase
     .from("agents")
@@ -407,9 +508,7 @@ export async function removeCatalogEntriesForAgent(
     .delete()
     .eq("agent_id", agentId);
 
-  if (error) {
-    throw new Error(`Failed to remove catalog entries: ${error.message}`);
-  }
+  if (error) throw new Error(`Failed to remove catalog entries: ${error.message}`);
 
   return catalogCount;
 }

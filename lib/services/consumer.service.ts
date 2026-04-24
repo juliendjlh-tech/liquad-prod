@@ -18,7 +18,7 @@ import { resolvePublisherDomains } from "@/lib/db/queries/domains";
 import { getWorkspaceSecret } from "@/lib/db/queries/workspaces";
 import { findSourcesByUrls } from "@/lib/db/queries/sources";
 import { getCatalogIdsBySourceIds, getCatalogs } from "@/lib/db/queries/catalogs";
-import { getAgentById, getCatalogAgents } from "@/lib/db/queries/agents";
+import { getAgentById, getCatalogAgents, isAgentActiveForWorkspace } from "@/lib/db/queries/agents";
 import { normalizeUrl } from "@liquad/sdk/url-normalize";
 import { ok, err, type ServiceResult } from "@/lib/utils/service-result";
 import type { TransactionInput } from "@/lib/validations/authorize.schema";
@@ -41,11 +41,12 @@ interface AuthorizeUrlResult {
   catalog_id: string;
   expires_at: string;
   cached: boolean;
+  allowed_ips: string[];
 }
 
 interface UnmatchedUrl {
   url: string;
-  reason: "no_match" | "no_catalog";
+  reason: "no_match" | "no_catalog" | "no_matching_ips";
 }
 
 export interface AuthorizeSuccess {
@@ -131,20 +132,35 @@ interface BatchDebitFailure {
 type BatchDebitResult = BatchDebitSuccess | BatchDebitFailure;
 
 async function batchDebitAndGrant(
+  apiKeyId: string,
   consumerWorkspaceId: string,
+  agentId: string,
   debits: BatchDebitInput[],
   supabase: SupabaseClient
 ): Promise<BatchDebitResult> {
   if (debits.length === 0) {
-    const { data: ws } = await supabase
-      .from("workspaces")
+    // Short-circuit: no URLs to grant, just return the current wallet balance
+    // for the wallet the API key points to. The wallet is resolved via the
+    // api_key (since migration 025 the wallet lives on its own entity).
+    const { data: apiKey } = await supabase
+      .from("api_keys")
+      .select("wallet_id")
+      .eq("id", apiKeyId)
+      .single();
+
+    if (!apiKey?.wallet_id) {
+      return { success: true, new_balance: 0, grants: [] };
+    }
+
+    const { data: wallet } = await supabase
+      .from("wallets")
       .select("balance_eur")
-      .eq("id", consumerWorkspaceId)
+      .eq("id", apiKey.wallet_id)
       .single();
 
     return {
       success: true,
-      new_balance: ws?.balance_eur ?? 0,
+      new_balance: wallet?.balance_eur ?? 0,
       grants: [],
     };
   }
@@ -152,7 +168,7 @@ async function batchDebitAndGrant(
   const { data: rpcData, error: rpcError } = await supabase.rpc(
     "authorize_and_debit_batch",
     {
-      p_consumer_id: consumerWorkspaceId,
+      p_api_key_id: apiKeyId,
       p_debits: debits.map((d) => ({
         publisher_workspace_id: d.publisher_workspace_id,
         catalog_id: d.catalog_id,
@@ -220,20 +236,34 @@ async function batchDebitAndGrant(
  */
 export async function authorize(
   consumerWorkspaceId: string,
+  apiKeyId: string,
   input: TransactionInput
 ): Promise<ServiceResult<AuthorizeSuccess>> {
   // ── Pass 1: Resolve agent + normalize + verify sources ────────────────
 
+  // agent_id is bound to the API key and injected by the route — always present here.
+  if (!input.agent_id) {
+    return err("agent_id_required", 422);
+  }
+  const agentId = input.agent_id;
+
   // Resolve consumer's agent — need ua_pattern for matching and token signing
-  const agent = await getAgentById(input.agent_id);
+  const agent = await getAgentById(agentId);
   if (!agent) {
-    return err("agent_not_found", 404, { agent_id: input.agent_id });
+    return err("agent_not_found", 404, { agent_id: agentId });
+  }
+
+  // Scoping: the bound agent must still be active for the caller's workspace
+  // (workspace_agents row). Closes the "deactivated-but-key-still-valid" gap.
+  const isActive = await isAgentActiveForWorkspace(agent.id, consumerWorkspaceId);
+  if (!isActive) {
+    return err("agent_not_in_workspace", 403, { agent_id: agentId });
   }
 
   // Require declared_ips for paid transactions (prevent unverifiable bot identity)
   if (!agent.declared_ips || agent.declared_ips.length === 0) {
     return err("agent_missing_ips", 422, {
-      agent_id: input.agent_id,
+      agent_id: agentId,
       message: "Agent must have declared IP ranges to participate in paid transactions",
     });
   }
@@ -280,7 +310,7 @@ export async function authorize(
   const supabase = await createServerClient();
 
   if (indexed.length === 0) {
-    const debitResult = await batchDebitAndGrant(consumerWorkspaceId, [], supabase);
+    const debitResult = await batchDebitAndGrant(apiKeyId, consumerWorkspaceId, agentId, [], supabase);
     return debitResult.success
       ? ok({ results: [], unmatched, total_cost_eur: 0, balance_remaining_eur: debitResult.new_balance })
       : err("insufficient_balance", 402, { balance_eur: debitResult.balance, required_eur: debitResult.required });
@@ -300,16 +330,27 @@ export async function authorize(
   // Get all unique catalog_ids from source links
   const allCatalogIds = [...new Set(sourceCatalogLinks.map((l) => l.catalog_id))];
 
-  // Reconciliation: find catalogs linked to agents with matching ua_pattern
+  // Reconciliation: find catalogs linked to agents with matching ua_pattern.
+  // Track two sets:
+  //   - uaCompatibleCatalogs: any catalog with a matching ua_pattern agent
+  //     (used to distinguish "no_catalog" from "no_matching_ips")
+  //   - catalogIdToAllowedIps: catalogs whose agent also shares ≥1 IP with the
+  //     caller — only these can produce usable tokens.
   const catalogAgentLinks = await getCatalogAgents(allCatalogIds);
-  const catalogsWithMatchingAgent = new Set(
-    catalogAgentLinks
-      .filter((link) => link.agent.ua_pattern === uaPattern)
-      .map((link) => link.catalog_id)
-  );
+  const consumerIps = new Set(agent.declared_ips);
+  const uaCompatibleCatalogs = new Set<string>();
+  const catalogIdToAllowedIps = new Map<string, string[]>();
+  for (const link of catalogAgentLinks) {
+    if (link.agent.ua_pattern !== uaPattern) continue;
+    uaCompatibleCatalogs.add(link.catalog_id);
+    const intersection = link.agent.declared_ips.filter((ip) => consumerIps.has(ip));
+    if (intersection.length === 0) continue;
+    catalogIdToAllowedIps.set(link.catalog_id, intersection);
+  }
 
-  // Fetch catalog details (active + price filter) only for matching catalogs
-  const relevantCatalogIds = allCatalogIds.filter((id) => catalogsWithMatchingAgent.has(id));
+  // Fetch catalog details (active + price filter) only for catalogs with a
+  // non-empty IP intersection — this guarantees every emitted token is usable.
+  const relevantCatalogIds = allCatalogIds.filter((id) => catalogIdToAllowedIps.has(id));
 
   const catalogs = await getCatalogs(relevantCatalogIds, {
     status: "active",
@@ -317,13 +358,14 @@ export async function authorize(
   });
   const catalogMap = new Map(catalogs.map((c) => [c.id, c]));
 
-  // Pick cheapest valid catalog per URL
+  // Pick cheapest usable catalog per URL (IP-compatible candidates only)
   const matched: Array<{
     normalizedUrl: string;
     publisherWorkspaceId: string;
     catalogId: string;
     priceEur: number;
     ttlMinutes: number;
+    allowedIps: string[];
   }> = [];
 
   for (const entry of indexed) {
@@ -332,6 +374,7 @@ export async function authorize(
 
     let bestCatalog: { id: string; price_eur: number; ttl_minutes: number | null } | null = null;
     for (const catId of catalogIds) {
+      if (!catalogIdToAllowedIps.has(catId)) continue;
       const cat = catalogMap.get(catId);
       if (cat && (!bestCatalog || cat.price_eur < bestCatalog.price_eur)) {
         bestCatalog = cat;
@@ -339,7 +382,12 @@ export async function authorize(
     }
 
     if (!bestCatalog) {
-      unmatched.push({ url: entry.normalizedUrl, reason: "no_catalog" });
+      // Distinguish "no catalog at all" from "catalogs exist but none IP-compatible"
+      const hasUaCompatible = catalogIds.some((id) => uaCompatibleCatalogs.has(id));
+      unmatched.push({
+        url: entry.normalizedUrl,
+        reason: hasUaCompatible ? "no_matching_ips" : "no_catalog",
+      });
       continue;
     }
 
@@ -349,6 +397,7 @@ export async function authorize(
       catalogId: bestCatalog.id,
       priceEur: bestCatalog.price_eur,
       ttlMinutes: bestCatalog.ttl_minutes ?? DEFAULT_TTL_MINUTES,
+      allowedIps: catalogIdToAllowedIps.get(bestCatalog.id)!,
     });
   }
 
@@ -366,11 +415,13 @@ export async function authorize(
   );
 
   const debitResult = await batchDebitAndGrant(
+    apiKeyId,
     consumerWorkspaceId,
+    agentId,
     matched.map((m) => ({
       publisher_workspace_id: m.publisherWorkspaceId,
       catalog_id: m.catalogId,
-      agent_id: input.agent_id,
+      agent_id: agentId,
       ua_pattern: uaPattern,
       url: m.normalizedUrl,
       price_eur: m.priceEur,
@@ -419,6 +470,7 @@ export async function authorize(
         catalog_id: m.catalogId,
         expires_at: grant.expires_at,
         cached: grant.cached,
+        allowed_ips: m.allowedIps,
       };
     })
   );

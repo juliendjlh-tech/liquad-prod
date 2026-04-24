@@ -56,7 +56,8 @@ export async function resolvePublisherDomains(
   const { data } = await supabase
     .from("domains")
     .select("domain, workspace_id")
-    .in("domain", hostnames);
+    .in("domain", hostnames)
+    .eq("status", "verified");
 
   return new Map((data ?? []).map((d) => [d.domain, d.workspace_id]));
 }

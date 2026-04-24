@@ -28,13 +28,8 @@ export async function GET(
     }
 
     const supabase = await createServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { data: membership } = await supabase
       .from("workspace_members")
@@ -43,32 +38,22 @@ export async function GET(
       .eq("user_id", user.id)
       .single();
 
-    if (!membership) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const agent = await getAgentById(agentId);
-
-    if (!agent) {
-      return NextResponse.json(
-        { error: "Agent not found" },
-        { status: 404 }
-      );
-    }
+    if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
 
     return NextResponse.json(agent, { status: 200 });
   } catch {
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
 /**
  * PATCH /api/user-agents/:id
  *
- * Update an agent (name, ua_pattern, declared_ips).
+ * Update a custom agent. Presets are immutable for clients.
+ * Only the workspace that owns the custom bot (has it in workspace_agents) can edit it.
  */
 export async function PATCH(
   request: NextRequest,
@@ -96,13 +81,8 @@ export async function PATCH(
     }
 
     const supabase = await createServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { data: membership } = await supabase
       .from("workspace_members")
@@ -111,32 +91,37 @@ export async function PATCH(
       .eq("user_id", user.id)
       .single();
 
-    if (!membership) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const updated = await updateAgent(agentId, validation.data);
+    const updated = await updateAgent(agentId, validation.data, workspaceId);
 
-    if (!updated) {
-      return NextResponse.json(
-        { error: "Agent not found" },
-        { status: 404 }
-      );
-    }
+    if (!updated) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
 
     return NextResponse.json(updated, { status: 200 });
-  } catch {
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+  } catch (err) {
+    if (err instanceof Error) {
+      if (err.message === "PRESET_IMMUTABLE") {
+        return NextResponse.json(
+          { error: "PRESET_IMMUTABLE", message: "Platform presets cannot be edited" },
+          { status: 403 }
+        );
+      }
+      if (err.message === "NOT_OWNER") {
+        return NextResponse.json(
+          { error: "NOT_OWNER", message: "You can only edit bots created by your workspace" },
+          { status: 403 }
+        );
+      }
+    }
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
 /**
  * DELETE /api/user-agents/:id
  *
- * Remove an agent from a workspace. Does NOT delete the global agent.
+ * Unsubscribe an agent from a workspace.
+ * For custom bots, also deletes the global agent record (and cascade data).
  */
 export async function DELETE(
   request: NextRequest,
@@ -154,13 +139,8 @@ export async function DELETE(
     }
 
     const supabase = await createServerClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { data: membership } = await supabase
       .from("workspace_members")
@@ -169,9 +149,7 @@ export async function DELETE(
       .eq("user_id", user.id)
       .single();
 
-    if (!membership) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
+    if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
     const result = await removeAgentFromWorkspace(workspaceId, agentId);
 
@@ -193,9 +171,6 @@ export async function DELETE(
 
     return NextResponse.json(response, { status: 200 });
   } catch {
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }

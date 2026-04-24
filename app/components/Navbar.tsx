@@ -8,13 +8,13 @@ export default async function Navbar() {
   const pathname = headersList.get("x-pathname") ?? "";
 
   // Hide Navbar on dashboard, onboarding, and login pages (app vs. website separation)
-  if (
+  {/*if (
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/onboarding") ||
     pathname.startsWith("/login")
   ) {
     return null;
-  }
+  }*/}
 
   const supabase = await createServerClient();
   const {

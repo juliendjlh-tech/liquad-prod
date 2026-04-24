@@ -3,7 +3,6 @@ import { createServerClient } from "@/lib/db/supabase-server";
 import { importSitemapSchema } from "@/lib/validations/content.schema";
 import { importFromSitemap } from "@/lib/services/content.service";
 import { evaluatePathRule, type PathRule } from "@/lib/validations/catalog.schema";
-import { startScrapePipeline } from "@/lib/services/pipeline.service";
 import type { Json } from "@/lib/db/types";
 
 /**
@@ -226,8 +225,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           })
           .eq("id", job.id);
 
-        // Start the scraping pipeline (chunks + embeddings + catalog linking).
-        await startScrapePipeline(job.id);
+        // Scrape pipeline disabled for MVP (no RAG yet).
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         console.error(`Import job ${job.id} failed:`, message);

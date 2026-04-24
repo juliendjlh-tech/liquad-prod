@@ -104,6 +104,19 @@ export async function ensureDomainExists(
 ): Promise<string> {
   const supabase = await createServerClient();
 
+  // Reject if another workspace already owns this domain as verified.
+  const { data: claimed } = await supabase
+    .from("domains")
+    .select("id")
+    .eq("domain", domain)
+    .eq("status", "verified")
+    .neq("workspace_id", workspaceId)
+    .maybeSingle();
+
+  if (claimed) {
+    throw new Error(`domain_claimed: ${domain}`);
+  }
+
   const { error } = await supabase
     .from("domains")
     .upsert(

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateApiKey } from "@/lib/services/auth.service";
+import { authenticateConsumerKey } from "@/lib/services/auth.service";
 import { authorize } from "@/lib/services/consumer.service";
 import { transactionSchema } from "@/lib/validations/authorize.schema";
 
@@ -20,6 +20,15 @@ import { transactionSchema } from "@/lib/validations/authorize.schema";
  *
  * RESPONSES:
  * - 200: { results: [...], unmatched: [...], total_cost_eur, balance_remaining_eur }
+ *        Each result includes `allowed_ips` — the intersection of the caller's
+ *        declared IPs with the publisher agent's declared IPs. The gateway only
+ *        accepts scrapes from these IPs; any other IP will be rejected even with
+ *        a valid token.
+ *        Unmatched reasons:
+ *          - "no_match": URL is not indexed by any publisher
+ *          - "no_catalog": URL indexed, no active catalog matches ua_pattern/price
+ *          - "no_matching_ips": catalog(s) match ua_pattern but none share any IP
+ *            with the caller's declared IPs — no usable token could be issued
  * - 401: Invalid API key
  * - 402: Insufficient balance
  * - 404: Domain not found
@@ -28,7 +37,7 @@ import { transactionSchema } from "@/lib/validations/authorize.schema";
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    const authResult = await authenticateApiKey(
+    const authResult = await authenticateConsumerKey(
       request.headers.get("authorization")
     );
     if ("error" in authResult) {
@@ -56,7 +65,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    const result = await authorize(authResult.workspaceId, parsed.data);
+    // The bot identity is bound to the API key. If the body also provides
+    // agent_id, it must match — otherwise reject.
+    if (parsed.data.agent_id && parsed.data.agent_id !== authResult.agentId) {
+      return NextResponse.json(
+        {
+          error: "agent_mismatch",
+          message: "Key is bound to a specific bot; body agent_id must match or be omitted",
+        },
+        { status: 422 }
+      );
+    }
+
+    const result = await authorize(authResult.workspaceId, authResult.apiKeyId, {
+      ...parsed.data,
+      agent_id: authResult.agentId,
+    });
 
     if (!result.ok) {
       return NextResponse.json(

@@ -338,42 +338,68 @@ export type Database = {
       }
       credit_transactions: {
         Row: {
+          agent_id: string | null
           amount_eur: number
+          api_key_id: string | null
           catalog_id: string | null
           consumer_workspace_id: string
           content_url: string | null
           created_at: string | null
           description: string | null
+          external_ref: string | null
           grant_id: string | null
           id: string
-          publisher_workspace_id: string
+          publisher_workspace_id: string | null
           type: string
+          wallet_id: string | null
         }
         Insert: {
+          agent_id?: string | null
           amount_eur: number
+          api_key_id?: string | null
           catalog_id?: string | null
           consumer_workspace_id: string
           content_url?: string | null
           created_at?: string | null
           description?: string | null
+          external_ref?: string | null
           grant_id?: string | null
           id?: string
-          publisher_workspace_id: string
+          publisher_workspace_id?: string | null
           type: string
+          wallet_id?: string | null
         }
         Update: {
+          agent_id?: string | null
           amount_eur?: number
+          api_key_id?: string | null
           catalog_id?: string | null
           consumer_workspace_id?: string
           content_url?: string | null
           created_at?: string | null
           description?: string | null
+          external_ref?: string | null
           grant_id?: string | null
           id?: string
-          publisher_workspace_id?: string
+          publisher_workspace_id?: string | null
           type?: string
+          wallet_id?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "credit_transactions_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_transactions_api_key_id_fkey"
+            columns: ["api_key_id"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "credit_transactions_catalog_id_fkey"
             columns: ["catalog_id"]
@@ -393,6 +419,13 @@ export type Database = {
             columns: ["publisher_workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_transactions_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "wallets"
             referencedColumns: ["id"]
           },
         ]
@@ -520,6 +553,8 @@ export type Database = {
           name: string
           ua_pattern: string
           declared_ips: string[]
+          description: string | null
+          type: 'preset' | 'custom'
           created_at: string | null
         }
         Insert: {
@@ -527,6 +562,8 @@ export type Database = {
           name: string
           ua_pattern: string
           declared_ips?: string[]
+          description?: string | null
+          type?: 'preset' | 'custom'
           created_at?: string | null
         }
         Update: {
@@ -534,9 +571,126 @@ export type Database = {
           name?: string
           ua_pattern?: string
           declared_ips?: string[]
+          description?: string | null
           created_at?: string | null
         }
         Relationships: []
+      }
+      api_keys: {
+        Row: {
+          id: string
+          workspace_id: string
+          agent_id: string
+          wallet_id: string
+          api_key_hash: string
+          api_key_prefix: string
+          label: string | null
+          revoked_at: string | null
+          last_used_at: string | null
+          created_at: string | null
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          agent_id: string
+          wallet_id: string
+          api_key_hash: string
+          api_key_prefix: string
+          label?: string | null
+          revoked_at?: string | null
+          last_used_at?: string | null
+          created_at?: string | null
+        }
+        Update: {
+          id?: string
+          workspace_id?: string
+          agent_id?: string
+          wallet_id?: string
+          api_key_hash?: string
+          api_key_prefix?: string
+          label?: string | null
+          revoked_at?: string | null
+          last_used_at?: string | null
+          created_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "api_keys_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "api_keys_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "api_keys_wallet_id_fkey"
+            columns: ["wallet_id"]
+            isOneToOne: false
+            referencedRelation: "wallets"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wallets: {
+        Row: {
+          id: string
+          workspace_id: string
+          agent_id: string
+          external_user_id: string | null
+          label: string | null
+          balance_eur: number
+          created_at: string | null
+          archived_at: string | null
+        }
+        Insert: {
+          id?: string
+          workspace_id: string
+          agent_id: string
+          external_user_id?: string | null
+          label?: string | null
+          balance_eur?: number
+          created_at?: string | null
+          archived_at?: string | null
+        }
+        Update: {
+          id?: string
+          workspace_id?: string
+          agent_id?: string
+          external_user_id?: string | null
+          label?: string | null
+          balance_eur?: number
+          created_at?: string | null
+          archived_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallets_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallets_agent_id_fkey"
+            columns: ["agent_id"]
+            isOneToOne: false
+            referencedRelation: "agents"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wallets_workspace_agent_fkey"
+            columns: ["workspace_id", "agent_id"]
+            isOneToOne: false
+            referencedRelation: "workspace_agents"
+            referencedColumns: ["workspace_id", "agent_id"]
+          },
+        ]
       }
       workspace_agents: {
         Row: {
@@ -726,7 +880,6 @@ export type Database = {
         Row: {
           api_key_hash: string | null
           api_key_prefix: string | null
-          balance_eur: number
           created_at: string | null
           id: string
           jwt_signing_secret: string
@@ -737,7 +890,6 @@ export type Database = {
         Insert: {
           api_key_hash?: string | null
           api_key_prefix?: string | null
-          balance_eur?: number
           created_at?: string | null
           id?: string
           jwt_signing_secret?: string
@@ -748,7 +900,6 @@ export type Database = {
         Update: {
           api_key_hash?: string | null
           api_key_prefix?: string | null
-          balance_eur?: number
           created_at?: string | null
           id?: string
           jwt_signing_secret?: string
@@ -774,27 +925,17 @@ export type Database = {
       }
       authorize_and_debit_batch: {
         Args: {
-          p_consumer_id: string
+          p_api_key_id: string
           p_debits: Json
         }
         Returns: Json
       }
-      check_cache_and_debit: {
+      credit_wallet: {
         Args: {
-          p_consumer_id: string
-          p_publisher_id: string
-          p_url: string
-          p_catalog_id: string
-          p_agent_id: string
-          p_price_eur: number
-          p_ttl_minutes?: number
-        }
-        Returns: Json
-      }
-      check_balance_and_debit_batch: {
-        Args: {
-          p_consumer_workspace_id: string
-          p_debits: Json
+          p_api_key_id: string
+          p_amount_eur: number
+          p_external_ref?: string | null
+          p_description?: string | null
         }
         Returns: Json
       }

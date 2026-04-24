@@ -13,7 +13,7 @@ const HERO = {
   headline_line2: "legally and reliably.",
   subheadline:
     "Liquad is the single API that gives your AI agents licensed access to a growing network of European publishers — with clear terms, real-time authentication, and full compliance.",
-  cta_primary: { label: "Get API Access", href: "/login" },
+  cta_primary: { label: "Get API Access", href: "https://tally.so/r/xXNeZr" },
   cta_secondary: { label: "How it works", href: "#how-it-works" },
   stats: [
     { value: "1 API", label: "to access all publishers in the network" },
@@ -102,6 +102,12 @@ const HOW_IT_WORKS = {
       desc: "Your agents present the signed token in the HTTP header when accessing publisher sites. The SDK verifies locally in 0.01ms — zero latency for publishers, instant access for you.",
     },
   ],
+  partner_nudge: {
+    label: "Already working with a publisher?",
+    desc: "Some publishers issue API keys directly to their AI partners — no account needed on your side, they cover the cost. Talk to your publisher contact or reach out to ours.",
+    cta_label: "Contact our partnerships team →",
+    cta_href: "https://tally.so/r/VL1kYJ",
+  },
 };
 
 const VALUE_PROPS = {
@@ -143,13 +149,16 @@ Authorization: Bearer YOUR_API_KEY
 Content-Type: application/json
 
 {
-  "agent_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
   "urls": [
     "https://publisher-a.com/article/123",
-    "https://publisher-b.com/research/ai-trends"
+    "https://publisher-b.com/research/ai-trends",
+    "https://publisher-c.com/unknown-article"
   ],
   "max_price_eur": 0.50
-}`,
+}
+
+# Bot identity is derived from your API key — no agent_id needed.
+# max_price_eur is optional: skip URLs that exceed your ceiling.`,
   response: `{
   "results": [
     {
@@ -157,21 +166,28 @@ Content-Type: application/json
       "token": "dG9rZW4tZXhhbXBsZS1obWFjLXNpZ...",
       "price_eur": 0.10,
       "catalog_id": "cat_abc123",
-      "expires_at": "2026-04-16T12:00:00Z",
-      "cached": false
+      "expires_at": "2026-04-24T13:00:00Z",
+      "cached": false,
+      "allowed_ips": ["203.0.113.0/24", "198.51.100.42/32"]
     },
     {
       "url": "https://publisher-b.com/research/ai-trends",
       "token": "dG9rZW4tZXhhbXBsZS1obWFjLXNpZ...",
       "price_eur": 0.25,
       "catalog_id": "cat_def456",
-      "expires_at": "2026-04-16T12:00:00Z",
-      "cached": false
+      "expires_at": "2026-04-24T13:00:00Z",
+      "cached": true,
+      "allowed_ips": ["203.0.113.0/24"]
     }
   ],
-  "unmatched": [],
-  "total_cost_eur": 0.35,
-  "balance_remaining_eur": 99.65
+  "unmatched": [
+    {
+      "url": "https://publisher-c.com/unknown-article",
+      "reason": "no_match"
+    }
+  ],
+  "total_cost_eur": 0.10,
+  "balance_remaining_eur": 99.90
 }`,
 };
 
@@ -185,7 +201,7 @@ const PRICING = {
     { credits: "€500", label: "Growth", desc: "Scale access across multiple publishers" },
     { credits: "Custom", label: "Enterprise", desc: "Volume pricing, dedicated support" },
   ],
-  cta: { label: "Get API Access", href: "/login" },
+  cta: { label: "Get API Access", href: "https://tally.so/r/xXNeZr" },
 };
 
 const FAQ = {
@@ -212,6 +228,14 @@ const FAQ = {
       q: "What happens if a publisher blocks my bot?",
       a: "If your bot is on a publisher's watchlist but not authorized on any catalog, you'll get an error explaining why. Purchasing access through Liquad's API is how you get authorized — the publisher defines the terms, you accept them by buying credits.",
     },
+    {
+      q: "Do I need to create an account to use Liquad?",
+      a: "No — not if a publisher partner has already issued you a key. You can start calling the API in minutes with their key, and they cover the cost for content accessed on their site. Create your own account when you want multi-publisher access, your own billing, or a custom bot identity.",
+    },
+    {
+      q: "What if I need my bot to use a custom User-Agent?",
+      a: "You can create a custom bot identity in your Liquad account. Each publisher must explicitly enable it on their catalogs. For standard bots (GPTBot, ClaudeBot, etc.), you inherit access from publishers who already opted-in to those presets — no per-publisher negotiation needed.",
+    },
   ],
 };
 
@@ -219,7 +243,7 @@ const CTA_FINAL = {
   headline: "Stop scraping. Start licensing.",
   subheadline:
     "One API key. Thousands of publishers. Full compliance. Get access to licensed content your AI agents can trust.",
-  cta_primary: { label: "Get API Access", href: "/login" },
+  cta_primary: { label: "Get API Access", href: "https://tally.so/r/xXNeZr" },
   cta_secondary: { label: "For publishers", href: "/" },
 };
 
@@ -371,6 +395,24 @@ export default function AICompaniesPage() {
               </div>
             ))}
           </div>
+
+          {/* Partner nudge */}
+          <div className="mt-14 rounded-2xl border border-deck-green/20 bg-deck-green/5 px-8 py-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-white mb-1">
+                {HOW_IT_WORKS.partner_nudge.label}
+              </p>
+              <p className="text-sm text-deck-text-dim leading-relaxed max-w-xl">
+                {HOW_IT_WORKS.partner_nudge.desc}
+              </p>
+            </div>
+            <a
+              href={HOW_IT_WORKS.partner_nudge.cta_href}
+              className="shrink-0 text-sm font-semibold text-deck-green hover:text-white transition-colors whitespace-nowrap"
+            >
+              {HOW_IT_WORKS.partner_nudge.cta_label}
+            </a>
+          </div>
         </div>
       </section>
 
@@ -443,7 +485,7 @@ export default function AICompaniesPage() {
             {PRICING.subheadline}
           </p>
 
-          <div className="grid gap-6 sm:grid-cols-3 mb-10">
+          {/*<div className="grid gap-6 sm:grid-cols-3 mb-10">
             {PRICING.tiers.map((tier) => (
               <div key={tier.label} className="rounded-2xl border border-deck-border bg-deck-card p-8 text-center">
                 <div className="text-3xl font-black text-deck-green mb-1">{tier.credits}</div>
@@ -451,7 +493,7 @@ export default function AICompaniesPage() {
                 <p className="text-xs text-deck-text-dim">{tier.desc}</p>
               </div>
             ))}
-          </div>
+          </div>*/}
 
           <Link
             href={PRICING.cta.href}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateApiKey } from "@/lib/services/auth.service";
+import { authenticateSdkKey } from "@/lib/services/auth.service";
 import { ingestEvents } from "@/lib/services/sdk.service";
 import { sdkEventBatchSchema } from "@/lib/validations/sdk-event.schema";
 
@@ -30,7 +30,7 @@ import { sdkEventBatchSchema } from "@/lib/validations/sdk-event.schema";
 export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const authHeader = request.headers.get("authorization");
-    const authResult = await authenticateApiKey(authHeader);
+    const authResult = await authenticateSdkKey(authHeader);
 
     if ("error" in authResult) {
       return NextResponse.json(

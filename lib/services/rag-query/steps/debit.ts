@@ -19,7 +19,7 @@ import type { PipelineStep, AuthorizeResult } from "../types";
  * On success, stores grants and new balance for the log-and-return step.
  */
 export const debit: PipelineStep = async (ctx) => {
-  const { supabase, consumerWorkspaceId, accumulated, agentId, uaPattern, catalogs } = ctx;
+  const { supabase, apiKeyId, accumulated, agentId, uaPattern, catalogs } = ctx;
 
   // Build catalog lookup for ttl_minutes
   const catalogTtl = new Map(
@@ -39,7 +39,7 @@ export const debit: PipelineStep = async (ctx) => {
   const { data: rpcData, error: rpcError } = await supabase.rpc(
     "authorize_and_debit_batch",
     {
-      p_consumer_id: consumerWorkspaceId!,
+      p_api_key_id: apiKeyId!,
       p_debits: debits as unknown as Json,
     }
   );

@@ -126,6 +126,9 @@ export interface RagQueryContext {
   /** Consumer workspace ID (set by authenticate step) */
   consumerWorkspaceId?: string;
 
+  /** API key ID used for this request (set by authenticate step) */
+  apiKeyId?: string;
+
   /** Resolved agent info (set by match-agents step) */
   agentId?: string;
   uaPattern?: string;

@@ -31,23 +31,6 @@ export default function LoginPage() {
     }
   };
 
-  const handleSignUp = async () => {
-    setLoading(true);
-    setError(null);
-
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-
-    if (error) {
-      setError(error.message);
-    } else {
-      setError('Check your email to confirm your account!');
-    }
-    setLoading(false);
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <div className="bg-white p-8 rounded-lg shadow-md w-96">
@@ -88,16 +71,6 @@ export default function LoginPage() {
             Log in
           </Button>
         </form>
-
-        <Button
-          variant="secondary"
-          onClick={handleSignUp}
-          disabled={loading}
-          full
-          className="mt-2"
-        >
-          Create an account
-        </Button>
       </div>
     </div>
   );

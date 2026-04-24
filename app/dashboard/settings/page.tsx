@@ -26,7 +26,6 @@ interface WorkspaceInfo {
   id: string;
   name: string;
   created_at: string;
-  balance_eur?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -208,22 +207,6 @@ export default function SettingsPage() {
               : "-"}
           </p>
         </div>
-      </section>
-
-      {/* Credits */}
-      <section className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Credits</h2>
-        <div>
-          <p className="text-sm text-gray-500">Current balance</p>
-          <p className="text-2xl font-bold text-gray-900">
-            {workspace?.balance_eur?.toFixed(2) ?? "0.00"} EUR
-          </p>
-        </div>
-        {workspace?.balance_eur === 0 && (
-          <p className="mt-2 text-sm text-amber-600">
-            Balance depleted. Contact the administrator to reload.
-          </p>
-        )}
       </section>
 
       {/* API Key */}

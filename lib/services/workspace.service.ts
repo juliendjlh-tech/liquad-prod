@@ -210,7 +210,6 @@ export async function getWorkspaceById(
   created_at: string;
   domain_count: number;
   member_count: number;
-  balance_eur: number;
 } | null> {
   const supabase = await createServerClient();
 
@@ -227,7 +226,7 @@ export async function getWorkspaceById(
 
   const { data: workspace, error: wsError } = await supabase
     .from("workspaces")
-    .select("id, name, created_at, balance_eur")
+    .select("id, name, created_at")
     .eq("id", workspaceId)
     .single();
 
@@ -252,7 +251,6 @@ export async function getWorkspaceById(
     created_at: workspace.created_at!,
     domain_count: domainCount ?? 0,
     member_count: memberCount ?? 0,
-    balance_eur: workspace.balance_eur ?? 0,
   };
 }
 

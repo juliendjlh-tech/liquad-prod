@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateApiKey } from "@/lib/services/auth.service";
+import { authenticateSdkKey } from "@/lib/services/auth.service";
 import { getGatewayRules } from "@/lib/services/sdk.service";
 
 /**
@@ -27,7 +27,7 @@ import { getGatewayRules } from "@/lib/services/sdk.service";
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const authHeader = request.headers.get("authorization");
-    const authResult = await authenticateApiKey(authHeader);
+    const authResult = await authenticateSdkKey(authHeader);
 
     if ("error" in authResult) {
       return NextResponse.json(

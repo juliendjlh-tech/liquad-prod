@@ -21,7 +21,7 @@ export default function DashboardShell({
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
-      <ModeNav />
+      {/*<ModeNav />*/}
       <div className="flex flex-1">
         <Sidebar workspace={workspace} userEmail={userEmail} mode={mode} />
         <main className="flex-1 p-6 md:p-8 overflow-auto">

@@ -13,7 +13,7 @@ const HERO = {
   headline_line2: "to AI for free.",
   subheadline:
     "AI services access your content daily without compensation. Liquad lets European publishers see who's crawling, set their own rules, and earn revenue — in one platform.",
-  cta_primary: { label: "Get Early Access", href: "/login" },
+  cta_primary: { label: "Get Early Access", href: "https://tally.so/r/VL1kLN" },
   cta_secondary: { label: "See how it works", href: "#how-it-works" },
   stats: [
     { value: "50,000+", label: "EU publishers with no AI licensing solution" },
@@ -125,6 +125,28 @@ const HOW_IT_WORKS = {
         "We automatically index your contents to make it accessible by your partners through a transactional, secured and monitored API.",
       desc_bottom:
         "Seamlessly grant paid licensed access over your content to legit AI Partners, and get automatically retributed.",
+    },
+  ],
+};
+
+// ── PARTNER KEYS ────────────────────────────────────────────────────────
+const PARTNER_KEYS = {
+  eyebrow: "Distribution",
+  headline: "Onboard your AI partners in one click.",
+  subheadline:
+    "Issue API keys to your AI partners directly from your dashboard. They access your content instantly — no Liquad account required on their side. You stay in control of who gets access and can revoke anytime.",
+  bullets: [
+    {
+      title: "Zero friction for your partners",
+      desc: "They use the key you gave them. First API call in minutes, not weeks. No signup, no billing setup on their end.",
+    },
+    {
+      title: "You set the terms",
+      desc: "Each key is bound to a specific bot identity. Revoke individually, anytime, from your dashboard.",
+    },
+    {
+      title: "Consolidated billing",
+      desc: "Partner usage is billed to your account at the catalog price you set. One line in your Liquad dashboard — full visibility.",
     },
   ],
 };
@@ -297,7 +319,7 @@ const PRICING = {
       "Framework-agnostic SDK — no third-party runtime dependencies",
       "EU-hosted, GDPR-compliant",
     ],
-    cta: { label: "Get Early Access", href: "/login" },
+    cta: { label: "Get Early Access", href: "https://tally.so/r/VL1kLN" },
   },
   model_note:
     "Our model is aligned with yours: we earn when you distribute, not before.",
@@ -332,6 +354,10 @@ const FAQ = {
       q: "What if the SDK adds latency to my site?",
       a: "The SDK adds less than 5ms of latency. Token verification is done locally via HMAC-SHA256 in under 0.1ms — zero network calls. Policies are cached locally with a configurable refresh interval (default: 5 min). If anything fails, the SDK fails open — your site is never impacted.",
     },
+    {
+      q: "Can I onboard AI partners without them creating an account?",
+      a: "Yes. From your dashboard you can issue API keys directly to your AI partners, each bound to a specific bot identity. They use the key — no Liquad account needed on their side. You stay in control of access and absorb the usage cost, which is consistent with the licensing terms you've already set on your catalogs.",
+    },
   ],
 };
 
@@ -340,7 +366,7 @@ const CTA_FINAL = {
   headline: "Every day without Liquad, your content serves AI for free.",
   subheadline:
     "Join the network. See your AI traffic. Set your rules. Start earning.",
-  cta_primary: { label: "Get Early Access", href: "/login" },
+  cta_primary: { label: "Get Early Access", href: "https://tally.so/r/VL1kLN" },
   cta_secondary: { label: "See how it works", href: "#how-it-works" },
 };
 
@@ -509,6 +535,31 @@ export default function LandingPage() {
                 <h3 className="text-base font-semibold text-white mb-4">{pillar.title}</h3>
                 <p className="text-sm text-deck-text-dim leading-relaxed mb-4">{pillar.desc_top}</p>
                 <p className="text-sm text-deck-text-dim leading-relaxed">{pillar.desc_bottom}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ─── PARTNER KEYS ─────────────────────────────────────────── */}
+      <section className="py-24" id="partner-keys">
+        <div className="mx-auto max-w-5xl px-6">
+          <div className="text-center mb-14">
+            <p className="text-xs font-semibold uppercase tracking-widest text-deck-blue mb-4">
+              {PARTNER_KEYS.eyebrow}
+            </p>
+            <h2 className="text-3xl font-bold text-white sm:text-4xl mb-4">
+              {PARTNER_KEYS.headline}
+            </h2>
+            <p className="mx-auto max-w-2xl text-base text-deck-text-dim leading-relaxed">
+              {PARTNER_KEYS.subheadline}
+            </p>
+          </div>
+          <div className="grid gap-6 sm:grid-cols-3">
+            {PARTNER_KEYS.bullets.map((b) => (
+              <div key={b.title} className="rounded-2xl border border-deck-border bg-deck-card p-6">
+                <h3 className="font-semibold text-white mb-2">{b.title}</h3>
+                <p className="text-sm text-deck-text-dim leading-relaxed">{b.desc}</p>
               </div>
             ))}
           </div>

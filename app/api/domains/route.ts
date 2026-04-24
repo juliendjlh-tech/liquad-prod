@@ -137,6 +137,22 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
+    // Reject if another workspace already owns this domain as verified.
+    const { data: claimed } = await supabase
+      .from("domains")
+      .select("id")
+      .eq("domain", hostname)
+      .eq("status", "verified")
+      .neq("workspace_id", workspaceId)
+      .maybeSingle();
+
+    if (claimed) {
+      return NextResponse.json(
+        { error: "DOMAIN_CLAIMED", domain: hostname },
+        { status: 409 }
+      );
+    }
+
     const { data: domain, error: insertError } = await supabase
       .from("domains")
       .insert({

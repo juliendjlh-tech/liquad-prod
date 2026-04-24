@@ -1,16 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateApiKey } from "@/lib/services/auth.service";
+import { authenticateConsumerKey } from "@/lib/services/auth.service";
 import { createServerClient } from "@/lib/db/supabase-server";
 
 /**
  * GET /api/consumer/balance
  *
- * Returns workspace balance and spending summary.
+ * Returns the wallet balance and spending summary for the wallet bound to
+ * the calling API key. Since migration 025, balance lives on the wallet
+ * entity; multiple keys can point at the same wallet, and one (workspace,
+ * agent) pair can host multiple wallets for per-end-user budgets.
+ *
  * Authentication: API key via Authorization: Bearer <key>
  *
  * RESPONSE (200):
  * {
  *   workspace_id: string,
+ *   agent_id: string,
+ *   wallet_id: string,
  *   balance_eur: number,
  *   total_spent_eur: number,
  *   transaction_count: number
@@ -18,7 +24,7 @@ import { createServerClient } from "@/lib/db/supabase-server";
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const authResult = await authenticateApiKey(
+    const authResult = await authenticateConsumerKey(
       request.headers.get("authorization")
     );
     if ("error" in authResult) {
@@ -27,15 +33,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const supabase = await createServerClient();
 
-    const { data: workspace } = await supabase
-      .from("workspaces")
-      .select("id, balance_eur")
-      .eq("id", authResult.workspaceId)
+    const { data: wallet } = await supabase
+      .from("wallets")
+      .select("balance_eur")
+      .eq("id", authResult.walletId)
       .single();
 
-    if (!workspace) {
+    if (!wallet) {
       return NextResponse.json(
-        { error: "workspace_not_found" },
+        { error: "wallet_not_found" },
         { status: 404 }
       );
     }
@@ -43,7 +49,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: debits } = await supabase
       .from("credit_transactions")
       .select("amount_eur")
-      .eq("consumer_workspace_id", authResult.workspaceId)
+      .eq("wallet_id", authResult.walletId)
       .eq("type", "debit");
 
     const transactions = debits ?? [];
@@ -53,8 +59,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     );
 
     return NextResponse.json({
-      workspace_id: workspace.id,
-      balance_eur: Number(workspace.balance_eur),
+      workspace_id: authResult.workspaceId,
+      agent_id: authResult.agentId,
+      wallet_id: authResult.walletId,
+      balance_eur: Number(wallet.balance_eur),
       total_spent_eur: Math.round(totalSpent * 100) / 100,
       transaction_count: transactions.length,
     });

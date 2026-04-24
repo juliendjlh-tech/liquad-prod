@@ -14,7 +14,7 @@ interface SidebarProps {
 const licenseLinks = [
   { label: "Overview", href: "/dashboard" },
   { label: "Domains", href: "/dashboard/domains" },
-  { label: "AI Bots", href: "/dashboard/user-agents" },
+  { label: "Bots", href: "/dashboard/bots" },
   { label: "Catalogs", href: "/dashboard/catalogs" },
   { label: "Integration", href: "/dashboard/integration" },
   { label: "Settings", href: "/dashboard/settings" },
@@ -22,6 +22,7 @@ const licenseLinks = [
 
 const accessLinks = [
   { label: "Overview", href: "/dashboard/access" },
+  { label: "Bots", href: "/dashboard/bots" },
   { label: "Search Configs", href: "/dashboard/access/search" },
   //{ label: "Integration", href: "/dashboard/access/integration" },
   //{ label: "Marketplace", href: "/dashboard/access/marketplace" },

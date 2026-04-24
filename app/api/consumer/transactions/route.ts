@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authenticateApiKey } from "@/lib/services/auth.service";
+import { authenticateConsumerKey } from "@/lib/services/auth.service";
 import { createServerClient } from "@/lib/db/supabase-server";
 
 /**
@@ -23,7 +23,7 @@ import { createServerClient } from "@/lib/db/supabase-server";
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
-    const authResult = await authenticateApiKey(
+    const authResult = await authenticateConsumerKey(
       request.headers.get("authorization")
     );
     if ("error" in authResult) {
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .select(
         "id, type, amount_eur, content_url, publisher_workspace_id, created_at"
       )
-      .eq("consumer_workspace_id", authResult.workspaceId)
+      .eq("wallet_id", authResult.walletId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(limitParam + 1);
