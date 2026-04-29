@@ -30,10 +30,10 @@ export interface DomainDeleteImpact {
 }
 
 // ---------------------------------------------------------------------------
-// Types — Sources
+// Types — Indexed Sources
 // ---------------------------------------------------------------------------
 
-export interface SourceRow {
+export interface IndexedSourceRow {
   id: string;
   workspace_id: string;
   source_url: string;
@@ -45,7 +45,7 @@ export interface SourceRow {
 }
 
 export interface PaginatedSources {
-  items: SourceRow[];
+  items: IndexedSourceRow[];
   total: number;
   page: number;
   totalPages: number;
@@ -213,7 +213,7 @@ export async function getDomainDeleteImpact(
   if (!domain) return null;
 
   const { count } = await supabase
-    .from("sources")
+    .from("indexed_sources")
     .select("id", { count: "exact", head: true })
     .eq("domain_id", domainId);
 
@@ -330,7 +330,7 @@ export async function getSources(
   }
 
   let query = supabase
-    .from("sources")
+    .from("indexed_sources")
     .select("id, workspace_id, source_url, domain_id, title, lastmod, created_at, domains(domain)", {
       count: "exact",
     })
@@ -354,7 +354,7 @@ export async function getSources(
 
   const total = count ?? 0;
 
-  const items: SourceRow[] = (data ?? []).map((row) => ({
+  const items: IndexedSourceRow[] = (data ?? []).map((row) => ({
     id: row.id,
     workspace_id: row.workspace_id,
     source_url: row.source_url,
@@ -378,18 +378,18 @@ export async function getSources(
 // ---------------------------------------------------------------------------
 
 /**
- * Delete a single source by ID, scoped to workspace.
+ * Delete a single indexed source by ID, scoped to workspace.
  */
 export async function deleteSource(
-  sourceId: string,
+  indexedSourceId: string,
   workspaceId: string
 ): Promise<boolean> {
   const supabase = await createServerClient();
 
   const { data: source } = await supabase
-    .from("sources")
+    .from("indexed_sources")
     .select("id")
-    .eq("id", sourceId)
+    .eq("id", indexedSourceId)
     .eq("workspace_id", workspaceId)
     .single();
 
@@ -398,13 +398,13 @@ export async function deleteSource(
   }
 
   const { error } = await supabase
-    .from("sources")
+    .from("indexed_sources")
     .delete()
-    .eq("id", sourceId)
+    .eq("id", indexedSourceId)
     .eq("workspace_id", workspaceId);
 
   if (error) {
-    throw new Error(`Failed to delete source: ${error.message}`);
+    throw new Error(`Failed to delete indexed source: ${error.message}`);
   }
 
   return true;
@@ -524,7 +524,7 @@ export async function importFromSitemap(
 
   if (options?.maxPages !== undefined) {
     const { count } = await supabase
-      .from("sources")
+      .from("indexed_sources")
       .select("id", { count: "exact", head: true })
       .eq("workspace_id", workspaceId);
     const currentCount = count ?? 0;
@@ -559,7 +559,7 @@ export async function importFromSitemap(
   let page = 0;
   while (true) {
     const { data } = await supabase
-      .from("sources")
+      .from("indexed_sources")
       .select("source_url")
       .eq("workspace_id", workspaceId)
       .range(page * BATCH_SIZE, (page + 1) * BATCH_SIZE - 1);
@@ -574,10 +574,10 @@ export async function importFromSitemap(
   let upserted = 0;
   for (let i = 0; i < newRecords.length; i += BATCH_SIZE) {
     const batch = newRecords.slice(i, i + BATCH_SIZE);
-    const { error } = await supabase.from("sources").insert(batch);
+    const { error } = await supabase.from("indexed_sources").insert(batch);
 
     if (error) {
-      throw new Error(`Failed to insert sources: ${error.message}`);
+      throw new Error(`Failed to insert indexed sources: ${error.message}`);
     }
     upserted += batch.length;
   }

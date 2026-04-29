@@ -4,7 +4,7 @@ import { authorize } from "@/lib/services/consumer.service";
 import { transactionSchema } from "@/lib/validations/authorize.schema";
 
 /**
- * POST /api/consumer/authorize
+ * POST /api/consumer/v1/licenses
  *
  * Pre-authorize access to paid content. Returns HMAC-signed tokens
  * that the publisher SDK verifies locally (no callback needed).
@@ -13,7 +13,8 @@ import { transactionSchema } from "@/lib/validations/authorize.schema";
  *
  * REQUEST BODY:
  * - urls: string[] (required) — URLs of the content to access (max 100)
- * - agent_id: string (required) — UUID of the bot that will use the tokens
+ * - bot_id: string (optional) — UUID of the bot that will use the tokens.
+ *           If provided, must match the bot bound to the API key.
  * - max_price_eur: number (optional) — price ceiling per URL
  *
  * Token validity (TTL) is controlled by the publisher via catalog.ttl_minutes.
@@ -21,7 +22,7 @@ import { transactionSchema } from "@/lib/validations/authorize.schema";
  * RESPONSES:
  * - 200: { results: [...], unmatched: [...], total_cost_eur, balance_remaining_eur }
  *        Each result includes `allowed_ips` — the intersection of the caller's
- *        declared IPs with the publisher agent's declared IPs. The gateway only
+ *        declared IPs with the publisher bot's declared IPs. The gateway only
  *        accepts scrapes from these IPs; any other IP will be rejected even with
  *        a valid token.
  *        Unmatched reasons:
@@ -66,21 +67,26 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     // The bot identity is bound to the API key. If the body also provides
-    // agent_id, it must match — otherwise reject.
-    if (parsed.data.agent_id && parsed.data.agent_id !== authResult.agentId) {
+    // bot_id, it must match — otherwise reject.
+    if (parsed.data.bot_id && parsed.data.bot_id !== authResult.botId) {
       return NextResponse.json(
         {
-          error: "agent_mismatch",
-          message: "Key is bound to a specific bot; body agent_id must match or be omitted",
+          error: "bot_mismatch",
+          message: "Key is bound to a specific bot; body bot_id must match or be omitted",
         },
         { status: 422 }
       );
     }
 
-    const result = await authorize(authResult.workspaceId, authResult.apiKeyId, {
-      ...parsed.data,
-      agent_id: authResult.agentId,
-    });
+    const result = await authorize(
+      authResult.workspaceId,
+      authResult.apiKeyId,
+      {
+        ...parsed.data,
+        bot_id: authResult.botId,
+      },
+      authResult.scopeToWorkspace
+    );
 
     if (!result.ok) {
       return NextResponse.json(

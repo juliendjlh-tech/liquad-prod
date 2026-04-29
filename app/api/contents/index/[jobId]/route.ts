@@ -2,9 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
 
 /**
- * GET /api/contents/import/[jobId]
+ * GET /api/contents/index/[jobId]
  *
- * Poll the status of an import job.
+ * Poll the status of an indexing job.
  *
  * HEADERS:
  * - x-workspace-id: UUID of the workspace (for authorization)
@@ -55,7 +55,7 @@ export async function GET(
 
     // Fetch job — scoped to workspace for security
     const { data: job, error } = await supabase
-      .from("import_jobs")
+      .from("indexing_jobs")
       .select("id, status, result, error_message, sitemap_url, created_at, updated_at")
       .eq("id", jobId)
       .eq("workspace_id", workspaceId)

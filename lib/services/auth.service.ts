@@ -78,16 +78,22 @@ export interface ConsumerKeyAuth {
   /** Workspace that owns the key and is debited. */
   workspaceId: string;
   /** Bot identity the key is bound to (NOT NULL invariant enforced in DB). */
-  agentId: string;
+  botId: string;
   apiKeyId: string;
-  /** Wallet the key authorises spending from (NOT NULL since migration 025). */
-  walletId: string;
+  /** Bot subscription the key authorises spending from (NOT NULL since migration 025). */
+  botSubscriptionId: string;
+  /**
+   * If true, /licenses and /sources only return catalogs owned by `workspaceId`.
+   * Sourced from workspace_bots(scope_to_workspace) — settable per (workspace, bot).
+   * Default false (cross-workspace reconciliation).
+   */
+  scopeToWorkspace: boolean;
 }
 
 /**
  * Authenticate a consumer request.
- * Used by /api/consumer/* and the RAG pipeline.
- * Each key is bound to an agent; debits hit workspaceId.
+ * Used by /api/consumer/v1/* and the RAG pipeline.
+ * Each key is bound to a bot; debits hit workspaceId.
  */
 export async function authenticateConsumerKey(
   authHeader: string | null
@@ -102,7 +108,7 @@ export async function authenticateConsumerKey(
 
   const { data: row } = await supabase
     .from("api_keys")
-    .select("id, workspace_id, agent_id, wallet_id, api_key_hash")
+    .select("id, workspace_id, bot_id, bot_subscription_id, api_key_hash")
     .eq("api_key_prefix", prefix)
     .is("revoked_at", null)
     .single();
@@ -116,6 +122,16 @@ export async function authenticateConsumerKey(
     return { error: "Invalid API key" };
   }
 
+  // Resolve scope_to_workspace from workspace_bots junction.
+  // Defaults to false if no row is found (defensive; should always exist
+  // since api_keys are created against workspace_bots).
+  const { data: wsBot } = await supabase
+    .from("workspace_bots")
+    .select("scope_to_workspace")
+    .eq("workspace_id", row.workspace_id)
+    .eq("bot_id", row.bot_id)
+    .maybeSingle();
+
   // Best-effort last_used_at — don't block auth on this.
   void supabase
     .from("api_keys")
@@ -124,8 +140,9 @@ export async function authenticateConsumerKey(
 
   return {
     workspaceId: row.workspace_id,
-    agentId: row.agent_id,
+    botId: row.bot_id,
     apiKeyId: row.id,
-    walletId: row.wallet_id,
+    botSubscriptionId: row.bot_subscription_id,
+    scopeToWorkspace: wsBot?.scope_to_workspace ?? false,
   };
 }

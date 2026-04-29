@@ -6,7 +6,7 @@ import { evaluatePathRule, type PathRule } from "@/lib/validations/catalog.schem
 import type { Json } from "@/lib/db/types";
 
 /**
- * POST /api/contents/import
+ * POST /api/contents/index
  *
  * Single entry point for importing and re-indexing domain content.
  *
@@ -103,7 +103,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // ── Step 5: Concurrency check — reject if a job is already running ────
     const { data: runningJob } = await supabase
-      .from("import_jobs")
+      .from("indexing_jobs")
       .select("id")
       .eq("domain_id", domain_id)
       .in("status", ["pending", "processing"])
@@ -131,7 +131,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     // ── Step 7: Create import job with domain_id ──────────────────────────
     const { data: job, error: jobError } = await supabase
-      .from("import_jobs")
+      .from("indexing_jobs")
       .insert({
         workspace_id: workspaceId,
         domain_id: domain_id,
@@ -159,7 +159,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       try {
         // Mark job as processing
         await bgSupabase
-          .from("import_jobs")
+          .from("indexing_jobs")
           .update({ status: "processing", updated_at: new Date().toISOString() })
           .eq("id", job.id);
 
@@ -173,7 +173,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
             while (true) {
               const { data: rows } = await bgSupabase
-                .from("sources")
+                .from("indexed_sources")
                 .select("id, source_url")
                 .eq("domain_id", domain_id)
                 .range(from, from + PAGE_SIZE - 1);
@@ -189,7 +189,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
               if (sourcesToWipe.length > 0) {
                 await bgSupabase
-                  .from("sources")
+                  .from("indexed_sources")
                   .delete()
                   .in("id", sourcesToWipe.map((s) => s.id));
               }
@@ -201,9 +201,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             // Full wipe: delete ALL sources for this domain.
             // Chunks + catalog_sources are cleaned up via ON DELETE CASCADE.
             await bgSupabase
-              .from("sources")
+              .from("indexed_sources")
               .delete()
               .eq("domain_id", domain_id);
+
           }
         }
 
@@ -216,7 +217,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
         // Store urls_to_index on the job (immutable after this point).
         await bgSupabase
-          .from("import_jobs")
+          .from("indexing_jobs")
           .update({
             status: "completed",
             result: result as unknown as Json,
@@ -231,7 +232,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         console.error(`Import job ${job.id} failed:`, message);
 
         await bgSupabase
-          .from("import_jobs")
+          .from("indexing_jobs")
           .update({
             status: "failed",
             error_message: message,

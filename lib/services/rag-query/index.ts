@@ -7,7 +7,7 @@
 //   1. authenticate     — Validate API key, extract workspace ID
 //   2. resolveParams    — Merge inline + search_config parameters
 //   3. validateCatalogs — Verify catalogs are active + RAG-enabled
-//   4. matchAgents      — Resolve agent by ID, ua_pattern reconciliation
+//   4. matchBots        — Resolve bot by ID, ua_pattern reconciliation
 //   5. embedQuery       — Generate vector embedding for query text
 //   6. vectorSearch     — Execute pgvector similarity search
 //   7. dedupResults     — Keep best chunk per source URL
@@ -26,7 +26,7 @@ import { runPipeline } from "./pipeline";
 import { authenticate } from "./steps/authenticate";
 import { resolveParams } from "./steps/resolve-params";
 import { validateCatalogs } from "./steps/validate-catalogs";
-import { matchAgents } from "./steps/match-agents";
+import { matchBots } from "./steps/match-agents";
 import { embedQuery } from "./steps/embed-query";
 import { vectorSearch } from "./steps/vector-search";
 import { dedupResults } from "./steps/dedup-results";
@@ -41,14 +41,14 @@ export type { QueryResult, QueryResultItem, QuerySuccess, QueryDryRun, QueryErro
 /**
  * Execute a RAG semantic search query.
  *
- * This is the main entry point for POST /api/consumer/query.
+ * This is the main entry point for POST /api/consumer/v1/query.
  * Internally, it runs an 11-step pipeline where each step either
  * advances the context or short-circuits with a typed result.
  *
  * CRITICAL: This function NEVER throws. All errors are returned as typed results.
  *
  * @param authHeader - Authorization header (Bearer lq_...)
- * @param input - Validated query input (includes agent_id)
+ * @param input - Validated query input (includes bot_id)
  * @returns Typed result: success, dry_run, or error
  */
 export async function executeRagQuery(
@@ -67,7 +67,7 @@ export async function executeRagQuery(
     authenticate,
     resolveParams,
     validateCatalogs,
-    matchAgents,
+    matchBots,
     embedQuery,
     vectorSearch,
     dedupResults,

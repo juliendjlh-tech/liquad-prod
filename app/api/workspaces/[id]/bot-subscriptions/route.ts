@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { createWalletSchema } from "@/lib/validations/wallet.schema";
-import { createWallet, listWallets } from "@/lib/services/wallet.service";
+import { createBotSubscriptionSchema } from "@/lib/validations/wallet.schema";
+import {
+  createBotSubscription,
+  listBotSubscriptions,
+} from "@/lib/services/wallet.service";
 
 /**
- * GET /api/workspaces/:id/wallets
- * List non-archived wallets for the workspace. Optional ?agent_id= filter.
+ * GET /api/workspaces/:id/bot-subscriptions
+ * List non-archived bot subscriptions for the workspace.
+ * Optional ?bot_id= filter.
  */
 export async function GET(
   request: NextRequest,
@@ -13,7 +17,7 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { id: workspaceId } = await params;
-    const agentId = request.nextUrl.searchParams.get("agent_id") ?? undefined;
+    const botId = request.nextUrl.searchParams.get("bot_id") ?? undefined;
 
     const supabase = await createServerClient();
     const {
@@ -24,16 +28,16 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const wallets = await listWallets(workspaceId, user.id, { agentId });
-    return NextResponse.json(wallets, { status: 200 });
+    const subscriptions = await listBotSubscriptions(workspaceId, user.id, { botId });
+    return NextResponse.json(subscriptions, { status: 200 });
   } catch (err) {
     return mapError(err);
   }
 }
 
 /**
- * POST /api/workspaces/:id/wallets
- * Create a new wallet for a subscribed bot (owner/admin only).
+ * POST /api/workspaces/:id/bot-subscriptions
+ * Create a new bot subscription for a subscribed bot (owner/admin only).
  */
 export async function POST(
   request: NextRequest,
@@ -43,7 +47,7 @@ export async function POST(
     const { id: workspaceId } = await params;
 
     const body = await request.json().catch(() => null);
-    const parsed = createWalletSchema.safeParse(body);
+    const parsed = createBotSubscriptionSchema.safeParse(body);
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -61,13 +65,13 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const wallet = await createWallet(workspaceId, user.id, {
-      agentId: parsed.data.agent_id,
+    const subscription = await createBotSubscription(workspaceId, user.id, {
+      botId: parsed.data.bot_id,
       externalUserId: parsed.data.external_user_id ?? null,
       label: parsed.data.label ?? null,
     });
 
-    return NextResponse.json(wallet, { status: 201 });
+    return NextResponse.json(subscription, { status: 201 });
   } catch (err) {
     return mapError(err);
   }
@@ -81,13 +85,13 @@ function mapError(err: unknown): NextResponse {
     if (err.message === "FORBIDDEN") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (err.message === "AGENT_NOT_IN_WORKSPACE") {
+    if (err.message === "BOT_NOT_IN_WORKSPACE") {
       return NextResponse.json(
-        { error: "agent_not_in_workspace" },
+        { error: "bot_not_in_workspace" },
         { status: 422 }
       );
     }
-    if (err.message === "WALLET_DUPLICATE") {
+    if (err.message === "BOT_SUBSCRIPTION_DUPLICATE") {
       return NextResponse.json(
         { error: "external_user_id already exists for this bot" },
         { status: 409 }

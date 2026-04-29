@@ -1,7 +1,7 @@
-import { a as LiquadConfig, H as HandleRequestOptions, L as LiquadResult } from './types-BQBdWPwx.mjs';
-export { S as SdkEvent } from './types-BQBdWPwx.mjs';
+import { a as LiquadConfig, H as HandleRequestOptions, L as LiquadResult } from './types-B1i4Vg0_.mjs';
+export { S as SdkEvent } from './types-B1i4Vg0_.mjs';
 import { MatchableCatalog } from './matcher.mjs';
-export { MatchableAgent, findBestCatalog, matchUserAgent } from './matcher.mjs';
+export { MatchableBot, findBestCatalog, matchUserAgent } from './matcher.mjs';
 export { normalizeUrl } from './url-normalize.mjs';
 
 /**
@@ -18,13 +18,13 @@ interface CachedRules {
     /** Publisher's HMAC signing secret for local token verification */
     hmac_secret: string;
     verified_domains: string[];
-    agents: Array<{
+    bots: Array<{
         id: string;
         name: string;
         ua_pattern: string;
         /** Official IP ranges (CIDR) declared by the bot operator */
         declared_ips: string[];
-        /** Catalog IDs this agent is linked to */
+        /** Catalog IDs this bot is linked to */
         catalog_ids: string[];
     }>;
     /** Free catalogs (price_eur=0) with resolved filter_rules for local matching */
@@ -72,13 +72,13 @@ declare function verifyToken(token: string, normalizedUrl: string, expectedUaPat
  *
  * handleRequest flow:
  *
- *   1. Load cached workspace rules (agents + free catalogs + HMAC secret)
- *   2. Extract User-Agent → match against known agents (matchUserAgent)
+ *   1. Load cached workspace rules (bots + free catalogs + HMAC secret)
+ *   2. Extract User-Agent → match against known bots (matchUserAgent)
  *      └── No match → pass through (unknown bot / human) — FAST PATH
  *   3. Extract client IP
  *      └── Declared ranges exist + IP missing or not in ranges → 403 (spoofed UA)
  *   4. Normalize request URL
- *   4a. Match URL against free catalogs (price_eur=0) for this agent
+ *   4a. Match URL against free catalogs (price_eur=0) for this bot
  *      └── Match → pass through (decision: "granted", no token needed)
  *   5. Extract token from ?_lq= param or Authorization: License header
  *      └── Token present → verify HMAC locally (0.1ms, no API call)

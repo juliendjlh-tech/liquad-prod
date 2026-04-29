@@ -80,7 +80,7 @@ export async function GET(
  * PATCH /api/catalogs/:id
  *
  * Update a catalog. Supports partial updates for name, description,
- * filter_rules, agent_ids, price_eur, and status.
+ * filter_rules, bot_ids, price_eur, and status.
  *
  * When status is set to "active", checks for verified domains and
  * includes a warning if none exist (activation still proceeds).
@@ -90,7 +90,7 @@ export async function GET(
  *
  * RESPONSES:
  * - 200: Updated catalog (with optional warning field)
- * - 400: Validation error or invalid agent_ids
+ * - 400: Validation error or invalid bot_ids
  * - 401: Unauthorized
  * - 404: Catalog not found or wrong workspace
  * - 500: Internal server error
@@ -155,9 +155,9 @@ export async function PATCH(
 
     return NextResponse.json(updated, { status: 200 });
   } catch (err) {
-    if (err instanceof Error && err.message === "INVALID_AGENT_IDS") {
+    if (err instanceof Error && err.message === "INVALID_BOT_IDS") {
       return NextResponse.json(
-        { error: "agent_ids contains invalid or unauthorized agent IDs" },
+        { error: "bot_ids contains invalid or unauthorized bot IDs" },
         { status: 400 }
       );
     }

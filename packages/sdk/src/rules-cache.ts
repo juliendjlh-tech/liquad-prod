@@ -16,13 +16,13 @@ export interface CachedRules {
   hmac_secret: string;
   verified_domains: string[];
 
-  agents: Array<{
+  bots: Array<{
     id: string;
     name: string;
     ua_pattern: string;
     /** Official IP ranges (CIDR) declared by the bot operator */
     declared_ips: string[];
-    /** Catalog IDs this agent is linked to */
+    /** Catalog IDs this bot is linked to */
     catalog_ids: string[];
   }>;
 

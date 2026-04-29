@@ -1,23 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { updateUserAgentSchema } from "@/lib/validations/user-agent.schema";
+import { updateBotSchema } from "@/lib/validations/user-agent.schema";
 import {
-  getAgentById,
-  updateAgent,
-  removeAgentFromWorkspace,
+  getBotById,
+  updateBot,
+  removeBotFromWorkspace,
+  setBotScopeToWorkspace,
 } from "@/lib/services/agent.service";
 
 /**
- * GET /api/user-agents/:id
+ * GET /api/bots/:id
  *
- * Get a single agent by ID.
+ * Get a single bot by ID.
  */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id: agentId } = await params;
+    const { id: botId } = await params;
     const workspaceId = request.headers.get("x-workspace-id");
 
     if (!workspaceId) {
@@ -40,27 +41,33 @@ export async function GET(
 
     if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const agent = await getAgentById(agentId);
-    if (!agent) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+    const bot = await getBotById(botId, workspaceId);
+    if (!bot) return NextResponse.json({ error: "Bot not found" }, { status: 404 });
 
-    return NextResponse.json(agent, { status: 200 });
+    return NextResponse.json(bot, { status: 200 });
   } catch {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
 
 /**
- * PATCH /api/user-agents/:id
+ * PATCH /api/bots/:id
  *
- * Update a custom agent. Presets are immutable for clients.
- * Only the workspace that owns the custom bot (has it in workspace_agents) can edit it.
+ * Update a bot. Two kinds of fields:
+ *   - bot fields (name, ua_pattern, description, declared_ips):
+ *     mutate the global `bots` row. Presets are immutable for clients.
+ *   - scope_to_workspace: lives on workspace_bots(workspace_id, bot_id) and
+ *     is per-workspace. Settable on presets too (it's a workspace-local
+ *     policy, not a property of the bot identity).
+ *
+ * Only the workspace that owns the custom bot (has it in workspace_bots) can edit it.
  */
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id: agentId } = await params;
+    const { id: botId } = await params;
     const workspaceId = request.headers.get("x-workspace-id");
 
     if (!workspaceId) {
@@ -71,7 +78,7 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const validation = updateUserAgentSchema.safeParse(body);
+    const validation = updateBotSchema.safeParse(body);
 
     if (!validation.success) {
       return NextResponse.json(
@@ -93,9 +100,31 @@ export async function PATCH(
 
     if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const updated = await updateAgent(agentId, validation.data, workspaceId);
+    // Split the body: bot fields go to updateBot, scope_to_workspace goes to
+    // workspace_bots. They can be sent in the same request.
+    const { scope_to_workspace, ...botFields } = validation.data;
+    const hasBotFields = Object.keys(botFields).length > 0;
 
-    if (!updated) return NextResponse.json({ error: "Agent not found" }, { status: 404 });
+    let updated = hasBotFields
+      ? await updateBot(botId, botFields, workspaceId)
+      : await getBotById(botId, workspaceId);
+
+    if (!updated) return NextResponse.json({ error: "Bot not found" }, { status: 404 });
+
+    if (scope_to_workspace !== undefined) {
+      const newScope = await setBotScopeToWorkspace(
+        workspaceId,
+        botId,
+        scope_to_workspace
+      );
+      if (newScope === null) {
+        return NextResponse.json(
+          { error: "Bot not found in this workspace" },
+          { status: 404 }
+        );
+      }
+      updated = { ...updated, scope_to_workspace: newScope };
+    }
 
     return NextResponse.json(updated, { status: 200 });
   } catch (err) {
@@ -118,17 +147,17 @@ export async function PATCH(
 }
 
 /**
- * DELETE /api/user-agents/:id
+ * DELETE /api/bots/:id
  *
- * Unsubscribe an agent from a workspace.
- * For custom bots, also deletes the global agent record (and cascade data).
+ * Unsubscribe a bot from a workspace.
+ * For custom bots, also deletes the global bot record (and cascade data).
  */
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id: agentId } = await params;
+    const { id: botId } = await params;
     const workspaceId = request.headers.get("x-workspace-id");
 
     if (!workspaceId) {
@@ -151,22 +180,22 @@ export async function DELETE(
 
     if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    const result = await removeAgentFromWorkspace(workspaceId, agentId);
+    const result = await removeBotFromWorkspace(workspaceId, botId);
 
     if (!result.removed) {
       return NextResponse.json(
-        { error: "Agent not found in this workspace" },
+        { error: "Bot not found in this workspace" },
         { status: 404 }
       );
     }
 
     const response: { deleted: boolean; id: string; warning?: string } = {
       deleted: true,
-      id: agentId,
+      id: botId,
     };
 
     if (result.catalogCount > 0) {
-      response.warning = `This agent was linked to ${result.catalogCount} catalog(s). Those links have been removed.`;
+      response.warning = `This bot was linked to ${result.catalogCount} catalog(s). Those links have been removed.`;
     }
 
     return NextResponse.json(response, { status: 200 });

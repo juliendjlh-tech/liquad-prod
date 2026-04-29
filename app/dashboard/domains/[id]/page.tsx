@@ -182,7 +182,7 @@ export default function DomainDetailPage() {
   const handleReindex = async () => {
     setReindexing(true);
     try {
-      const res = await fetch("/api/contents/import", {
+      const res = await fetch("/api/contents/index", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -3,7 +3,7 @@ import { querySchema } from "@/lib/validations/query.schema";
 import { executeRagQuery } from "@/lib/services/rag-query";
 
 /**
- * POST /api/consumer/query
+ * POST /api/consumer/v1/query
  *
  * Semantic search (RAG) endpoint for consumers.
  * Searches content chunks using vector similarity and charges per result.
@@ -15,7 +15,7 @@ import { executeRagQuery } from "@/lib/services/rag-query";
  * REQUEST BODY:
  * {
  *   "query": "How does billing work?",
- *   "agent_id": "uuid",
+ *   "bot_id": "uuid",
  *   "catalog_ids": ["uuid1", "uuid2"],      // or search_config_id
  *   "max_results": 5,
  *   "dry_run": false
@@ -25,7 +25,7 @@ import { executeRagQuery } from "@/lib/services/rag-query";
  * - 200: Results with snippets, tokens + billing info (or empty results)
  * - 401: Invalid API key
  * - 402: Insufficient balance
- * - 403: Agent not authorized on catalog
+ * - 403: Bot not authorized on catalog
  * - 404: Catalog not found, inactive, or RAG not enabled
  * - 422: Validation error
  */

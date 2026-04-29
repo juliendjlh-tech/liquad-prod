@@ -112,7 +112,7 @@ export const createCatalogSchema = z.object({
   name: z.string().trim().min(1, "name is required").max(255),
   description: z.string().max(1000).optional(),
   filter_rules: filterRulesSchema,
-  agent_ids: z.array(z.string().uuid()),
+  bot_ids: z.array(z.string().uuid()),
   price_eur: z
     .number()
     .min(0, "price_eur must be between 0 and 1")
@@ -130,7 +130,7 @@ export const updateCatalogSchema = z.object({
   name: z.string().trim().min(1).max(255).optional(),
   description: z.string().max(1000).optional(),
   filter_rules: filterRulesSchema.optional(),
-  agent_ids: z.array(z.string().uuid()).optional(),
+  bot_ids: z.array(z.string().uuid()).optional(),
   price_eur: z
     .number()
     .min(0, "price_eur must be between 0 and 1")

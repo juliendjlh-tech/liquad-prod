@@ -1,6 +1,6 @@
 {
   "name": "@liquad/sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Liquad AI Content Licensing SDK - Universal handler for Node.js and Edge runtimes",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

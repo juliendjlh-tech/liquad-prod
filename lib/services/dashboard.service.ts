@@ -43,12 +43,12 @@ export async function getDashboardMetrics(
   ).toISOString();
 
   const { count: totalContents } = await supabase
-    .from("sources")
+    .from("indexed_sources")
     .select("id", { count: "exact", head: true })
     .eq("workspace_id", workspaceId);
 
   const { data: allContents } = await supabase
-    .from("sources")
+    .from("indexed_sources")
     .select("source_url")
     .eq("workspace_id", workspaceId);
 

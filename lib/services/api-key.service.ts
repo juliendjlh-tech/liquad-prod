@@ -1,10 +1,11 @@
 // ---------------------------------------------------------------------------
-// API Key service (ADR-006, wallets entity since migration 025)
+// API Key service (ADR-006, bot_subscriptions entity since migration 025)
 //
-// CRUD for consumer-side api_keys. Each key is bound to an agent (bot) AND a
-// wallet. Multiple keys can point at the same wallet (rotation / per-env), so
-// revoking a key never touches the wallet's balance. This separation is by
-// design — revocation is unconditional even if the wallet still has credit.
+// CRUD for consumer-side api_keys. Each key is bound to a bot AND a
+// bot subscription. Multiple keys can point at the same bot subscription
+// (rotation / per-env), so revoking a key never touches the subscription's
+// balance. This separation is by design — revocation is unconditional even
+// if the subscription still has credit.
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
@@ -15,29 +16,30 @@ import { generateApiKey, hashApiKey } from "@/lib/services/workspace.service";
 // ---------------------------------------------------------------------------
 
 export interface CreateApiKeyInput {
-  agentId: string;
+  botId: string;
   label?: string;
   /**
-   * Existing wallet to attach this key to. When omitted, a new wallet is
-   * created implicitly and the key is the first credential on it.
+   * Existing bot subscription to attach this key to. When omitted, a new
+   * subscription is created implicitly and the key is the first credential
+   * on it.
    */
-  walletId?: string;
-  /** Used when walletId is omitted — label for the implicitly-created wallet. */
-  walletLabel?: string;
-  /** Used when walletId is omitted — external user id mapped to the new wallet. */
-  walletExternalUserId?: string;
+  botSubscriptionId?: string;
+  /** Used when botSubscriptionId is omitted — label for the implicitly-created subscription. */
+  botSubscriptionLabel?: string;
+  /** Used when botSubscriptionId is omitted — external user id mapped to the new subscription. */
+  botSubscriptionExternalUserId?: string;
 }
 
 export interface ApiKeyPublic {
   id: string;
   label: string | null;
   api_key_prefix: string;
-  agent_id: string;
-  agent_name: string;
-  wallet_id: string;
-  wallet_label: string | null;
-  wallet_external_user_id: string | null;
-  wallet_balance_eur: number;
+  bot_id: string;
+  bot_name: string;
+  bot_subscription_id: string;
+  bot_subscription_label: string | null;
+  bot_subscription_external_user_id: string | null;
+  bot_subscription_balance_eur: number;
   last_used_at: string | null;
   created_at: string | null;
   revoked_at: string | null;
@@ -80,10 +82,10 @@ async function assertRole(
  * Create a new consumer API key. Returns the plaintext key ONCE.
  * Role required: owner or admin on the workspace.
  *
- * The agent must already be subscribed to the workspace (workspace_agents row).
- * If input.walletId is provided, the key is attached to that wallet (must
- * match the same workspace+agent). Otherwise, a new empty wallet is created
- * and the key becomes its first credential.
+ * The bot must already be subscribed to the workspace (workspace_bots row).
+ * If input.botSubscriptionId is provided, the key is attached to that
+ * subscription (must match the same workspace+bot). Otherwise, a new empty
+ * subscription is created and the key becomes its first credential.
  */
 export async function createApiKey(
   workspaceId: string,
@@ -94,48 +96,48 @@ export async function createApiKey(
 
   const supabase = await createServerClient();
 
-  // Scope check: the agent must be subscribed in this workspace.
+  // Scope check: the bot must be subscribed in this workspace.
   const { data: link } = await supabase
-    .from("workspace_agents")
-    .select("agent_id")
+    .from("workspace_bots")
+    .select("bot_id")
     .eq("workspace_id", workspaceId)
-    .eq("agent_id", input.agentId)
+    .eq("bot_id", input.botId)
     .maybeSingle();
 
-  if (!link) throw new Error("AGENT_NOT_IN_WORKSPACE");
+  if (!link) throw new Error("BOT_NOT_IN_WORKSPACE");
 
-  // Resolve the target wallet: either provided, or freshly created.
-  let walletId: string;
+  // Resolve the target bot subscription: either provided, or freshly created.
+  let botSubscriptionId: string;
 
-  if (input.walletId) {
-    const { data: wallet } = await supabase
-      .from("wallets")
+  if (input.botSubscriptionId) {
+    const { data: botSubscription } = await supabase
+      .from("bot_subscriptions")
       .select("id")
-      .eq("id", input.walletId)
+      .eq("id", input.botSubscriptionId)
       .eq("workspace_id", workspaceId)
-      .eq("agent_id", input.agentId)
+      .eq("bot_id", input.botId)
       .is("archived_at", null)
       .maybeSingle();
 
-    if (!wallet) throw new Error("WALLET_NOT_FOUND");
-    walletId = wallet.id;
+    if (!botSubscription) throw new Error("BOT_SUBSCRIPTION_NOT_FOUND");
+    botSubscriptionId = botSubscription.id;
   } else {
-    const { data: newWallet, error: walletError } = await supabase
-      .from("wallets")
+    const { data: newBotSubscription, error: botSubscriptionError } = await supabase
+      .from("bot_subscriptions")
       .insert({
         workspace_id: workspaceId,
-        agent_id: input.agentId,
-        label: input.walletLabel ?? null,
-        external_user_id: input.walletExternalUserId ?? null,
+        bot_id: input.botId,
+        label: input.botSubscriptionLabel ?? null,
+        external_user_id: input.botSubscriptionExternalUserId ?? null,
       })
       .select("id")
       .single();
 
-    if (walletError || !newWallet) {
-      if (walletError?.code === "23505") throw new Error("WALLET_DUPLICATE");
-      throw new Error(`WALLET_CREATE_FAILED: ${walletError?.message ?? "unknown"}`);
+    if (botSubscriptionError || !newBotSubscription) {
+      if (botSubscriptionError?.code === "23505") throw new Error("BOT_SUBSCRIPTION_DUPLICATE");
+      throw new Error(`BOT_SUBSCRIPTION_CREATE_FAILED: ${botSubscriptionError?.message ?? "unknown"}`);
     }
-    walletId = newWallet.id;
+    botSubscriptionId = newBotSubscription.id;
   }
 
   const apiKey = generateApiKey();
@@ -146,14 +148,14 @@ export async function createApiKey(
     .from("api_keys")
     .insert({
       workspace_id: workspaceId,
-      agent_id: input.agentId,
-      wallet_id: walletId,
+      bot_id: input.botId,
+      bot_subscription_id: botSubscriptionId,
       api_key_hash: apiKeyHash,
       api_key_prefix: apiKeyPrefix,
       label: input.label ?? null,
     })
     .select(
-      "id, label, api_key_prefix, agent_id, wallet_id, last_used_at, created_at, revoked_at"
+      "id, label, api_key_prefix, bot_id, bot_subscription_id, last_used_at, created_at, revoked_at"
     )
     .single();
 
@@ -161,12 +163,12 @@ export async function createApiKey(
     throw new Error(`CREATE_FAILED: ${error?.message ?? "unknown"}`);
   }
 
-  const [{ data: agent }, { data: wallet }] = await Promise.all([
-    supabase.from("agents").select("name").eq("id", input.agentId).single(),
+  const [{ data: bot }, { data: botSubscription }] = await Promise.all([
+    supabase.from("bots").select("name").eq("id", input.botId).single(),
     supabase
-      .from("wallets")
+      .from("bot_subscriptions")
       .select("label, external_user_id, balance_eur")
-      .eq("id", walletId)
+      .eq("id", botSubscriptionId)
       .single(),
   ]);
 
@@ -174,10 +176,10 @@ export async function createApiKey(
     api_key: apiKey,
     record: {
       ...data,
-      agent_name: agent?.name ?? "unknown",
-      wallet_label: wallet?.label ?? null,
-      wallet_external_user_id: wallet?.external_user_id ?? null,
-      wallet_balance_eur: Number(wallet?.balance_eur ?? 0),
+      bot_name: bot?.name ?? "unknown",
+      bot_subscription_label: botSubscription?.label ?? null,
+      bot_subscription_external_user_id: botSubscription?.external_user_id ?? null,
+      bot_subscription_balance_eur: Number(botSubscription?.balance_eur ?? 0),
     },
   };
 }
@@ -188,12 +190,13 @@ export async function createApiKey(
 
 /**
  * List non-revoked API keys for a workspace (member can read).
- * Filterable by agent_id or wallet_id (UI typically scopes by wallet now).
+ * Filterable by bot_id or bot_subscription_id (UI typically scopes by
+ * bot subscription now).
  */
 export async function listApiKeys(
   workspaceId: string,
   userId: string,
-  options?: { agentId?: string; walletId?: string }
+  options?: { botId?: string; botSubscriptionId?: string }
 ): Promise<ApiKeyPublic[]> {
   await assertRole(workspaceId, userId, ["owner", "admin", "member"]);
 
@@ -202,22 +205,22 @@ export async function listApiKeys(
   let query = supabase
     .from("api_keys")
     .select(
-      "id, label, api_key_prefix, agent_id, wallet_id, last_used_at, created_at, revoked_at, agents(name), wallets(label, external_user_id, balance_eur)"
+      "id, label, api_key_prefix, bot_id, bot_subscription_id, last_used_at, created_at, revoked_at, bots(name), bot_subscriptions(label, external_user_id, balance_eur)"
     )
     .eq("workspace_id", workspaceId)
     .is("revoked_at", null)
     .order("created_at", { ascending: false });
 
-  if (options?.agentId) query = query.eq("agent_id", options.agentId);
-  if (options?.walletId) query = query.eq("wallet_id", options.walletId);
+  if (options?.botId) query = query.eq("bot_id", options.botId);
+  if (options?.botSubscriptionId) query = query.eq("bot_subscription_id", options.botSubscriptionId);
 
   const { data, error } = await query;
 
   if (error) throw new Error(`LIST_FAILED: ${error.message}`);
 
   return (data ?? []).map((row) => {
-    const agents = row.agents as { name: string } | null;
-    const wallet = row.wallets as {
+    const bots = row.bots as { name: string } | null;
+    const botSubscription = row.bot_subscriptions as {
       label: string | null;
       external_user_id: string | null;
       balance_eur: number;
@@ -226,12 +229,12 @@ export async function listApiKeys(
       id: row.id,
       label: row.label,
       api_key_prefix: row.api_key_prefix,
-      agent_id: row.agent_id,
-      agent_name: agents?.name ?? "unknown",
-      wallet_id: row.wallet_id,
-      wallet_label: wallet?.label ?? null,
-      wallet_external_user_id: wallet?.external_user_id ?? null,
-      wallet_balance_eur: Number(wallet?.balance_eur ?? 0),
+      bot_id: row.bot_id,
+      bot_name: bots?.name ?? "unknown",
+      bot_subscription_id: row.bot_subscription_id,
+      bot_subscription_label: botSubscription?.label ?? null,
+      bot_subscription_external_user_id: botSubscription?.external_user_id ?? null,
+      bot_subscription_balance_eur: Number(botSubscription?.balance_eur ?? 0),
       last_used_at: row.last_used_at,
       created_at: row.created_at,
       revoked_at: row.revoked_at,
@@ -248,9 +251,10 @@ export async function listApiKeys(
  * Role required: owner or admin. The key must belong to the workspace.
  *
  * Design note: revocation is ALWAYS unconditional — we never check the
- * wallet's balance. A revoked key no longer authenticates, but the funds on
- * the wallet are preserved and spendable via any other active key on it.
- * This is the core reason balance lives on wallets (see migration 025).
+ * bot subscription's balance. A revoked key no longer authenticates, but
+ * the funds on the subscription are preserved and spendable via any other
+ * active key on it. This is the core reason balance lives on bot
+ * subscriptions (see migration 025).
  */
 export async function revokeApiKey(
   workspaceId: string,

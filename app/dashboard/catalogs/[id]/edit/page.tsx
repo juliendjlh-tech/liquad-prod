@@ -10,7 +10,7 @@ import DomainSelector from "@/app/components/catalog/DomainSelector";
 import CatalogPreview from "@/app/components/catalog/CatalogPreview";
 import type { DomainRule, FilterRules } from "@/lib/validations/catalog.schema";
 
-interface UserAgent {
+interface BotOption {
   id: string;
   name: string;
   ua_pattern: string;
@@ -31,7 +31,7 @@ interface CatalogDetail {
   status: "active" | "inactive";
   rag_enabled: boolean;
   rag_source_count: number;
-  agents: Array<{ id: string; name: string }>;
+  bots: Array<{ id: string; name: string }>;
 }
 
 interface PerDomainStat {
@@ -69,9 +69,9 @@ export default function EditCatalogPage({
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [domainRules, setDomainRules] = useState<DomainRule[]>([]);
-  const [selectedAgents, setSelectedAgents] = useState<string[]>([]);
+  const [selectedBots, setSelectedBots] = useState<string[]>([]);
   const [priceEur, setPriceEur] = useState("0.00");
-  const [agents, setAgents] = useState<UserAgent[]>([]);
+  const [bots, setBots] = useState<BotOption[]>([]);
   const [domains, setDomains] = useState<DomainWithCount[]>([]);
   const [ragEnabled, setRagEnabled] = useState(false);
   const [ragChunkCount, setRagChunkCount] = useState(0);
@@ -107,7 +107,7 @@ export default function EditCatalogPage({
         setName(data.name);
         setDescription(data.description ?? "");
         setDomainRules(data.filter_rules.domain_rules);
-        setSelectedAgents(data.agents.map((a) => a.id));
+        setSelectedBots(data.bots.map((a) => a.id));
         setPriceEur(data.price_eur.toFixed(2));
         setRagEnabled(data.rag_enabled ?? false);
         setRagChunkCount(data.rag_source_count ?? 0);
@@ -120,15 +120,15 @@ export default function EditCatalogPage({
   useEffect(() => {
     void fetchCatalog();
     void (async () => {
-      const [agentsRes, domainsRes] = await Promise.all([
-        fetch("/api/user-agents", {
+      const [botsRes, domainsRes] = await Promise.all([
+        fetch("/api/bots", {
           headers: { "x-workspace-id": workspaceId },
         }),
         fetch(`/api/domains?workspace_id=${workspaceId}`),
       ]);
-      if (agentsRes.ok) {
-        const data = (await agentsRes.json()) as UserAgent[];
-        setAgents(data);
+      if (botsRes.ok) {
+        const data = (await botsRes.json()) as BotOption[];
+        setBots(data);
       }
       if (domainsRes.ok) {
         setDomains(await domainsRes.json());
@@ -184,8 +184,8 @@ export default function EditCatalogPage({
     }
   }, [previewPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const toggleAgent = (id: string) => {
-    setSelectedAgents((prev) =>
+  const toggleBot = (id: string) => {
+    setSelectedBots((prev) =>
       prev.includes(id) ? prev.filter((a) => a !== id) : [...prev, id]
     );
   };
@@ -241,7 +241,7 @@ export default function EditCatalogPage({
           name,
           description: description || undefined,
           filter_rules: { domain_rules: domainRules },
-          agent_ids: selectedAgents,
+          bot_ids: selectedBots,
           price_eur: Math.round(price * 100) / 100,
         }),
       });
@@ -324,18 +324,18 @@ export default function EditCatalogPage({
             Authorized Bots
           </label>
           <div className="space-y-2">
-            {agents.map((agent) => (
+            {bots.map((bot) => (
               <label
-                key={agent.id}
+                key={bot.id}
                 className="flex items-center gap-2 text-sm"
               >
                 <input
                   type="checkbox"
-                  checked={selectedAgents.includes(agent.id)}
-                  onChange={() => toggleAgent(agent.id)}
+                  checked={selectedBots.includes(bot.id)}
+                  onChange={() => toggleBot(bot.id)}
                   className="rounded border-gray-300"
                 />
-                <span className="text-gray-700">{agent.name}</span>
+                <span className="text-gray-700">{bot.name}</span>
               </label>
             ))}
           </div>

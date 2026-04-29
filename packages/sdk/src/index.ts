@@ -5,13 +5,13 @@
  *
  * handleRequest flow:
  *
- *   1. Load cached workspace rules (agents + free catalogs + HMAC secret)
- *   2. Extract User-Agent → match against known agents (matchUserAgent)
+ *   1. Load cached workspace rules (bots + free catalogs + HMAC secret)
+ *   2. Extract User-Agent → match against known bots (matchUserAgent)
  *      └── No match → pass through (unknown bot / human) — FAST PATH
  *   3. Extract client IP
  *      └── Declared ranges exist + IP missing or not in ranges → 403 (spoofed UA)
  *   4. Normalize request URL
- *   4a. Match URL against free catalogs (price_eur=0) for this agent
+ *   4a. Match URL against free catalogs (price_eur=0) for this bot
  *      └── Match → pass through (decision: "granted", no token needed)
  *   5. Extract token from ?_lq= param or Authorization: License header
  *      └── Token present → verify HMAC locally (0.1ms, no API call)
@@ -119,12 +119,12 @@ export function createLiquadHandler(
         return { blocked: false };
       }
 
-      // ── Step 2: Match User-Agent against known agents ─────────────────────
+      // ── Step 2: Match User-Agent against known bots ───────────────────────
       // This is the FAST PATH — non-bot traffic exits here with zero overhead
       const ua = request.headers.get("user-agent") ?? "";
-      const agent = matchUserAgent(ua, rules.agents);
+      const bot = matchUserAgent(ua, rules.bots);
 
-      if (!agent) {
+      if (!bot) {
         return { blocked: false };
       }
 
@@ -132,17 +132,17 @@ export function createLiquadHandler(
       const host = request.headers.get("host") ?? "";
       const domain = host.replace(/:\d+$/, "");
 
-      // ── Step 3: Verify client IP against agent's declared IP ranges ────────
+      // ── Step 3: Verify client IP against bot's declared IP ranges ──────────
       // REINFORCED: block if ranges configured but IP is missing or out of range
       const ip = extractSourceIp(request);
-      const declaredRanges = agent.declared_ips ?? [];
+      const declaredRanges = bot.declared_ips ?? [];
 
       if (declaredRanges.length > 0) {
         if (!ip || !isIpInRanges(ip, declaredRanges)) {
           events.push({
             domain,
             request_url:           request.url,
-            user_agent_name:       agent.name,
+            user_agent_name:       bot.name,
             user_agent_raw:        ua,
             matched_catalog_id:    null,
             decision:              "denied_identity_check",
@@ -170,10 +170,10 @@ export function createLiquadHandler(
       const normalizedUrl = normalizeUrl(fullUrl) ?? fullUrl;
 
       // ── Step 4a: Check free catalog match (local, no I/O) ────────────────
-      // Agent is already resolved — call findBestCatalog directly with its
+      // Bot is already resolved — call findBestCatalog directly with its
       // catalog_ids instead of going through matchRequest which would
-      // redundantly re-resolve the agent from the list.
-      if (rules.catalogs.length > 0 && agent.catalog_ids.length > 0) {
+      // redundantly re-resolve the bot from the list.
+      if (rules.catalogs.length > 0 && bot.catalog_ids.length > 0) {
         let reqDomain: string;
         let reqPath: string;
         try {
@@ -187,7 +187,7 @@ export function createLiquadHandler(
 
         const freeCatalog = findBestCatalog(
           rules.catalogs,
-          agent.catalog_ids,
+          bot.catalog_ids,
           reqDomain,
           reqPath,
           0,
@@ -197,7 +197,7 @@ export function createLiquadHandler(
           events.push({
             domain,
             request_url:           normalizedUrl,
-            user_agent_name:       agent.name,
+            user_agent_name:       bot.name,
             user_agent_raw:        ua,
             matched_catalog_id:    freeCatalog.id,
             decision:              "granted",
@@ -215,13 +215,13 @@ export function createLiquadHandler(
 
       if (token) {
         // ── Step 5a: Verify HMAC token locally ────────────────────────────
-        const result = await verifyToken(token, normalizedUrl, agent.ua_pattern, rules.hmac_secret);
+        const result = await verifyToken(token, normalizedUrl, bot.ua_pattern, rules.hmac_secret);
 
         if (result.valid) {
           events.push({
             domain,
             request_url:           normalizedUrl,
-            user_agent_name:       agent.name,
+            user_agent_name:       bot.name,
             user_agent_raw:        ua,
             matched_catalog_id:    null,
             decision:              "authorized_paid",
@@ -237,7 +237,7 @@ export function createLiquadHandler(
         events.push({
           domain,
           request_url:           normalizedUrl,
-          user_agent_name:       agent.name,
+          user_agent_name:       bot.name,
           user_agent_raw:        ua,
           matched_catalog_id:    null,
           decision:              "denied_invalid_token",
@@ -259,7 +259,7 @@ export function createLiquadHandler(
       events.push({
         domain,
         request_url:           normalizedUrl,
-        user_agent_name:       agent.name,
+        user_agent_name:       bot.name,
         user_agent_raw:        ua,
         matched_catalog_id:    null,
         decision:              "denied_authorization_required",
@@ -297,7 +297,7 @@ export type {
 } from "./types";
 export type { CachedRules } from "./rules-cache";
 export type {
-  MatchableAgent,
+  MatchableBot,
   MatchableCatalog,
 } from "./matcher";
 export { matchUserAgent, findBestCatalog } from "./matcher";

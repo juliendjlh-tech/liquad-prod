@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Agent query module
+// Bot query module
 //
-// Centralizes queries for workspace_agents and catalog_agents junction
-// tables. Replaces duplicate inline queries across agent, catalog,
+// Centralizes queries for workspace_bots and catalog_bots junction
+// tables. Replaces duplicate inline queries across bot, catalog,
 // sdk-rules, and rag-query services.
 // ---------------------------------------------------------------------------
 
@@ -12,7 +12,7 @@ import { createServerClient } from "@/lib/db/supabase-server";
 // Types
 // ---------------------------------------------------------------------------
 
-export interface AgentRecord {
+export interface BotRecord {
   id: string;
   name: string;
   ua_pattern: string;
@@ -21,18 +21,24 @@ export interface AgentRecord {
   description: string | null;
   created_at: string | null;
   /**
-   * Aggregate of all wallet balances for this (workspace, agent).
-   * Optional: only populated by getWorkspaceAgents(). A single agent can host
-   * multiple wallets (see migration 025).
+   * Aggregate of all bot subscription balances for this (workspace, bot).
+   * Optional: only populated by getWorkspaceBots(). A single bot can host
+   * multiple bot subscriptions (see migration 025).
    */
   balance_eur?: number;
-  wallet_count?: number;
+  bot_subscription_count?: number;
+  /**
+   * Per-(workspace, bot) flag from workspace_bots.scope_to_workspace.
+   * Optional: only populated by getWorkspaceBots() and getBotById() when
+   * a workspace context is available. See migration 030.
+   */
+  scope_to_workspace?: boolean;
 }
 
-export interface CatalogAgentRecord {
+export interface CatalogBotRecord {
   catalog_id: string;
-  agent_id: string;
-  agent: {
+  bot_id: string;
+  bot: {
     id: string;
     name: string;
     ua_pattern: string;
@@ -47,37 +53,37 @@ export interface CatalogAgentRecord {
 // ---------------------------------------------------------------------------
 
 /**
- * Fetch a single agent by ID.
+ * Fetch a single bot by ID.
  */
-export async function getAgentById(
-  agentId: string
-): Promise<AgentRecord | null> {
+export async function getBotById(
+  botId: string
+): Promise<BotRecord | null> {
   const supabase = await createServerClient();
 
   const { data, error } = await supabase
-    .from("agents")
+    .from("bots")
     .select("id, name, ua_pattern, declared_ips, type, description, created_at")
-    .eq("id", agentId)
+    .eq("id", botId)
     .single();
 
   if (error) return null;
-  return data as AgentRecord;
+  return data as BotRecord;
 }
 
 /**
- * Check whether an agent is currently active for a workspace.
- * (row present in workspace_agents junction)
+ * Check whether a bot is currently active for a workspace.
+ * (row present in workspace_bots junction)
  */
-export async function isAgentActiveForWorkspace(
-  agentId: string,
+export async function isBotActiveForWorkspace(
+  botId: string,
   workspaceId: string
 ): Promise<boolean> {
   const supabase = await createServerClient();
 
   const { data } = await supabase
-    .from("workspace_agents")
-    .select("agent_id")
-    .eq("agent_id", agentId)
+    .from("workspace_bots")
+    .select("bot_id")
+    .eq("bot_id", botId)
     .eq("workspace_id", workspaceId)
     .maybeSingle();
 
@@ -85,84 +91,85 @@ export async function isAgentActiveForWorkspace(
 }
 
 /**
- * Fetch all agents active for a workspace via the workspace_agents junction.
- * balance_eur is the sum of every non-archived wallet the workspace holds on
- * that agent. wallet_count is the number of wallets contributing to that sum.
+ * Fetch all bots active for a workspace via the workspace_bots junction.
+ * balance_eur is the sum of every non-archived bot subscription the workspace holds on
+ * that bot. bot_subscription_count is the number of bot subscriptions contributing to that sum.
  */
-export async function getWorkspaceAgents(
+export async function getWorkspaceBots(
   workspaceId: string
-): Promise<AgentRecord[]> {
+): Promise<BotRecord[]> {
   const supabase = await createServerClient();
 
   const { data, error } = await supabase
-    .from("workspace_agents")
-    .select("agent_id, agents(id, name, ua_pattern, declared_ips, type, description, created_at)")
+    .from("workspace_bots")
+    .select("bot_id, scope_to_workspace, bots(id, name, ua_pattern, declared_ips, type, description, created_at)")
     .eq("workspace_id", workspaceId) as unknown as {
-      data: Array<{ agent_id: string; agents: AgentRecord }> | null;
+      data: Array<{ bot_id: string; scope_to_workspace: boolean; bots: BotRecord }> | null;
       error: { message: string } | null;
     };
 
   if (error) {
-    throw new Error(`Failed to fetch workspace agents: ${error.message}`);
+    throw new Error(`Failed to fetch workspace bots: ${error.message}`);
   }
 
   const rows = data ?? [];
-  const agentIds = rows.map((r) => r.agent_id);
+  const botIds = rows.map((r) => r.bot_id);
 
   const totals = new Map<string, { balance: number; count: number }>();
-  if (agentIds.length > 0) {
-    const { data: wallets } = await supabase
-      .from("wallets")
-      .select("agent_id, balance_eur")
+  if (botIds.length > 0) {
+    const { data: botSubscriptions } = await supabase
+      .from("bot_subscriptions")
+      .select("bot_id, balance_eur")
       .eq("workspace_id", workspaceId)
       .is("archived_at", null)
-      .in("agent_id", agentIds);
+      .in("bot_id", botIds);
 
-    for (const w of wallets ?? []) {
-      const prev = totals.get(w.agent_id) ?? { balance: 0, count: 0 };
+    for (const w of botSubscriptions ?? []) {
+      const prev = totals.get(w.bot_id) ?? { balance: 0, count: 0 };
       prev.balance += Number(w.balance_eur);
       prev.count += 1;
-      totals.set(w.agent_id, prev);
+      totals.set(w.bot_id, prev);
     }
   }
 
   return rows.map((row) => {
-    const t = totals.get(row.agent_id) ?? { balance: 0, count: 0 };
+    const t = totals.get(row.bot_id) ?? { balance: 0, count: 0 };
     return {
-      ...row.agents,
+      ...row.bots,
       balance_eur: t.balance,
-      wallet_count: t.count,
+      bot_subscription_count: t.count,
+      scope_to_workspace: row.scope_to_workspace,
     };
   });
 }
 
 /**
- * Fetch all catalog_agents links for a set of catalog IDs,
- * joining agent details in a single query.
+ * Fetch all catalog_bots links for a set of catalog IDs,
+ * joining bot details in a single query.
  *
- * Returns one row per catalog–agent link with the full agent record.
+ * Returns one row per catalog–bot link with the full bot record.
  */
-export async function getCatalogAgents(
+export async function getCatalogBots(
   catalogIds: string[]
-): Promise<CatalogAgentRecord[]> {
+): Promise<CatalogBotRecord[]> {
   if (catalogIds.length === 0) return [];
 
   const supabase = await createServerClient();
 
   const { data, error } = await supabase
-    .from("catalog_agents")
-    .select("catalog_id, agent_id, agents(id, name, ua_pattern, declared_ips, type, description)")
+    .from("catalog_bots")
+    .select("catalog_id, bot_id, bots(id, name, ua_pattern, declared_ips, type, description)")
     .in("catalog_id", catalogIds);
 
   if (error) {
-    throw new Error(`Failed to fetch catalog agents: ${error.message}`);
+    throw new Error(`Failed to fetch catalog bots: ${error.message}`);
   }
 
   return (data ?? []).map(
-    (row: { catalog_id: string; agent_id: string; agents: CatalogAgentRecord["agent"] }) => ({
+    (row: { catalog_id: string; bot_id: string; bots: CatalogBotRecord["bot"] }) => ({
       catalog_id: row.catalog_id,
-      agent_id: row.agent_id,
-      agent: row.agents,
+      bot_id: row.bot_id,
+      bot: row.bots,
     })
   );
 }

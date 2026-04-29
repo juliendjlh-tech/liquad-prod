@@ -144,7 +144,7 @@ const VALUE_PROPS = {
 const API_PREVIEW = {
   eyebrow: "Developer experience",
   headline: "Clean API. Predictable responses.",
-  request: `POST /api/consumer/authorize
+  request: `POST /api/consumer/v1/licenses
 Authorization: Bearer YOUR_API_KEY
 Content-Type: application/json
 
@@ -157,7 +157,7 @@ Content-Type: application/json
   "max_price_eur": 0.50
 }
 
-# Bot identity is derived from your API key — no agent_id needed.
+# Bot identity is derived from your API key — no bot_id needed.
 # max_price_eur is optional: skip URLs that exceed your ceiling.`,
   response: `{
   "results": [

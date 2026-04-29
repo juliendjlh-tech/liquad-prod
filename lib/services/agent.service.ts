@@ -1,11 +1,11 @@
 import { createServerClient } from "@/lib/db/supabase-server";
-import { getWorkspaceAgents as queryWorkspaceAgents } from "@/lib/db/queries/agents";
+import { getWorkspaceBots as queryWorkspaceBots } from "@/lib/db/queries/agents";
 
 // ---------------------------------------------------------------------------
 // AI Bot Presets
 // ---------------------------------------------------------------------------
 // Each preset represents a well-known AI bot. These are seeded into the
-// global agents table by migration 018 and typed as 'preset' by migration 027.
+// global bots table by migration 018 and typed as 'preset' by migration 027.
 // The list here is used to enrich the presets API with the operator field
 // (display-only, not stored in DB).
 
@@ -218,7 +218,7 @@ const PRESET_OPERATOR_MAP = new Map(
 // Types
 // ---------------------------------------------------------------------------
 
-export interface AgentRow {
+export interface BotRow {
   id: string;
   name: string;
   ua_pattern: string;
@@ -226,121 +226,148 @@ export interface AgentRow {
   type: 'preset' | 'custom';
   description?: string | null;
   created_at: string | null;
-  /** Sum of wallet balances for this workspace/agent (populated by getWorkspaceAgents). */
+  /** Sum of bot subscription balances for this workspace/bot (populated by getWorkspaceBots). */
   balance_eur?: number;
-  /** Number of non-archived wallets on this workspace/agent. */
-  wallet_count?: number;
+  /** Number of non-archived bot subscriptions on this workspace/bot. */
+  bot_subscription_count?: number;
+  /**
+   * Per-(workspace, bot) policy from workspace_bots.scope_to_workspace.
+   * When true, /api/consumer/v1/{licenses,sources,catalogs} only return
+   * catalogs owned by the workspace this bot is in. See migration 030.
+   * Populated by getWorkspaceBots() and getBotById(botId, workspaceId).
+   */
+  scope_to_workspace?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // CRUD Functions
 // ---------------------------------------------------------------------------
 
-const AGENT_SELECT_COLUMNS = "id, name, ua_pattern, declared_ips, type, description, created_at";
+const BOT_SELECT_COLUMNS = "id, name, ua_pattern, declared_ips, type, description, created_at";
 
 /**
- * List all agents active for a workspace (via workspace_agents junction).
+ * List all bots active for a workspace (via workspace_bots junction).
  */
-export async function getWorkspaceAgents(
+export async function getWorkspaceBots(
   workspaceId: string
-): Promise<AgentRow[]> {
-  return queryWorkspaceAgents(workspaceId) as Promise<AgentRow[]>;
+): Promise<BotRow[]> {
+  return queryWorkspaceBots(workspaceId) as Promise<BotRow[]>;
 }
 
 /**
- * Get all preset agents from DB, enriched with operator from the in-memory list.
+ * Get all preset bots from DB, enriched with operator from the in-memory list.
  */
-export async function getPresetAgents(): Promise<Array<AgentRow & { operator?: string }>> {
+export async function getPresetBots(): Promise<Array<BotRow & { operator?: string }>> {
   const supabase = await createServerClient();
 
   const { data, error } = await supabase
-    .from("agents")
-    .select(AGENT_SELECT_COLUMNS)
+    .from("bots")
+    .select(BOT_SELECT_COLUMNS)
     .eq("type", "preset")
     .order("name");
 
-  if (error) throw new Error(`Failed to fetch preset agents: ${error.message}`);
+  if (error) throw new Error(`Failed to fetch preset bots: ${error.message}`);
 
   return (data ?? []).map((row) => ({
-    ...(row as AgentRow),
+    ...(row as BotRow),
     operator: PRESET_OPERATOR_MAP.get(row.name),
   }));
 }
 
 /**
- * Get a single agent by ID.
+ * Get a single bot by ID.
+ *
+ * If `workspaceId` is provided, the response also includes
+ * `scope_to_workspace` resolved from workspace_bots(workspace_id, bot_id).
  */
-export async function getAgentById(
-  agentId: string
-): Promise<AgentRow | null> {
+export async function getBotById(
+  botId: string,
+  workspaceId?: string
+): Promise<BotRow | null> {
   const supabase = await createServerClient();
 
   const { data, error } = await supabase
-    .from("agents")
-    .select(AGENT_SELECT_COLUMNS)
-    .eq("id", agentId)
+    .from("bots")
+    .select(BOT_SELECT_COLUMNS)
+    .eq("id", botId)
     .single();
 
   if (error || !data) return null;
-  return data as AgentRow;
+
+  const bot = data as BotRow;
+
+  if (workspaceId) {
+    const { data: link } = await supabase
+      .from("workspace_bots")
+      .select("scope_to_workspace")
+      .eq("workspace_id", workspaceId)
+      .eq("bot_id", botId)
+      .maybeSingle();
+
+    if (link) {
+      bot.scope_to_workspace = link.scope_to_workspace;
+    }
+  }
+
+  return bot;
 }
 
 /**
  * Subscribe a workspace to a preset bot.
- * The preset must already exist in the agents table (type = 'preset').
+ * The preset must already exist in the bots table (type = 'preset').
  */
 export async function subscribeToPreset(
   workspaceId: string,
   name: string
-): Promise<AgentRow> {
+): Promise<BotRow> {
   const supabase = await createServerClient();
 
-  const { data: agent } = await supabase
-    .from("agents")
-    .select(AGENT_SELECT_COLUMNS)
+  const { data: bot } = await supabase
+    .from("bots")
+    .select(BOT_SELECT_COLUMNS)
     .eq("name", name)
     .single();
 
-  if (!agent) throw new Error("PRESET_NOT_FOUND");
-  if ((agent as AgentRow).type !== "preset") throw new Error("NOT_A_PRESET");
+  if (!bot) throw new Error("PRESET_NOT_FOUND");
+  if ((bot as BotRow).type !== "preset") throw new Error("NOT_A_PRESET");
 
   const { error: linkError } = await supabase
-    .from("workspace_agents")
-    .insert({ workspace_id: workspaceId, agent_id: agent.id });
+    .from("workspace_bots")
+    .insert({ workspace_id: workspaceId, bot_id: bot.id });
 
   if (linkError) {
     if (linkError.code === "23505") throw new Error("ALREADY_IN_WORKSPACE");
     throw new Error(`Failed to subscribe to preset: ${linkError.message}`);
   }
 
-  return agent as AgentRow;
+  return bot as BotRow;
 }
 
 /**
  * Create a custom bot and link it to the workspace.
  * Custom bots are owned by exactly one workspace: they are deleted when
- * the workspace unsubscribes (removeAgentFromWorkspace).
+ * the workspace unsubscribes (removeBotFromWorkspace).
  */
-export async function createCustomAgent(
+export async function createCustomBot(
   workspaceId: string,
   data: { name: string; ua_pattern: string; description?: string; declared_ips: string[] }
-): Promise<AgentRow> {
+): Promise<BotRow> {
   const supabase = await createServerClient();
 
   // Check name is not already taken
   const { data: existing } = await supabase
-    .from("agents")
+    .from("bots")
     .select("id, type")
     .eq("name", data.name)
     .maybeSingle();
 
   if (existing) {
     if ((existing as { type: string }).type === "preset") throw new Error("NAME_CONFLICT_WITH_PRESET");
-    throw new Error("CUSTOM_AGENT_ALREADY_EXISTS");
+    throw new Error("CUSTOM_BOT_ALREADY_EXISTS");
   }
 
   const { data: created, error } = await supabase
-    .from("agents")
+    .from("bots")
     .insert({
       name: data.name,
       ua_pattern: data.ua_pattern,
@@ -348,60 +375,60 @@ export async function createCustomAgent(
       declared_ips: data.declared_ips,
       type: "custom",
     })
-    .select(AGENT_SELECT_COLUMNS)
+    .select(BOT_SELECT_COLUMNS)
     .single();
 
-  if (error || !created) throw new Error(`Failed to create agent: ${error?.message}`);
+  if (error || !created) throw new Error(`Failed to create bot: ${error?.message}`);
 
   const { error: linkError } = await supabase
-    .from("workspace_agents")
-    .insert({ workspace_id: workspaceId, agent_id: created.id });
+    .from("workspace_bots")
+    .insert({ workspace_id: workspaceId, bot_id: created.id });
 
   if (linkError) {
-    // Rollback agent creation to avoid orphans
-    await supabase.from("agents").delete().eq("id", created.id);
-    throw new Error(`Failed to link agent to workspace: ${linkError.message}`);
+    // Rollback bot creation to avoid orphans
+    await supabase.from("bots").delete().eq("id", created.id);
+    throw new Error(`Failed to link bot to workspace: ${linkError.message}`);
   }
 
-  return created as AgentRow;
+  return created as BotRow;
 }
 
 /**
- * Remove an agent from a workspace (unsubscribe).
- * For custom agents, also deletes the global agent record (and all associated
+ * Remove a bot from a workspace (unsubscribe).
+ * For custom bots, also deletes the global bot record (and all associated
  * data via DB cascade) since custom bots are owned by exactly one workspace.
  */
-export async function removeAgentFromWorkspace(
+export async function removeBotFromWorkspace(
   workspaceId: string,
-  agentId: string
+  botId: string
 ): Promise<{ removed: boolean; catalogCount: number }> {
   const supabase = await createServerClient();
 
-  // Check the link exists and get agent type
+  // Check the link exists and get bot type
   const { data: link } = await supabase
-    .from("workspace_agents")
-    .select("agent_id")
+    .from("workspace_bots")
+    .select("bot_id")
     .eq("workspace_id", workspaceId)
-    .eq("agent_id", agentId)
+    .eq("bot_id", botId)
     .single();
 
   if (!link) return { removed: false, catalogCount: 0 };
 
-  const { data: agent } = await supabase
-    .from("agents")
+  const { data: bot } = await supabase
+    .from("bots")
     .select("id, type")
-    .eq("id", agentId)
+    .eq("id", botId)
     .single();
 
   // Count linked catalogs before removal
   const { count } = await supabase
-    .from("catalog_agents")
+    .from("catalog_bots")
     .select("catalog_id", { count: "exact", head: true })
-    .eq("agent_id", agentId);
+    .eq("bot_id", botId);
 
   const catalogCount = count ?? 0;
 
-  // Remove catalog links for this agent in this workspace's catalogs
+  // Remove catalog links for this bot in this workspace's catalogs
   if (catalogCount > 0) {
     const { data: workspaceCatalogs } = await supabase
       .from("catalogs")
@@ -411,64 +438,64 @@ export async function removeAgentFromWorkspace(
     const catalogIds = (workspaceCatalogs ?? []).map((c: { id: string }) => c.id);
     if (catalogIds.length > 0) {
       await supabase
-        .from("catalog_agents")
+        .from("catalog_bots")
         .delete()
-        .eq("agent_id", agentId)
+        .eq("bot_id", botId)
         .in("catalog_id", catalogIds);
     }
   }
 
-  if (agent && (agent as { type: string }).type === "custom") {
-    // Deleting the agents row cascades to workspace_agents, wallets, api_keys
+  if (bot && (bot as { type: string }).type === "custom") {
+    // Deleting the bots row cascades to workspace_bots, bot_subscriptions, api_keys
     const { error } = await supabase
-      .from("agents")
+      .from("bots")
       .delete()
-      .eq("id", agentId);
+      .eq("id", botId);
 
-    if (error) throw new Error(`Failed to delete custom agent: ${error.message}`);
+    if (error) throw new Error(`Failed to delete custom bot: ${error.message}`);
   } else {
     // Preset: only remove the workspace subscription
     const { error } = await supabase
-      .from("workspace_agents")
+      .from("workspace_bots")
       .delete()
       .eq("workspace_id", workspaceId)
-      .eq("agent_id", agentId);
+      .eq("bot_id", botId);
 
-    if (error) throw new Error(`Failed to remove agent from workspace: ${error.message}`);
+    if (error) throw new Error(`Failed to remove bot from workspace: ${error.message}`);
   }
 
   return { removed: true, catalogCount };
 }
 
 /**
- * Update a custom agent's properties.
+ * Update a custom bot's properties.
  * Presets cannot be edited by clients (pass callerWorkspaceId = null for admin).
  */
-export async function updateAgent(
-  agentId: string,
+export async function updateBot(
+  botId: string,
   data: { name?: string; ua_pattern?: string; description?: string; declared_ips?: string[] },
   callerWorkspaceId: string | null
-): Promise<AgentRow | null> {
+): Promise<BotRow | null> {
   const supabase = await createServerClient();
 
-  // Fetch agent to check type and verify caller has access
-  const { data: agent } = await supabase
-    .from("agents")
+  // Fetch bot to check type and verify caller has access
+  const { data: bot } = await supabase
+    .from("bots")
     .select("id, type")
-    .eq("id", agentId)
+    .eq("id", botId)
     .single();
 
-  if (!agent) return null;
+  if (!bot) return null;
 
-  if ((agent as { type: string }).type === "preset") {
+  if ((bot as { type: string }).type === "preset") {
     if (callerWorkspaceId !== null) throw new Error("PRESET_IMMUTABLE");
   } else {
-    // Custom bot: verify the caller's workspace owns it (has it in workspace_agents)
+    // Custom bot: verify the caller's workspace owns it (has it in workspace_bots)
     if (callerWorkspaceId !== null) {
       const { data: link } = await supabase
-        .from("workspace_agents")
-        .select("agent_id")
-        .eq("agent_id", agentId)
+        .from("workspace_bots")
+        .select("bot_id")
+        .eq("bot_id", botId)
         .eq("workspace_id", callerWorkspaceId)
         .maybeSingle();
 
@@ -477,36 +504,65 @@ export async function updateAgent(
   }
 
   const { data: updated, error } = await supabase
-    .from("agents")
+    .from("bots")
     .update(data)
-    .eq("id", agentId)
-    .select(AGENT_SELECT_COLUMNS)
+    .eq("id", botId)
+    .select(BOT_SELECT_COLUMNS)
     .single();
 
   if (error || !updated) return null;
-  return updated as AgentRow;
+  return updated as BotRow;
 }
 
 /**
- * Remove all catalog_agents entries for a given agent.
+ * Toggle workspace_bots.scope_to_workspace for a given (workspace, bot).
+ *
+ * When true, /api/consumer/v1/{licenses,sources,catalogs} will only surface catalogs
+ * owned by `workspaceId` to keys bound to this bot. Used by publishers
+ * managing partner keys (Mode B).
+ *
+ * Returns the new value, or null if the workspace_bots row doesn't exist.
  */
-export async function removeCatalogEntriesForAgent(
-  agentId: string
+export async function setBotScopeToWorkspace(
+  workspaceId: string,
+  botId: string,
+  scopeToWorkspace: boolean
+): Promise<boolean | null> {
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("workspace_bots")
+    .update({ scope_to_workspace: scopeToWorkspace })
+    .eq("workspace_id", workspaceId)
+    .eq("bot_id", botId)
+    .select("scope_to_workspace")
+    .maybeSingle();
+
+  if (error) throw new Error(`Failed to update scope_to_workspace: ${error.message}`);
+  if (!data) return null;
+  return data.scope_to_workspace;
+}
+
+/**
+ * Remove all catalog_bots entries for a given bot.
+ */
+export async function removeCatalogEntriesForBot(
+  botId: string
 ): Promise<number> {
   const supabase = await createServerClient();
 
   const { count } = await supabase
-    .from("catalog_agents")
+    .from("catalog_bots")
     .select("catalog_id", { count: "exact", head: true })
-    .eq("agent_id", agentId);
+    .eq("bot_id", botId);
 
   const catalogCount = count ?? 0;
   if (catalogCount === 0) return 0;
 
   const { error } = await supabase
-    .from("catalog_agents")
+    .from("catalog_bots")
     .delete()
-    .eq("agent_id", agentId);
+    .eq("bot_id", botId);
 
   if (error) throw new Error(`Failed to remove catalog entries: ${error.message}`);
 

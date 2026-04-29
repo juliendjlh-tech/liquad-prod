@@ -104,18 +104,18 @@ function matchFilterRules(requestDomain, requestPath, filterRules) {
   }
   return false;
 }
-function matchUserAgent(userAgentString, agents) {
+function matchUserAgent(userAgentString, bots) {
   if (!userAgentString) return null;
   const uaLower = userAgentString.toLowerCase();
-  for (const agent of agents) {
-    if (uaLower.includes(agent.ua_pattern.toLowerCase())) {
-      return agent;
+  for (const bot of bots) {
+    if (uaLower.includes(bot.ua_pattern.toLowerCase())) {
+      return bot;
     }
   }
   return null;
 }
-function findBestCatalog(catalogs, agentCatalogIds, domain, requestPath, maxPrice) {
-  const allowedIds = new Set(agentCatalogIds);
+function findBestCatalog(catalogs, botCatalogIds, domain, requestPath, maxPrice) {
+  const allowedIds = new Set(botCatalogIds);
   const matching = catalogs.filter(
     (catalog) => allowedIds.has(catalog.id) && (maxPrice === void 0 || catalog.price_eur <= maxPrice) && matchFilterRules(domain, requestPath, catalog.filter_rules)
   ).sort((a, b) => a.price_eur - b.price_eur);
@@ -332,21 +332,21 @@ function createLiquadHandler(config) {
         return { blocked: false };
       }
       const ua = request.headers.get("user-agent") ?? "";
-      const agent = matchUserAgent(ua, rules.agents);
-      if (!agent) {
+      const bot = matchUserAgent(ua, rules.bots);
+      if (!bot) {
         return { blocked: false };
       }
       const timestamp = (/* @__PURE__ */ new Date()).toISOString();
       const host = request.headers.get("host") ?? "";
       const domain = host.replace(/:\d+$/, "");
       const ip = extractSourceIp(request);
-      const declaredRanges = agent.declared_ips ?? [];
+      const declaredRanges = bot.declared_ips ?? [];
       if (declaredRanges.length > 0) {
         if (!ip || !isIpInRanges(ip, declaredRanges)) {
           events.push({
             domain,
             request_url: request.url,
-            user_agent_name: agent.name,
+            user_agent_name: bot.name,
             user_agent_raw: ua,
             matched_catalog_id: null,
             decision: "denied_identity_check",
@@ -367,7 +367,7 @@ function createLiquadHandler(config) {
       }
       const fullUrl = request.url.startsWith("http") ? request.url : `https://${domain}${request.url}`;
       const normalizedUrl = normalizeUrl(fullUrl) ?? fullUrl;
-      if (rules.catalogs.length > 0 && agent.catalog_ids.length > 0) {
+      if (rules.catalogs.length > 0 && bot.catalog_ids.length > 0) {
         let reqDomain;
         let reqPath;
         try {
@@ -380,7 +380,7 @@ function createLiquadHandler(config) {
         }
         const freeCatalog = findBestCatalog(
           rules.catalogs,
-          agent.catalog_ids,
+          bot.catalog_ids,
           reqDomain,
           reqPath,
           0
@@ -389,7 +389,7 @@ function createLiquadHandler(config) {
           events.push({
             domain,
             request_url: normalizedUrl,
-            user_agent_name: agent.name,
+            user_agent_name: bot.name,
             user_agent_raw: ua,
             matched_catalog_id: freeCatalog.id,
             decision: "granted",
@@ -403,12 +403,12 @@ function createLiquadHandler(config) {
       }
       const token = extractToken(request);
       if (token) {
-        const result = await verifyToken(token, normalizedUrl, agent.ua_pattern, rules.hmac_secret);
+        const result = await verifyToken(token, normalizedUrl, bot.ua_pattern, rules.hmac_secret);
         if (result.valid) {
           events.push({
             domain,
             request_url: normalizedUrl,
-            user_agent_name: agent.name,
+            user_agent_name: bot.name,
             user_agent_raw: ua,
             matched_catalog_id: null,
             decision: "authorized_paid",
@@ -422,7 +422,7 @@ function createLiquadHandler(config) {
         events.push({
           domain,
           request_url: normalizedUrl,
-          user_agent_name: agent.name,
+          user_agent_name: bot.name,
           user_agent_raw: ua,
           matched_catalog_id: null,
           decision: "denied_invalid_token",
@@ -441,7 +441,7 @@ function createLiquadHandler(config) {
       events.push({
         domain,
         request_url: normalizedUrl,
-        user_agent_name: agent.name,
+        user_agent_name: bot.name,
         user_agent_raw: ua,
         matched_catalog_id: null,
         decision: "denied_authorization_required",

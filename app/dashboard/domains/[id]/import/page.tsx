@@ -123,7 +123,7 @@ export default function ImportDomainPage() {
           body.path_rules = validRules;
           body.path_logic = logic;
         }
-        const res = await fetch("/api/contents/import/preview", {
+        const res = await fetch("/api/contents/index/preview", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -197,7 +197,7 @@ export default function ImportDomainPage() {
       stopPolling();
       pollRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`/api/contents/import/${jobId}`, {
+          const res = await fetch(`/api/contents/index/${jobId}`, {
             headers: { "x-workspace-id": workspaceId },
           });
           if (!res.ok) return;
@@ -255,7 +255,7 @@ export default function ImportDomainPage() {
       }
       body.max_pages = maxPages;
 
-      const res = await fetch("/api/contents/import", {
+      const res = await fetch("/api/contents/index", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

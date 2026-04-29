@@ -17,8 +17,8 @@ interface CatalogFilterRules {
   domain_rules: DomainRule[];
 }
 
-/** Minimal agent shape needed for matching and gateway decisions */
-export interface MatchableAgent {
+/** Minimal bot shape needed for matching and gateway decisions */
+export interface MatchableBot {
   id: string;
   name: string;
   ua_pattern: string;
@@ -84,15 +84,15 @@ function matchFilterRules(
 
 export function matchUserAgent(
   userAgentString: string,
-  agents: MatchableAgent[]
-): MatchableAgent | null {
+  bots: MatchableBot[]
+): MatchableBot | null {
   if (!userAgentString) return null;
 
   const uaLower = userAgentString.toLowerCase();
 
-  for (const agent of agents) {
-    if (uaLower.includes(agent.ua_pattern.toLowerCase())) {
-      return agent;
+  for (const bot of bots) {
+    if (uaLower.includes(bot.ua_pattern.toLowerCase())) {
+      return bot;
     }
   }
 
@@ -100,18 +100,18 @@ export function matchUserAgent(
 }
 
 /**
- * Find the best matching catalog for an agent on a given domain/path.
- * Filters by agent's catalog_ids, filter rules, and maxPrice.
+ * Find the best matching catalog for a bot on a given domain/path.
+ * Filters by bot's catalog_ids, filter rules, and maxPrice.
  * Returns the catalog with the lowest price_eur, or null if none match.
  */
 export function findBestCatalog(
   catalogs: MatchableCatalog[],
-  agentCatalogIds: string[],
+  botCatalogIds: string[],
   domain: string,
   requestPath: string,
   maxPrice?: number
 ): MatchableCatalog | null {
-  const allowedIds = new Set(agentCatalogIds);
+  const allowedIds = new Set(botCatalogIds);
 
   const matching = catalogs
     .filter(
@@ -124,4 +124,3 @@ export function findBestCatalog(
 
   return matching[0] ?? null;
 }
-

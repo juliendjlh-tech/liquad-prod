@@ -86,21 +86,21 @@ export async function getCatalogs(
 }
 
 /**
- * Fetch catalog_sources links for a set of source IDs.
- * Reverse lookup: given sources, find which catalogs they belong to.
+ * Fetch catalog_sources links for a set of indexed source IDs.
+ * Reverse lookup: given indexed sources, find which catalogs they belong to.
  */
 export async function getCatalogIdsBySourceIds(
-  sourceIds: string[]
-): Promise<Array<{ catalog_id: string; source_id: string }>> {
-  if (sourceIds.length === 0) return [];
+  indexedSourceIds: string[]
+): Promise<Array<{ catalog_id: string; indexed_source_id: string }>> {
+  if (indexedSourceIds.length === 0) return [];
 
   const supabase = await createServerClient();
   const { data, error } = await supabase
     .from("catalog_sources")
-    .select("catalog_id, source_id")
-    .in("source_id", sourceIds);
+    .select("catalog_id, indexed_source_id")
+    .in("indexed_source_id", indexedSourceIds);
 
-  if (error) throw new Error(`Failed to fetch catalog sources by source IDs: ${error.message}`);
+  if (error) throw new Error(`Failed to fetch catalog sources by indexed source IDs: ${error.message}`);
   return data ?? [];
 }
 
@@ -111,17 +111,17 @@ export async function getCatalogIdsBySourceIds(
  */
 export async function getCatalogSources(
   catalogIds: string[]
-): Promise<Array<{ catalog_id: string; source_id: string }>> {
+): Promise<Array<{ catalog_id: string; indexed_source_id: string }>> {
   if (catalogIds.length === 0) return [];
 
   const supabase = await createServerClient();
-  const rows: Array<{ catalog_id: string; source_id: string }> = [];
+  const rows: Array<{ catalog_id: string; indexed_source_id: string }> = [];
   let from = 0;
 
   while (true) {
     const { data, error } = await supabase
       .from("catalog_sources")
-      .select("catalog_id, source_id")
+      .select("catalog_id, indexed_source_id")
       .in("catalog_id", catalogIds)
       .range(from, from + PAGE_SIZE - 1);
 

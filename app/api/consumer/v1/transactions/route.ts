@@ -3,7 +3,7 @@ import { authenticateConsumerKey } from "@/lib/services/auth.service";
 import { createServerClient } from "@/lib/db/supabase-server";
 
 /**
- * GET /api/consumer/transactions
+ * GET /api/consumer/v1/transactions
  *
  * Returns paginated transaction history for the authenticated workspace.
  * Cursor-based pagination using base64url-encoded created_at|id.
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .select(
         "id, type, amount_eur, content_url, publisher_workspace_id, created_at"
       )
-      .eq("wallet_id", authResult.walletId)
+      .eq("bot_subscription_id", authResult.botSubscriptionId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(limitParam + 1);

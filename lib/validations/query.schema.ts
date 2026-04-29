@@ -17,9 +17,9 @@ export const querySchema = z
     // The natural language query to search for
     query: z.string().min(1, "query is required").max(2000),
 
-    // UUID of the agent (bot) performing the query — used for authorization,
+    // UUID of the bot performing the query — used for authorization,
     // cache lookup, grant creation, and token signing
-    agent_id: z.string().uuid(),
+    bot_id: z.string().uuid(),
 
     // Reference a saved SearchConfig (optional)
     search_config_id: z.string().uuid().optional(),

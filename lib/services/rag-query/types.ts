@@ -97,7 +97,7 @@ export type AuthorizeResult = AuthorizeSuccess | AuthorizeFailure;
 
 export interface VectorSearchRow {
   chunk_id: string;
-  source_id: string;
+  indexed_source_id: string;
   source_url: string;
   catalog_id: string;
   catalog_name: string;
@@ -129,8 +129,8 @@ export interface RagQueryContext {
   /** API key ID used for this request (set by authenticate step) */
   apiKeyId?: string;
 
-  /** Resolved agent info (set by match-agents step) */
-  agentId?: string;
+  /** Resolved bot info (set by match-agents step) */
+  botId?: string;
   uaPattern?: string;
 
   /** Resolved catalog IDs after merging inline + search_config (set by resolve-params) */

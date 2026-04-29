@@ -71,9 +71,9 @@ export async function GET(
       return NextResponse.json({ error: "Not found" }, { status: 404 });
     }
 
-    // Fetch the latest import job for this domain to get indexing status.
+    // Fetch the latest indexing job for this domain to get indexing status.
     const { data: latestJob } = await supabase
-      .from("import_jobs")
+      .from("indexing_jobs")
       .select(
         "id, scrape_status, scrape_processed_pages, scrape_error_message, urls_to_index, updated_at"
       )
@@ -92,7 +92,7 @@ export async function GET(
       const { count } = await supabase
         .from("chunks")
         .select("id", { count: "exact", head: true })
-        .eq("import_job_id", latestJob.id)
+        .eq("indexing_job_id", latestJob.id)
         .not("embedding", "is", null);
       scrapeChunkCount = count ?? 0;
     }

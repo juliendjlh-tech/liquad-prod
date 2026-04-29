@@ -8,9 +8,9 @@
 import { createServerClient } from "@/lib/db/supabase-server";
 import { getWorkspaceDomains, getDomainMap } from "@/lib/db/queries/domains";
 import { getWorkspaceSecret } from "@/lib/db/queries/workspaces";
-import { getWorkspaceAgents, getCatalogAgents } from "@/lib/db/queries/agents";
+import { getWorkspaceBots, getCatalogBots } from "@/lib/db/queries/agents";
 import { getCatalogs } from "@/lib/db/queries/catalogs";
-import type { MatchableAgent, MatchableCatalog } from "@liquad/sdk/matcher";
+import type { MatchableBot, MatchableCatalog } from "@liquad/sdk/matcher";
 import type { SdkEventInput } from "@/lib/validations/sdk-event.schema";
 import { sdkEventSchema } from "@/lib/validations/sdk-event.schema";
 
@@ -18,7 +18,7 @@ import { sdkEventSchema } from "@/lib/validations/sdk-event.schema";
 // Types — Gateway
 // ---------------------------------------------------------------------------
 
-export interface GatewayAgent {
+export interface GatewayBot {
   id: string;
   name: string;
   ua_pattern: string;
@@ -43,7 +43,7 @@ export interface GatewayRules {
   workspace_id: string;
   hmac_secret: string;
   verified_domains: string[];
-  agents: GatewayAgent[];
+  bots: GatewayBot[];
   catalogs: GatewayCatalog[];
 }
 
@@ -62,33 +62,33 @@ export interface IngestResult {
 
 /**
  * Fetch and assemble the data needed for the SDK gateway:
- * agents with their catalog_ids, and free catalogs with resolved filter_rules.
+ * bots with their catalog_ids, and free catalogs with resolved filter_rules.
  */
 async function getPublisherMatchData(
   workspaceId: string
-): Promise<{ hmacSecret: string; agents: MatchableAgent[]; catalogs: MatchableCatalog[] }> {
-  const [hmacSecret, agents, rawCatalogs, domainIdToHostname] =
+): Promise<{ hmacSecret: string; bots: MatchableBot[]; catalogs: MatchableCatalog[] }> {
+  const [hmacSecret, bots, rawCatalogs, domainIdToHostname] =
     await Promise.all([
       getWorkspaceSecret(workspaceId),
-      getWorkspaceAgents(workspaceId),
+      getWorkspaceBots(workspaceId),
       getCatalogs([], { workspaceId, status: "active", maxPriceEur: 0 }),
       getDomainMap(workspaceId),
     ]);
 
-  // Build agent → catalog_ids map (sorted by price ASC)
+  // Build bot → catalog_ids map (sorted by price ASC)
   const catalogIds = rawCatalogs.map((c) => c.id);
-  const links = await getCatalogAgents(catalogIds);
+  const links = await getCatalogBots(catalogIds);
 
   const catalogPriceMap = new Map(rawCatalogs.map((c) => [c.id, c.price_eur]));
-  const agentToCatalogIds = new Map<string, string[]>();
+  const botToCatalogIds = new Map<string, string[]>();
 
   for (const link of links) {
-    const ids = agentToCatalogIds.get(link.agent_id) ?? [];
+    const ids = botToCatalogIds.get(link.bot_id) ?? [];
     ids.push(link.catalog_id);
-    agentToCatalogIds.set(link.agent_id, ids);
+    botToCatalogIds.set(link.bot_id, ids);
   }
 
-  for (const [, ids] of agentToCatalogIds) {
+  for (const [, ids] of botToCatalogIds) {
     ids.sort(
       (a, b) => (catalogPriceMap.get(a) ?? 0) - (catalogPriceMap.get(b) ?? 0)
     );
@@ -127,16 +127,16 @@ async function getPublisherMatchData(
     };
   });
 
-  // Build MatchableAgent[]
-  const matchableAgents: MatchableAgent[] = agents.map((a) => ({
+  // Build MatchableBot[]
+  const matchableBots: MatchableBot[] = bots.map((a) => ({
     id: a.id,
     name: a.name,
     ua_pattern: a.ua_pattern,
     declared_ips: (a.declared_ips as string[]) ?? [],
-    catalog_ids: agentToCatalogIds.get(a.id) ?? [],
+    catalog_ids: botToCatalogIds.get(a.id) ?? [],
   }));
 
-  return { hmacSecret, agents: matchableAgents, catalogs };
+  return { hmacSecret, bots: matchableBots, catalogs };
 }
 
 /**
@@ -155,7 +155,7 @@ export async function getGatewayRules(
     workspace_id: workspaceId,
     hmac_secret: publisherData.hmacSecret,
     verified_domains: verifiedDomains,
-    agents: publisherData.agents,
+    bots: publisherData.bots,
     catalogs: publisherData.catalogs,
   };
 }

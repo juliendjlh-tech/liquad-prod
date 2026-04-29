@@ -4,7 +4,7 @@
 // Uses the consolidated authorize_and_debit_batch RPC which handles:
 //   - Cache check (existing grant = free reuse)
 //   - Balance verification + atomic debit
-//   - Grant creation with agent_id + ua_pattern
+//   - Grant creation with bot_id + ua_pattern
 // ---------------------------------------------------------------------------
 
 import type { Json } from "@/lib/db/types";
@@ -14,12 +14,12 @@ import type { PipelineStep, AuthorizeResult } from "../types";
  * Verify balance, debit atomically, and create grants for each result.
  *
  * Builds the debits array from accumulated results (post-filtering),
- * including agent_id, ua_pattern, and ttl_minutes from the matched catalog.
+ * including bot_id, ua_pattern, and ttl_minutes from the matched catalog.
  *
  * On success, stores grants and new balance for the log-and-return step.
  */
 export const debit: PipelineStep = async (ctx) => {
-  const { supabase, apiKeyId, accumulated, agentId, uaPattern, catalogs } = ctx;
+  const { supabase, apiKeyId, accumulated, botId, uaPattern, catalogs } = ctx;
 
   // Build catalog lookup for ttl_minutes
   const catalogTtl = new Map(
@@ -29,7 +29,7 @@ export const debit: PipelineStep = async (ctx) => {
   const debits = accumulated!.map((r) => ({
     publisher_workspace_id: r.publisher_workspace_id,
     catalog_id: r.catalog_id,
-    agent_id: agentId!,
+    bot_id: botId!,
     ua_pattern: uaPattern!,
     url: r.source_url,
     price_eur: Number(r.price_eur),

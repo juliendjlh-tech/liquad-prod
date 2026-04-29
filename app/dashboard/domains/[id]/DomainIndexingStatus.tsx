@@ -3,7 +3,7 @@
 import Button from "@/app/components/ui/Button";
 
 /**
- * Possible indexing statuses from the import_jobs table.
+ * Possible indexing statuses from the indexing_jobs table.
  * - none: no indexing has been initiated
  * - pending: indexing is queued
  * - scraping: actively processing pages (fetching + chunking + embedding)

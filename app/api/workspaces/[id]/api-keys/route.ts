@@ -13,8 +13,9 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { id: workspaceId } = await params;
-    const agentId = request.nextUrl.searchParams.get("agent_id") ?? undefined;
-    const walletId = request.nextUrl.searchParams.get("wallet_id") ?? undefined;
+    const botId = request.nextUrl.searchParams.get("bot_id") ?? undefined;
+    const botSubscriptionId =
+      request.nextUrl.searchParams.get("bot_subscription_id") ?? undefined;
 
     const supabase = await createServerClient();
     const {
@@ -25,7 +26,10 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const keys = await listApiKeys(workspaceId, user.id, { agentId, walletId });
+    const keys = await listApiKeys(workspaceId, user.id, {
+      botId,
+      botSubscriptionId,
+    });
     return NextResponse.json(keys, { status: 200 });
   } catch (err) {
     return mapError(err);
@@ -34,7 +38,7 @@ export async function GET(
 
 /**
  * POST /api/workspaces/:id/api-keys
- * Create a new consumer API key bound to an agent (owner/admin only).
+ * Create a new consumer API key bound to a bot (owner/admin only).
  * Returns the plaintext key ONCE.
  */
 export async function POST(
@@ -64,11 +68,11 @@ export async function POST(
     }
 
     const result = await createApiKey(workspaceId, user.id, {
-      agentId: parsed.data.agent_id,
+      botId: parsed.data.bot_id,
       label: parsed.data.label,
-      walletId: parsed.data.wallet_id,
-      walletLabel: parsed.data.wallet_label,
-      walletExternalUserId: parsed.data.wallet_external_user_id,
+      botSubscriptionId: parsed.data.bot_subscription_id,
+      botSubscriptionLabel: parsed.data.bot_subscription_label,
+      botSubscriptionExternalUserId: parsed.data.bot_subscription_external_user_id,
     });
 
     return NextResponse.json(result, { status: 201 });
@@ -85,19 +89,19 @@ function mapError(err: unknown): NextResponse {
     if (err.message === "FORBIDDEN") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (err.message === "AGENT_NOT_IN_WORKSPACE") {
+    if (err.message === "BOT_NOT_IN_WORKSPACE") {
       return NextResponse.json(
-        { error: "agent_not_in_workspace" },
+        { error: "bot_not_in_workspace" },
         { status: 422 }
       );
     }
-    if (err.message === "WALLET_NOT_FOUND") {
+    if (err.message === "BOT_SUBSCRIPTION_NOT_FOUND") {
       return NextResponse.json(
-        { error: "wallet_not_found" },
+        { error: "bot_subscription_not_found" },
         { status: 404 }
       );
     }
-    if (err.message === "WALLET_DUPLICATE") {
+    if (err.message === "BOT_SUBSCRIPTION_DUPLICATE") {
       return NextResponse.json(
         { error: "external_user_id already exists for this bot" },
         { status: 409 }

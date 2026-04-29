@@ -18,7 +18,7 @@ const previewSchema = z.object({
 });
 
 /**
- * POST /api/contents/import/preview
+ * POST /api/contents/index/preview
  *
  * Fetch a sitemap and preview which URLs match the given filters.
  * Returns total count, matched count, and first 50 matched URLs.

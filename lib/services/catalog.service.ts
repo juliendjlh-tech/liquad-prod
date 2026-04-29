@@ -13,7 +13,7 @@ import { matchContentAgainstRules } from "@/lib/validations/catalog.schema";
 import { syncCatalogSources } from "@/lib/services/pipeline.service";
 import { getDomainMap } from "@/lib/db/queries/domains";
 import { getAllSourceUrls, getAllSourcesCustom } from "@/lib/db/queries/sources";
-import { getWorkspaceAgents, getCatalogAgents } from "@/lib/db/queries/agents";
+import { getWorkspaceBots, getCatalogBots } from "@/lib/db/queries/agents";
 import { getCatalogs as queryCatalogs } from "@/lib/db/queries/catalogs";
 
 // ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ export interface CatalogListItem {
   filter_rules: FilterRules;
   price_eur: number;
   status: string;
-  agent_count: number;
+  bot_count: number;
   content_count: number;
   rag_enabled: boolean;
   rag_source_count: number;
@@ -44,7 +44,7 @@ export interface CatalogDetail {
   rag_enabled: boolean;
   rag_source_count: number;
   created_at: string;
-  agents: Array<{
+  bots: Array<{
     id: string;
     name: string;
     ua_pattern: string;
@@ -91,12 +91,12 @@ export async function createCatalog(
 ): Promise<CatalogDetail> {
   const supabase = await createServerClient();
 
-  // Validate agent_ids are linked to the workspace via workspace_agents
-  if (data.agent_ids.length > 0) {
-    const wsAgents = await getWorkspaceAgents(workspaceId);
-    const wsAgentIds = new Set(wsAgents.map((a) => a.id));
-    if (!data.agent_ids.every((id) => wsAgentIds.has(id))) {
-      throw new Error("INVALID_AGENT_IDS");
+  // Validate bot_ids are linked to the workspace via workspace_bots
+  if (data.bot_ids.length > 0) {
+    const wsBots = await getWorkspaceBots(workspaceId);
+    const wsBotIds = new Set(wsBots.map((a) => a.id));
+    if (!data.bot_ids.every((id) => wsBotIds.has(id))) {
+      throw new Error("INVALID_BOT_IDS");
     }
   }
 
@@ -132,19 +132,19 @@ export async function createCatalog(
     throw new Error(`Failed to create catalog: ${catalogError?.message}`);
   }
 
-  // Link agents via catalog_agents junction table
-  if (data.agent_ids.length > 0) {
-    const junctionRows = data.agent_ids.map((agentId) => ({
+  // Link bots via catalog_bots junction table
+  if (data.bot_ids.length > 0) {
+    const junctionRows = data.bot_ids.map((botId) => ({
       catalog_id: catalog.id,
-      agent_id: agentId,
+      bot_id: botId,
     }));
 
     const { error: linkError } = await supabase
-      .from("catalog_agents")
+      .from("catalog_bots")
       .insert(junctionRows);
 
     if (linkError) {
-      throw new Error(`Failed to link agents: ${linkError.message}`);
+      throw new Error(`Failed to link bots: ${linkError.message}`);
     }
   }
 
@@ -165,12 +165,12 @@ export async function getCatalogs(
   const sources = sourceUrls.map((url) => ({ source_url: url }));
   const domainMap = await getDomainMap(workspaceId);
 
-  // Batch-fetch agent counts for all catalogs in one query
+  // Batch-fetch bot counts for all catalogs in one query
   const catalogIds = catalogs.map((c) => c.id);
-  const allCatalogAgents = await getCatalogAgents(catalogIds);
-  const agentCountMap = new Map<string, number>();
-  for (const link of allCatalogAgents) {
-    agentCountMap.set(link.catalog_id, (agentCountMap.get(link.catalog_id) ?? 0) + 1);
+  const allCatalogBots = await getCatalogBots(catalogIds);
+  const botCountMap = new Map<string, number>();
+  for (const link of allCatalogBots) {
+    botCountMap.set(link.catalog_id, (botCountMap.get(link.catalog_id) ?? 0) + 1);
   }
 
   return catalogs.map((catalog) => {
@@ -184,7 +184,7 @@ export async function getCatalogs(
       filter_rules: filterRules,
       price_eur: catalog.price_eur,
       status: catalog.status,
-      agent_count: agentCountMap.get(catalog.id) ?? 0,
+      bot_count: botCountMap.get(catalog.id) ?? 0,
       content_count: contentCount,
       rag_enabled: catalog.rag_enabled ?? false,
       rag_source_count: catalog.rag_source_count ?? 0,
@@ -204,12 +204,12 @@ export async function getCatalogById(
   const catalog = results[0];
   if (!catalog) return null;
 
-  // Fetch linked agents in a single query
-  const links = await getCatalogAgents([catalogId]);
-  const agents = links.map((l) => ({
-    id: l.agent.id,
-    name: l.agent.name,
-    ua_pattern: l.agent.ua_pattern,
+  // Fetch linked bots in a single query
+  const links = await getCatalogBots([catalogId]);
+  const bots = links.map((l) => ({
+    id: l.bot.id,
+    name: l.bot.name,
+    ua_pattern: l.bot.ua_pattern,
   }));
 
   return {
@@ -222,7 +222,7 @@ export async function getCatalogById(
     rag_enabled: catalog.rag_enabled ?? false,
     rag_source_count: catalog.rag_source_count ?? 0,
     created_at: catalog.created_at!,
-    agents,
+    bots,
   };
 }
 
@@ -241,26 +241,26 @@ export async function updateCatalog(
     return null;
   }
 
-  // If agent_ids provided, validate and replace
-  if (data.agent_ids !== undefined) {
-    if (data.agent_ids.length > 0) {
-      const wsAgents = await getWorkspaceAgents(workspaceId);
-      const wsAgentIds = new Set(wsAgents.map((a) => a.id));
-      if (!data.agent_ids.every((id) => wsAgentIds.has(id))) {
-        throw new Error("INVALID_AGENT_IDS");
+  // If bot_ids provided, validate and replace
+  if (data.bot_ids !== undefined) {
+    if (data.bot_ids.length > 0) {
+      const wsBots = await getWorkspaceBots(workspaceId);
+      const wsBotIds = new Set(wsBots.map((a) => a.id));
+      if (!data.bot_ids.every((id) => wsBotIds.has(id))) {
+        throw new Error("INVALID_BOT_IDS");
       }
     }
 
     await supabase
-      .from("catalog_agents")
+      .from("catalog_bots")
       .delete()
       .eq("catalog_id", catalogId);
 
-    if (data.agent_ids.length > 0) {
-      await supabase.from("catalog_agents").insert(
-        data.agent_ids.map((agentId) => ({
+    if (data.bot_ids.length > 0) {
+      await supabase.from("catalog_bots").insert(
+        data.bot_ids.map((botId) => ({
           catalog_id: catalogId,
-          agent_id: agentId,
+          bot_id: botId,
         }))
       );
     }
@@ -328,7 +328,7 @@ export async function updateCatalog(
 }
 
 /**
- * Delete a catalog (cascade removes catalog_agents + catalog_sources).
+ * Delete a catalog (cascade removes catalog_bots + catalog_sources).
  */
 export async function deleteCatalog(
   catalogId: string,

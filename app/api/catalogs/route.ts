@@ -12,7 +12,7 @@ import { createCatalog, getCatalogs } from "@/lib/services/catalog.service";
  * - x-workspace-id: UUID of the workspace
  *
  * RESPONSES:
- * - 200: Array of catalog list items with agent_count
+ * - 200: Array of catalog list items with bot_count
  * - 400: Missing header
  * - 401: Unauthorized
  * - 403: User not a member
@@ -73,14 +73,14 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
  *   "name": "Premium Articles",
  *   "description": "All premium content",
  *   "filter_rules": { "domain_rules": [{ "domain_id": "<uuid>" }] },
- *   "agent_ids": ["<uuid>"],
+ *   "bot_ids": ["<uuid>"],
  *   "price_eur": 0.50
  * }
  * ```
  *
  * RESPONSES:
- * - 201: Created catalog with agents
- * - 400: Validation error or invalid agent_ids
+ * - 201: Created catalog with bots
+ * - 400: Validation error or invalid bot_ids
  * - 401: Unauthorized
  * - 403: User not a member
  * - 500: Internal server error
@@ -128,9 +128,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const catalog = await createCatalog(workspaceId, validation.data);
     return NextResponse.json(catalog, { status: 201 });
   } catch (err) {
-    if (err instanceof Error && err.message === "INVALID_AGENT_IDS") {
+    if (err instanceof Error && err.message === "INVALID_BOT_IDS") {
       return NextResponse.json(
-        { error: "agent_ids contains invalid or unauthorized agent IDs" },
+        { error: "bot_ids contains invalid or unauthorized bot IDs" },
         { status: 400 }
       );
     }

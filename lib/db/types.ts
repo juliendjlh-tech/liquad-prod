@@ -16,7 +16,7 @@ export type Database = {
     Tables: {
       access_grants: {
         Row: {
-          agent_id: string | null
+          bot_id: string | null
           catalog_id: string
           consumer_workspace_id: string
           created_at: string | null
@@ -28,7 +28,7 @@ export type Database = {
           url: string
         }
         Insert: {
-          agent_id?: string | null
+          bot_id?: string | null
           catalog_id: string
           consumer_workspace_id: string
           created_at?: string | null
@@ -40,7 +40,7 @@ export type Database = {
           url: string
         }
         Update: {
-          agent_id?: string | null
+          bot_id?: string | null
           catalog_id?: string
           consumer_workspace_id?: string
           created_at?: string | null
@@ -75,32 +75,32 @@ export type Database = {
           },
         ]
       }
-      catalog_agents: {
+      catalog_bots: {
         Row: {
           catalog_id: string
-          agent_id: string
+          bot_id: string
         }
         Insert: {
           catalog_id: string
-          agent_id: string
+          bot_id: string
         }
         Update: {
           catalog_id?: string
-          agent_id?: string
+          bot_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "catalog_agents_catalog_id_fkey"
+            foreignKeyName: "catalog_bots_catalog_id_fkey"
             columns: ["catalog_id"]
             isOneToOne: false
             referencedRelation: "catalogs"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "catalog_agents_agent_id_fkey"
-            columns: ["agent_id"]
+            foreignKeyName: "catalog_bots_bot_id_fkey"
+            columns: ["bot_id"]
             isOneToOne: false
-            referencedRelation: "agents"
+            referencedRelation: "bots"
             referencedColumns: ["id"]
           },
         ]
@@ -108,15 +108,15 @@ export type Database = {
       catalog_sources: {
         Row: {
           catalog_id: string
-          source_id: string
+          indexed_source_id: string
         }
         Insert: {
           catalog_id: string
-          source_id: string
+          indexed_source_id: string
         }
         Update: {
           catalog_id?: string
-          source_id?: string
+          indexed_source_id?: string
         }
         Relationships: [
           {
@@ -127,10 +127,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "catalog_sources_source_id_fkey"
-            columns: ["source_id"]
+            foreignKeyName: "catalog_sources_indexed_source_id_fkey"
+            columns: ["indexed_source_id"]
             isOneToOne: false
-            referencedRelation: "sources"
+            referencedRelation: "indexed_sources"
             referencedColumns: ["id"]
           },
         ]
@@ -185,7 +185,7 @@ export type Database = {
           },
         ]
       }
-      import_jobs: {
+      indexing_jobs: {
         Row: {
           id: string
           workspace_id: string
@@ -242,7 +242,7 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "import_jobs_workspace_id_fkey"
+            foreignKeyName: "indexing_jobs_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -250,7 +250,7 @@ export type Database = {
           },
         ]
       }
-      sources: {
+      indexed_sources: {
         Row: {
           id: string
           workspace_id: string
@@ -258,6 +258,12 @@ export type Database = {
           title: string | null
           lastmod: string | null
           domain_id: string
+          /**
+           * URL path extracted from source_url (e.g. "/blog/my-post").
+           * Generated column (STORED), readonly. Indexed via
+           * idx_sources_ws_domain_path on (workspace_id, domain_id, path).
+           */
+          path: string | null
           created_at: string | null
         }
         Insert: {
@@ -280,14 +286,14 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "sources_workspace_id_fkey"
+            foreignKeyName: "indexed_sources_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "fk_sources_domain"
+            foreignKeyName: "fk_indexed_sources_domain"
             columns: ["domain_id"]
             isOneToOne: false
             referencedRelation: "domains"
@@ -298,8 +304,8 @@ export type Database = {
       chunks: {
         Row: {
           id: string
-          source_id: string
-          import_job_id: string | null
+          indexed_source_id: string
+          indexing_job_id: string | null
           chunk_index: number | null
           chunk_text: string | null
           heading_context: string | null
@@ -308,8 +314,8 @@ export type Database = {
         }
         Insert: {
           id?: string
-          source_id: string
-          import_job_id?: string | null
+          indexed_source_id: string
+          indexing_job_id?: string | null
           chunk_index?: number | null
           chunk_text?: string | null
           heading_context?: string | null
@@ -318,8 +324,8 @@ export type Database = {
         }
         Update: {
           id?: string
-          source_id?: string
-          import_job_id?: string | null
+          indexed_source_id?: string
+          indexing_job_id?: string | null
           chunk_index?: number | null
           chunk_text?: string | null
           heading_context?: string | null
@@ -328,17 +334,17 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "fk_chunks_source"
-            columns: ["source_id"]
+            foreignKeyName: "fk_chunks_indexed_source"
+            columns: ["indexed_source_id"]
             isOneToOne: false
-            referencedRelation: "sources"
+            referencedRelation: "indexed_sources"
             referencedColumns: ["id"]
           },
         ]
       }
       credit_transactions: {
         Row: {
-          agent_id: string | null
+          bot_id: string | null
           amount_eur: number
           api_key_id: string | null
           catalog_id: string | null
@@ -351,10 +357,10 @@ export type Database = {
           id: string
           publisher_workspace_id: string | null
           type: string
-          wallet_id: string | null
+          bot_subscription_id: string | null
         }
         Insert: {
-          agent_id?: string | null
+          bot_id?: string | null
           amount_eur: number
           api_key_id?: string | null
           catalog_id?: string | null
@@ -367,10 +373,10 @@ export type Database = {
           id?: string
           publisher_workspace_id?: string | null
           type: string
-          wallet_id?: string | null
+          bot_subscription_id?: string | null
         }
         Update: {
-          agent_id?: string | null
+          bot_id?: string | null
           amount_eur?: number
           api_key_id?: string | null
           catalog_id?: string | null
@@ -383,14 +389,14 @@ export type Database = {
           id?: string
           publisher_workspace_id?: string | null
           type?: string
-          wallet_id?: string | null
+          bot_subscription_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "credit_transactions_agent_id_fkey"
-            columns: ["agent_id"]
+            foreignKeyName: "credit_transactions_bot_id_fkey"
+            columns: ["bot_id"]
             isOneToOne: false
-            referencedRelation: "agents"
+            referencedRelation: "bots"
             referencedColumns: ["id"]
           },
           {
@@ -422,10 +428,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "credit_transactions_wallet_id_fkey"
-            columns: ["wallet_id"]
+            foreignKeyName: "credit_transactions_bot_subscription_id_fkey"
+            columns: ["bot_subscription_id"]
             isOneToOne: false
-            referencedRelation: "wallets"
+            referencedRelation: "bot_subscriptions"
             referencedColumns: ["id"]
           },
         ]
@@ -547,7 +553,7 @@ export type Database = {
           },
         ]
       }
-      agents: {
+      bots: {
         Row: {
           id: string
           name: string
@@ -580,8 +586,8 @@ export type Database = {
         Row: {
           id: string
           workspace_id: string
-          agent_id: string
-          wallet_id: string
+          bot_id: string
+          bot_subscription_id: string
           api_key_hash: string
           api_key_prefix: string
           label: string | null
@@ -592,8 +598,8 @@ export type Database = {
         Insert: {
           id?: string
           workspace_id: string
-          agent_id: string
-          wallet_id: string
+          bot_id: string
+          bot_subscription_id: string
           api_key_hash: string
           api_key_prefix: string
           label?: string | null
@@ -604,8 +610,8 @@ export type Database = {
         Update: {
           id?: string
           workspace_id?: string
-          agent_id?: string
-          wallet_id?: string
+          bot_id?: string
+          bot_subscription_id?: string
           api_key_hash?: string
           api_key_prefix?: string
           label?: string | null
@@ -622,26 +628,26 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "api_keys_agent_id_fkey"
-            columns: ["agent_id"]
+            foreignKeyName: "api_keys_bot_id_fkey"
+            columns: ["bot_id"]
             isOneToOne: false
-            referencedRelation: "agents"
+            referencedRelation: "bots"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "api_keys_wallet_id_fkey"
-            columns: ["wallet_id"]
+            foreignKeyName: "api_keys_bot_subscription_id_fkey"
+            columns: ["bot_subscription_id"]
             isOneToOne: false
-            referencedRelation: "wallets"
+            referencedRelation: "bot_subscriptions"
             referencedColumns: ["id"]
           },
         ]
       }
-      wallets: {
+      bot_subscriptions: {
         Row: {
           id: string
           workspace_id: string
-          agent_id: string
+          bot_id: string
           external_user_id: string | null
           label: string | null
           balance_eur: number
@@ -651,7 +657,7 @@ export type Database = {
         Insert: {
           id?: string
           workspace_id: string
-          agent_id: string
+          bot_id: string
           external_user_id?: string | null
           label?: string | null
           balance_eur?: number
@@ -661,7 +667,7 @@ export type Database = {
         Update: {
           id?: string
           workspace_id?: string
-          agent_id?: string
+          bot_id?: string
           external_user_id?: string | null
           label?: string | null
           balance_eur?: number
@@ -670,54 +676,57 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "wallets_workspace_id_fkey"
+            foreignKeyName: "bot_subscriptions_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "wallets_agent_id_fkey"
-            columns: ["agent_id"]
+            foreignKeyName: "bot_subscriptions_bot_id_fkey"
+            columns: ["bot_id"]
             isOneToOne: false
-            referencedRelation: "agents"
+            referencedRelation: "bots"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "wallets_workspace_agent_fkey"
-            columns: ["workspace_id", "agent_id"]
+            foreignKeyName: "bot_subscriptions_workspace_bot_fkey"
+            columns: ["workspace_id", "bot_id"]
             isOneToOne: false
-            referencedRelation: "workspace_agents"
-            referencedColumns: ["workspace_id", "agent_id"]
+            referencedRelation: "workspace_bots"
+            referencedColumns: ["workspace_id", "bot_id"]
           },
         ]
       }
-      workspace_agents: {
+      workspace_bots: {
         Row: {
           workspace_id: string
-          agent_id: string
+          bot_id: string
+          scope_to_workspace: boolean
         }
         Insert: {
           workspace_id: string
-          agent_id: string
+          bot_id: string
+          scope_to_workspace?: boolean
         }
         Update: {
           workspace_id?: string
-          agent_id?: string
+          bot_id?: string
+          scope_to_workspace?: boolean
         }
         Relationships: [
           {
-            foreignKeyName: "workspace_agents_workspace_id_fkey"
+            foreignKeyName: "workspace_bots_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "workspace_agents_agent_id_fkey"
-            columns: ["agent_id"]
+            foreignKeyName: "workspace_bots_bot_id_fkey"
+            columns: ["bot_id"]
             isOneToOne: false
-            referencedRelation: "agents"
+            referencedRelation: "bots"
             referencedColumns: ["id"]
           },
         ]
@@ -930,7 +939,7 @@ export type Database = {
         }
         Returns: Json
       }
-      credit_wallet: {
+      credit_bot_subscription: {
         Args: {
           p_api_key_id: string
           p_amount_eur: number
@@ -947,7 +956,7 @@ export type Database = {
         }
         Returns: {
           chunk_id: string
-          source_id: string
+          indexed_source_id: string
           source_url: string
           chunk_text: string
           heading_context: string

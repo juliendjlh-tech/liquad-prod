@@ -258,9 +258,9 @@ const PAGE_SIZE = 1000;
  */
 export async function linkNewSources(
   workspaceId: string,
-  sourceIds: string[]
+  indexedSourceIds: string[]
 ): Promise<void> {
-  if (sourceIds.length === 0) return;
+  if (indexedSourceIds.length === 0) return;
 
   const supabase = await createServerClient();
 
@@ -277,10 +277,10 @@ export async function linkNewSources(
 
   const sources: Array<{ id: string; source_url: string; domain_id: string }> = [];
 
-  for (let i = 0; i < sourceIds.length; i += PAGE_SIZE) {
-    const batch = sourceIds.slice(i, i + PAGE_SIZE);
+  for (let i = 0; i < indexedSourceIds.length; i += PAGE_SIZE) {
+    const batch = indexedSourceIds.slice(i, i + PAGE_SIZE);
     const { data } = await supabase
-      .from("sources")
+      .from("indexed_sources")
       .select("id, source_url, domain_id")
       .in("id", batch);
 
@@ -309,13 +309,13 @@ export async function linkNewSources(
     }
 
     for (let i = 0; i < matchedIds.length; i += BATCH) {
-      const batch = matchedIds.slice(i, i + BATCH).map((sourceId) => ({
+      const batch = matchedIds.slice(i, i + BATCH).map((indexedSourceId) => ({
         catalog_id: catalog.id,
-        source_id: sourceId,
+        indexed_source_id: indexedSourceId,
       }));
       await supabase
         .from("catalog_sources")
-        .upsert(batch, { onConflict: "catalog_id,source_id" });
+        .upsert(batch, { onConflict: "catalog_id,indexed_source_id" });
     }
 
     if (matchedIds.length > 0) {
@@ -377,7 +377,7 @@ export async function syncCatalogSources(
     }
 
     const existingLinks = await getCatalogSources([catalog.id]);
-    const existingIds = new Set<string>(existingLinks.map((l) => l.source_id));
+    const existingIds = new Set<string>(existingLinks.map((l) => l.indexed_source_id));
 
     const toInsert: string[] = [];
     for (const id of expectedIds) {
@@ -402,17 +402,17 @@ export async function syncCatalogSources(
         .from("catalog_sources")
         .delete()
         .eq("catalog_id", catalog.id)
-        .in("source_id", batch);
+        .in("indexed_source_id", batch);
     }
 
     for (let i = 0; i < toInsert.length; i += BATCH) {
-      const batch = toInsert.slice(i, i + BATCH).map((sourceId) => ({
+      const batch = toInsert.slice(i, i + BATCH).map((indexedSourceId) => ({
         catalog_id: catalog.id,
-        source_id: sourceId,
+        indexed_source_id: indexedSourceId,
       }));
       await supabase
         .from("catalog_sources")
-        .upsert(batch, { onConflict: "catalog_id,source_id" });
+        .upsert(batch, { onConflict: "catalog_id,indexed_source_id" });
     }
 
     await supabase
@@ -440,14 +440,14 @@ async function getPendingUrls(
   while (true) {
     const { data } = await supabase
       .from("chunks")
-      .select("source_id, sources!inner(source_url)")
-      .eq("import_job_id", importJobId)
+      .select("indexed_source_id, indexed_sources!inner(source_url)")
+      .eq("indexing_job_id", importJobId)
       .not("embedding", "is", null)
       .range(from, from + PAGE_SIZE - 1);
 
     if (!data || data.length === 0) break;
     for (const row of data) {
-      const sourceUrl = (row.sources as unknown as { source_url: string })?.source_url;
+      const sourceUrl = (row.indexed_sources as unknown as { source_url: string })?.source_url;
       if (sourceUrl) indexedUrls.add(sourceUrl);
     }
     if (data.length < PAGE_SIZE) break;
@@ -465,7 +465,7 @@ export async function startScrapePipeline(importJobId: string): Promise<void> {
   const supabase = await createServerClient();
 
   const { data: job } = await supabase
-    .from("import_jobs")
+    .from("indexing_jobs")
     .select("id, workspace_id, domain_id, urls_to_index")
     .eq("id", importJobId)
     .single();
@@ -477,7 +477,7 @@ export async function startScrapePipeline(importJobId: string): Promise<void> {
 
   if (totalPages === 0) {
     await supabase
-      .from("import_jobs")
+      .from("indexing_jobs")
       .update({
         scrape_status: "scraped",
         updated_at: new Date().toISOString(),
@@ -487,7 +487,7 @@ export async function startScrapePipeline(importJobId: string): Promise<void> {
   }
 
   await supabase
-    .from("import_jobs")
+    .from("indexing_jobs")
     .update({
       scrape_status: "pending",
       scrape_processed_pages: 0,
@@ -507,7 +507,7 @@ export async function processScrapeMicroBatch(importJobId: string): Promise<void
   const supabase = await createServerClient();
 
   const { data: job } = await supabase
-    .from("import_jobs")
+    .from("indexing_jobs")
     .select("*")
     .eq("id", importJobId)
     .single();
@@ -516,7 +516,7 @@ export async function processScrapeMicroBatch(importJobId: string): Promise<void
 
   if (job.scrape_status !== "scraping") {
     await supabase
-      .from("import_jobs")
+      .from("indexing_jobs")
       .update({ scrape_status: "scraping", updated_at: new Date().toISOString() })
       .eq("id", importJobId);
   }
@@ -561,7 +561,7 @@ export async function processScrapeMicroBatch(importJobId: string): Promise<void
       const embeddings = await generateEmbeddings(chunks.map((c) => c.text));
 
       const { data: source } = await supabase
-        .from("sources")
+        .from("indexed_sources")
         .select("id")
         .eq("workspace_id", job.workspace_id)
         .eq("source_url", originalUrl)
@@ -575,11 +575,11 @@ export async function processScrapeMicroBatch(importJobId: string): Promise<void
       await supabase
         .from("chunks")
         .delete()
-        .eq("source_id", source.id);
+        .eq("indexed_source_id", source.id);
 
       const chunkRows = chunks.map((chunk, index) => ({
-        source_id: source.id,
-        import_job_id: importJobId,
+        indexed_source_id: source.id,
+        indexing_job_id: importJobId,
         chunk_index: index,
         chunk_text: chunk.text,
         heading_context: chunk.headingContext,
@@ -619,7 +619,7 @@ async function finalizeScrapePipeline(
   const supabase = await createServerClient();
 
   const { data: job } = await supabase
-    .from("import_jobs")
+    .from("indexing_jobs")
     .select("domain_id, urls_to_index")
     .eq("id", importJobId)
     .single();
@@ -635,14 +635,14 @@ async function finalizeScrapePipeline(
   while (true) {
     const { data } = await supabase
       .from("chunks")
-      .select("source_id, sources!inner(source_url)")
-      .eq("import_job_id", importJobId)
+      .select("indexed_source_id, indexed_sources!inner(source_url)")
+      .eq("indexing_job_id", importJobId)
       .not("embedding", "is", null)
       .range(from, from + PAGE_SIZE - 1);
 
     if (!data || data.length === 0) break;
     for (const row of data) {
-      const sourceUrl = (row.sources as unknown as { source_url: string })?.source_url;
+      const sourceUrl = (row.indexed_sources as unknown as { source_url: string })?.source_url;
       if (sourceUrl) indexedUrls.add(sourceUrl);
     }
     if (data.length < PAGE_SIZE) break;
@@ -655,7 +655,7 @@ async function finalizeScrapePipeline(
 
   if (errorRate > 0.5) {
     await supabase
-      .from("import_jobs")
+      .from("indexing_jobs")
       .update({
         scrape_status: "error",
         scrape_error_message: `${failedCount}/${totalPages} pages failed to scrape (${Math.round(errorRate * 100)}% error rate)`,
@@ -668,7 +668,7 @@ async function finalizeScrapePipeline(
       : null;
 
     await supabase
-      .from("import_jobs")
+      .from("indexing_jobs")
       .update({
         scrape_status: "scraped",
         scrape_error_message: warningMessage,
@@ -677,25 +677,25 @@ async function finalizeScrapePipeline(
       .eq("id", importJobId);
   }
 
-  const sourceIds: string[] = [];
+  const indexedSourceIds: string[] = [];
   from = 0;
 
   while (true) {
     const { data: batch } = await supabase
-      .from("sources")
+      .from("indexed_sources")
       .select("id")
       .eq("workspace_id", workspaceId)
       .in("source_url", urlsToIndex)
       .range(from, from + PAGE_SIZE - 1);
 
     if (!batch || batch.length === 0) break;
-    sourceIds.push(...batch.map((s) => s.id));
+    indexedSourceIds.push(...batch.map((s) => s.id));
     if (batch.length < PAGE_SIZE) break;
     from += PAGE_SIZE;
   }
 
-  if (sourceIds.length > 0) {
-    await linkNewSources(workspaceId, sourceIds);
+  if (indexedSourceIds.length > 0) {
+    await linkNewSources(workspaceId, indexedSourceIds);
   }
 }
 

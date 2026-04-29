@@ -10,7 +10,7 @@ import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
 // Types
 // ---------------------------------------------------------------------------
 
-interface Agent {
+interface Bot {
   id: string;
   name: string;
   ua_pattern: string;
@@ -19,7 +19,9 @@ interface Agent {
   description?: string | null;
   created_at: string;
   balance_eur: number;
-  wallet_count: number;
+  bot_subscription_count: number;
+  /** workspace_bots.scope_to_workspace — Mode B isolation for partner keys. */
+  scope_to_workspace?: boolean;
 }
 
 interface Preset {
@@ -29,11 +31,11 @@ interface Preset {
   description?: string;
 }
 
-interface Wallet {
+interface BotSubscription {
   id: string;
   workspace_id: string;
-  agent_id: string;
-  agent_name: string;
+  bot_id: string;
+  bot_name: string;
   external_user_id: string | null;
   label: string | null;
   balance_eur: number;
@@ -46,12 +48,12 @@ interface ApiKey {
   id: string;
   label: string | null;
   api_key_prefix: string;
-  agent_id: string;
-  agent_name: string;
-  wallet_id: string;
-  wallet_label: string | null;
-  wallet_external_user_id: string | null;
-  wallet_balance_eur: number;
+  bot_id: string;
+  bot_name: string;
+  bot_subscription_id: string;
+  bot_subscription_label: string | null;
+  bot_subscription_external_user_id: string | null;
+  bot_subscription_balance_eur: number;
   last_used_at: string | null;
   created_at: string | null;
   revoked_at: string | null;
@@ -61,9 +63,9 @@ interface ApiKey {
 // Component
 // ---------------------------------------------------------------------------
 
-export default function UserAgentsPage() {
+export default function BotsPage() {
   const { id: workspaceId } = useWorkspace();
-  const [agents, setAgents] = useState<Agent[]>([]);
+  const [bots, setBots] = useState<Bot[]>([]);
   const [presets, setPresets] = useState<Preset[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -80,39 +82,42 @@ export default function UserAgentsPage() {
   const [addingPresets, setAddingPresets] = useState(false);
 
   // Edit inline
-  const [editingAgent, setEditingAgent] = useState<string | null>(null);
+  const [editingBot, setEditingBot] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editPattern, setEditPattern] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editIps, setEditIps] = useState("");
 
-  const [confirmTarget, setConfirmTarget] = useState<Agent | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<Bot | null>(null);
   const [search, setSearch] = useState("");
 
-  // Wallets drawer state
-  const [walletsFor, setWalletsFor] = useState<Agent | null>(null);
-  const [wallets, setWallets] = useState<Wallet[]>([]);
-  const [walletsLoading, setWalletsLoading] = useState(false);
-  const [showNewWallet, setShowNewWallet] = useState(false);
-  const [newWalletLabel, setNewWalletLabel] = useState("");
-  const [newWalletExternalId, setNewWalletExternalId] = useState("");
-  const [newWalletKeyLabel, setNewWalletKeyLabel] = useState("");
-  const [creatingWallet, setCreatingWallet] = useState(false);
+  // Subscriptions drawer state
+  const [subscriptionsFor, setSubscriptionsFor] = useState<Bot | null>(null);
+  const [subscriptions, setSubscriptions] = useState<BotSubscription[]>([]);
+  const [subscriptionsLoading, setSubscriptionsLoading] = useState(false);
+  const [showNewSubscription, setShowNewSubscription] = useState(false);
+  const [newSubscriptionLabel, setNewSubscriptionLabel] = useState("");
+  const [newSubscriptionExternalId, setNewSubscriptionExternalId] = useState("");
+  const [newSubscriptionKeyLabel, setNewSubscriptionKeyLabel] = useState("");
+  const [creatingSubscription, setCreatingSubscription] = useState(false);
 
-  // Wallet detail state
-  const [activeWallet, setActiveWallet] = useState<Wallet | null>(null);
+  // Subscription detail state
+  const [activeSubscription, setActiveSubscription] = useState<BotSubscription | null>(null);
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [keysLoading, setKeysLoading] = useState(false);
   const [newKeyLabel, setNewKeyLabel] = useState("");
   const [creatingKey, setCreatingKey] = useState(false);
   const [justCreatedKey, setJustCreatedKey] = useState<string | null>(null);
   const [confirmRevoke, setConfirmRevoke] = useState<ApiKey | null>(null);
-  const [confirmArchive, setConfirmArchive] = useState<Wallet | null>(null);
+  const [confirmArchive, setConfirmArchive] = useState<BotSubscription | null>(null);
 
   // Top-up state
   const [topUpAmount, setTopUpAmount] = useState("");
   const [topUpDescription, setTopUpDescription] = useState("");
   const [toppingUp, setToppingUp] = useState(false);
+
+  // Workspace scope toggle state (per-bot, persisted on workspace_bots)
+  const [scopeUpdating, setScopeUpdating] = useState(false);
 
   const [toast, setToast] = useState<{
     message: string;
@@ -125,37 +130,37 @@ export default function UserAgentsPage() {
   };
 
   // ---------------------------------------------------------------------------
-  // Fetch agents + presets
+  // Fetch bots + presets
   // ---------------------------------------------------------------------------
 
-  const fetchAgents = useCallback(async () => {
+  const fetchBots = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/user-agents", {
+      const res = await fetch("/api/bots", {
         headers: { "x-workspace-id": workspaceId },
       });
-      if (res.ok) setAgents(await res.json());
+      if (res.ok) setBots(await res.json());
     } finally {
       setLoading(false);
     }
   }, [workspaceId]);
 
   const fetchPresets = useCallback(async () => {
-    const res = await fetch("/api/user-agents/presets");
+    const res = await fetch("/api/bots/presets");
     if (res.ok) setPresets(await res.json());
   }, []);
 
   useEffect(() => {
-    void fetchAgents();
+    void fetchBots();
     void fetchPresets();
-  }, [fetchAgents, fetchPresets]);
+  }, [fetchBots, fetchPresets]);
 
   // ---------------------------------------------------------------------------
-  // Agent CRUD
+  // Bot CRUD
   // ---------------------------------------------------------------------------
 
   const addPresetBot = async (preset: Preset) => {
-    const res = await fetch("/api/user-agents", {
+    const res = await fetch("/api/bots", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -190,7 +195,7 @@ export default function UserAgentsPage() {
         added === 1 ? "Bot added" : `${added} bots added`,
         "success"
       );
-      void fetchAgents();
+      void fetchBots();
     }
     setAddingPresets(false);
     setShowPresetPicker(false);
@@ -205,7 +210,7 @@ export default function UserAgentsPage() {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    const res = await fetch("/api/user-agents", {
+    const res = await fetch("/api/bots", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -227,15 +232,15 @@ export default function UserAgentsPage() {
       setCustomPattern("");
       setCustomDescription("");
       setCustomIps("");
-      void fetchAgents();
+      void fetchBots();
     } else {
       const json = await res.json();
       showToast(json.message ?? json.error ?? "Failed to add bot", "error");
     }
   };
 
-  const removeAgent = async (agent: Agent) => {
-    const res = await fetch(`/api/user-agents/${agent.id}`, {
+  const removeBot = async (bot: Bot) => {
+    const res = await fetch(`/api/bots/${bot.id}`, {
       method: "DELETE",
       headers: { "x-workspace-id": workspaceId },
     });
@@ -243,29 +248,29 @@ export default function UserAgentsPage() {
     if (res.ok) {
       const json = await res.json();
       const warning = json.warning ? ` — ${json.warning}` : "";
-      showToast(`${agent.name} removed${warning}`, "success");
-      void fetchAgents();
+      showToast(`${bot.name} removed${warning}`, "success");
+      void fetchBots();
     }
     setConfirmTarget(null);
   };
 
-  const startEdit = (agent: Agent) => {
-    setEditingAgent(agent.id);
-    setEditName(agent.name);
-    setEditPattern(agent.ua_pattern);
-    setEditDescription(agent.description ?? "");
-    setEditIps((agent.declared_ips ?? []).join("\n"));
+  const startEdit = (bot: Bot) => {
+    setEditingBot(bot.id);
+    setEditName(bot.name);
+    setEditPattern(bot.ua_pattern);
+    setEditDescription(bot.description ?? "");
+    setEditIps((bot.declared_ips ?? []).join("\n"));
   };
 
   const cancelEdit = () => {
-    setEditingAgent(null);
+    setEditingBot(null);
     setEditName("");
     setEditPattern("");
     setEditDescription("");
     setEditIps("");
   };
 
-  const saveEdit = async (agentId: string) => {
+  const saveEdit = async (botId: string) => {
     const parsedIps = editIps
       .split("\n")
       .map((ip) => ip.trim())
@@ -280,7 +285,7 @@ export default function UserAgentsPage() {
       body.declared_ips = parsedIps;
     }
 
-    const res = await fetch(`/api/user-agents/${agentId}`, {
+    const res = await fetch(`/api/bots/${botId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -292,7 +297,7 @@ export default function UserAgentsPage() {
     if (res.ok) {
       showToast("Bot updated", "success");
       cancelEdit();
-      void fetchAgents();
+      void fetchBots();
     } else {
       const json = await res.json();
       showToast(json.error ?? "Failed to update bot", "error");
@@ -300,69 +305,116 @@ export default function UserAgentsPage() {
   };
 
   // ---------------------------------------------------------------------------
-  // Wallets drawer
+  // Subscriptions drawer
   // ---------------------------------------------------------------------------
 
-  const fetchWallets = useCallback(
-    async (agentId: string) => {
-      setWalletsLoading(true);
+  const fetchSubscriptions = useCallback(
+    async (botId: string) => {
+      setSubscriptionsLoading(true);
       try {
         const res = await fetch(
-          `/api/workspaces/${workspaceId}/wallets?agent_id=${agentId}`
+          `/api/workspaces/${workspaceId}/bot-subscriptions?bot_id=${botId}`
         );
-        if (res.ok) setWallets(await res.json());
-        else setWallets([]);
+        if (res.ok) setSubscriptions(await res.json());
+        else setSubscriptions([]);
       } finally {
-        setWalletsLoading(false);
+        setSubscriptionsLoading(false);
       }
     },
     [workspaceId]
   );
 
-  const openWalletsDrawer = useCallback(
-    (agent: Agent) => {
-      setWalletsFor(agent);
-      setActiveWallet(null);
-      setShowNewWallet(false);
+  // Toggle workspace_bots.scope_to_workspace for the bot in the drawer.
+  // Optimistic update + rollback on failure.
+  const toggleScopeToWorkspace = async (next: boolean) => {
+    if (!subscriptionsFor || scopeUpdating) return;
+    const prev = subscriptionsFor.scope_to_workspace ?? false;
+    setSubscriptionsFor({ ...subscriptionsFor, scope_to_workspace: next });
+    setBots((current) =>
+      current.map((b) =>
+        b.id === subscriptionsFor.id ? { ...b, scope_to_workspace: next } : b
+      )
+    );
+    setScopeUpdating(true);
+    try {
+      const res = await fetch(`/api/bots/${subscriptionsFor.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "x-workspace-id": workspaceId,
+        },
+        body: JSON.stringify({ scope_to_workspace: next }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        throw new Error(json.message ?? json.error ?? "Failed to update scope");
+      }
+      showToast(
+        next
+          ? "Catalog access constrained to this workspace"
+          : "Catalog access opened to all matching publishers",
+        "success"
+      );
+    } catch (err) {
+      // Rollback
+      setSubscriptionsFor((cur) =>
+        cur ? { ...cur, scope_to_workspace: prev } : cur
+      );
+      setBots((current) =>
+        current.map((b) =>
+          b.id === subscriptionsFor.id ? { ...b, scope_to_workspace: prev } : b
+        )
+      );
+      showToast(err instanceof Error ? err.message : "Failed to update scope", "error");
+    } finally {
+      setScopeUpdating(false);
+    }
+  };
+
+  const openSubscriptionsDrawer = useCallback(
+    (bot: Bot) => {
+      setSubscriptionsFor(bot);
+      setActiveSubscription(null);
+      setShowNewSubscription(false);
       setJustCreatedKey(null);
-      void fetchWallets(agent.id);
+      void fetchSubscriptions(bot.id);
     },
-    [fetchWallets]
+    [fetchSubscriptions]
   );
 
-  const closeWalletsDrawer = () => {
-    setWalletsFor(null);
-    setWallets([]);
-    setActiveWallet(null);
+  const closeSubscriptionsDrawer = () => {
+    setSubscriptionsFor(null);
+    setSubscriptions([]);
+    setActiveSubscription(null);
     setKeys([]);
     setJustCreatedKey(null);
-    setShowNewWallet(false);
-    setNewWalletLabel("");
-    setNewWalletExternalId("");
-    setNewWalletKeyLabel("");
+    setShowNewSubscription(false);
+    setNewSubscriptionLabel("");
+    setNewSubscriptionExternalId("");
+    setNewSubscriptionKeyLabel("");
     setNewKeyLabel("");
     setTopUpAmount("");
     setTopUpDescription("");
   };
 
-  const createWalletAndKey = async (e: React.FormEvent) => {
+  const createSubscriptionAndKey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!walletsFor) return;
-    setCreatingWallet(true);
+    if (!subscriptionsFor) return;
+    setCreatingSubscription(true);
     try {
       const res = await fetch(`/api/workspaces/${workspaceId}/api-keys`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agent_id: walletsFor.id,
-          label: newWalletKeyLabel || undefined,
-          wallet_label: newWalletLabel || undefined,
-          wallet_external_user_id: newWalletExternalId || undefined,
+          bot_id: subscriptionsFor.id,
+          label: newSubscriptionKeyLabel || undefined,
+          bot_subscription_label: newSubscriptionLabel || undefined,
+          bot_subscription_external_user_id: newSubscriptionExternalId || undefined,
         }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        showToast(body.error ?? "Failed to create wallet", "error");
+        showToast(body.error ?? "Failed to create subscription", "error");
         return;
       }
       const payload = (await res.json()) as {
@@ -370,47 +422,47 @@ export default function UserAgentsPage() {
         record: ApiKey;
       };
 
-      setShowNewWallet(false);
-      setNewWalletLabel("");
-      setNewWalletExternalId("");
-      setNewWalletKeyLabel("");
+      setShowNewSubscription(false);
+      setNewSubscriptionLabel("");
+      setNewSubscriptionExternalId("");
+      setNewSubscriptionKeyLabel("");
 
-      await fetchWallets(walletsFor.id);
-      void fetchAgents();
+      await fetchSubscriptions(subscriptionsFor.id);
+      void fetchBots();
 
-      const justCreatedWallet: Wallet = {
-        id: payload.record.wallet_id,
+      const justCreatedSubscription: BotSubscription = {
+        id: payload.record.bot_subscription_id,
         workspace_id: workspaceId,
-        agent_id: payload.record.agent_id,
-        agent_name: payload.record.agent_name,
-        external_user_id: payload.record.wallet_external_user_id,
-        label: payload.record.wallet_label,
-        balance_eur: payload.record.wallet_balance_eur,
+        bot_id: payload.record.bot_id,
+        bot_name: payload.record.bot_name,
+        external_user_id: payload.record.bot_subscription_external_user_id,
+        label: payload.record.bot_subscription_label,
+        balance_eur: payload.record.bot_subscription_balance_eur,
         active_keys: 1,
         created_at: payload.record.created_at,
         archived_at: null,
       };
-      setActiveWallet(justCreatedWallet);
+      setActiveSubscription(justCreatedSubscription);
       setKeys([payload.record]);
       setJustCreatedKey(payload.api_key);
     } finally {
-      setCreatingWallet(false);
+      setCreatingSubscription(false);
     }
   };
 
   // ---------------------------------------------------------------------------
-  // Wallet detail
+  // Subscription detail
   // ---------------------------------------------------------------------------
 
-  const openWalletDetail = useCallback(
-    async (wallet: Wallet) => {
-      setActiveWallet(wallet);
+  const openSubscriptionDetail = useCallback(
+    async (subscription: BotSubscription) => {
+      setActiveSubscription(subscription);
       setJustCreatedKey(null);
       setKeys([]);
       setKeysLoading(true);
       try {
         const res = await fetch(
-          `/api/workspaces/${workspaceId}/api-keys?wallet_id=${wallet.id}`
+          `/api/workspaces/${workspaceId}/api-keys?bot_subscription_id=${subscription.id}`
         );
         if (res.ok) setKeys(await res.json());
       } finally {
@@ -420,8 +472,8 @@ export default function UserAgentsPage() {
     [workspaceId]
   );
 
-  const backToWalletList = () => {
-    setActiveWallet(null);
+  const backToSubscriptionList = () => {
+    setActiveSubscription(null);
     setKeys([]);
     setJustCreatedKey(null);
     setNewKeyLabel("");
@@ -431,15 +483,15 @@ export default function UserAgentsPage() {
 
   const createKey = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeWallet || !walletsFor) return;
+    if (!activeSubscription || !subscriptionsFor) return;
     setCreatingKey(true);
     try {
       const res = await fetch(`/api/workspaces/${workspaceId}/api-keys`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agent_id: walletsFor.id,
-          wallet_id: activeWallet.id,
+          bot_id: subscriptionsFor.id,
+          bot_subscription_id: activeSubscription.id,
           label: newKeyLabel || undefined,
         }),
       });
@@ -451,7 +503,7 @@ export default function UserAgentsPage() {
         setJustCreatedKey(payload.api_key);
         setNewKeyLabel("");
         setKeys((prev) => [payload.record, ...prev]);
-        setActiveWallet((prev) =>
+        setActiveSubscription((prev) =>
           prev ? { ...prev, active_keys: prev.active_keys + 1 } : prev
         );
       } else {
@@ -470,7 +522,7 @@ export default function UserAgentsPage() {
     );
     if (res.ok) {
       setKeys((prev) => prev.filter((k) => k.id !== key.id));
-      setActiveWallet((prev) =>
+      setActiveSubscription((prev) =>
         prev ? { ...prev, active_keys: Math.max(0, prev.active_keys - 1) } : prev
       );
       showToast("Key revoked", "success");
@@ -482,7 +534,7 @@ export default function UserAgentsPage() {
 
   const topUp = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeWallet) return;
+    if (!activeSubscription) return;
     const amount = parseFloat(topUpAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       showToast("Enter a positive amount", "error");
@@ -491,7 +543,7 @@ export default function UserAgentsPage() {
     setToppingUp(true);
     try {
       const res = await fetch(
-        `/api/workspaces/${workspaceId}/wallets/${activeWallet.id}/credits`,
+        `/api/workspaces/${workspaceId}/bot-subscriptions/${activeSubscription.id}/credits`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -510,37 +562,37 @@ export default function UserAgentsPage() {
         new_balance: number;
         transaction_id: string;
       };
-      setActiveWallet((prev) =>
+      setActiveSubscription((prev) =>
         prev ? { ...prev, balance_eur: payload.new_balance } : prev
       );
-      setWallets((prev) =>
-        prev.map((w) =>
-          w.id === activeWallet.id ? { ...w, balance_eur: payload.new_balance } : w
+      setSubscriptions((prev) =>
+        prev.map((s) =>
+          s.id === activeSubscription.id ? { ...s, balance_eur: payload.new_balance } : s
         )
       );
       setTopUpAmount("");
       setTopUpDescription("");
-      void fetchAgents();
+      void fetchBots();
       showToast(`Credited €${amount.toFixed(2)}`, "success");
     } finally {
       setToppingUp(false);
     }
   };
 
-  const archiveWallet = async (wallet: Wallet) => {
+  const archiveSubscription = async (subscription: BotSubscription) => {
     const res = await fetch(
-      `/api/workspaces/${workspaceId}/wallets/${wallet.id}`,
+      `/api/workspaces/${workspaceId}/bot-subscriptions/${subscription.id}`,
       { method: "DELETE" }
     );
     if (res.ok) {
-      showToast("Wallet archived", "success");
+      showToast("Subscription archived", "success");
       setConfirmArchive(null);
-      backToWalletList();
-      if (walletsFor) void fetchWallets(walletsFor.id);
-      void fetchAgents();
+      backToSubscriptionList();
+      if (subscriptionsFor) void fetchSubscriptions(subscriptionsFor.id);
+      void fetchBots();
     } else {
       const body = await res.json().catch(() => ({}));
-      showToast(body.error ?? "Failed to archive wallet", "error");
+      showToast(body.error ?? "Failed to archive subscription", "error");
       setConfirmArchive(null);
     }
   };
@@ -549,19 +601,19 @@ export default function UserAgentsPage() {
   // Derived data
   // ---------------------------------------------------------------------------
 
-  const isPreset = (a: Agent) => a.type === "preset";
+  const isPreset = (b: Bot) => b.type === "preset";
 
   const addedPresetNames = new Set(
-    agents.filter((a) => isPreset(a)).map((a) => a.name)
+    bots.filter((b) => isPreset(b)).map((b) => b.name)
   );
 
   const q = search.toLowerCase().trim();
-  const visibleAgents = agents.filter((a) => {
+  const visibleBots = bots.filter((b) => {
     if (!q) return true;
     return (
-      a.name.toLowerCase().includes(q) ||
-      a.ua_pattern.toLowerCase().includes(q) ||
-      (a.description?.toLowerCase().includes(q) ?? false)
+      b.name.toLowerCase().includes(q) ||
+      b.ua_pattern.toLowerCase().includes(q) ||
+      (b.description?.toLowerCase().includes(q) ?? false)
     );
   });
 
@@ -682,7 +734,7 @@ export default function UserAgentsPage() {
       )}
 
       {/* Search */}
-      {agents.length > 0 && (
+      {bots.length > 0 && (
         <div className="mb-4">
           <input
             type="search"
@@ -694,10 +746,10 @@ export default function UserAgentsPage() {
         </div>
       )}
 
-      {/* Agents list */}
+      {/* Bots list */}
       {loading ? (
         <div className="text-center py-12 text-gray-500">Loading...</div>
-      ) : agents.length === 0 ? (
+      ) : bots.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <p className="text-sm mb-4">No bots added yet.</p>
           <div className="flex justify-center gap-3">
@@ -716,18 +768,18 @@ export default function UserAgentsPage() {
             </Button>
           </div>
         </div>
-      ) : visibleAgents.length === 0 ? (
+      ) : visibleBots.length === 0 ? (
         <div className="text-center py-12 text-gray-400 text-sm">
           No bots match your search.
         </div>
       ) : (
         <div className="space-y-2">
-          {visibleAgents.map((agent) => (
+          {visibleBots.map((bot) => (
             <div
-              key={agent.id}
+              key={bot.id}
               className="group rounded-lg border border-gray-200 bg-white px-4 py-3 hover:bg-gray-50 transition-colors"
             >
-              {editingAgent === agent.id ? (
+              {editingBot === bot.id ? (
                 <div className="space-y-3">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -785,7 +837,7 @@ export default function UserAgentsPage() {
                     <Button variant="ghost" size="sm" onClick={cancelEdit}>
                       Cancel
                     </Button>
-                    <Button size="sm" onClick={() => saveEdit(agent.id)}>
+                    <Button size="sm" onClick={() => saveEdit(bot.id)}>
                       Save
                     </Button>
                   </div>
@@ -795,9 +847,9 @@ export default function UserAgentsPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium text-gray-900">
-                        {agent.name}
+                        {bot.name}
                       </span>
-                      {isPreset(agent) ? (
+                      {isPreset(bot) ? (
                         <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs text-blue-700">
                           Preset
                         </span>
@@ -808,11 +860,11 @@ export default function UserAgentsPage() {
                       )}
                     </div>
                     <div className="text-xs text-gray-500 mt-0.5">
-                      {agent.ua_pattern}
+                      {bot.ua_pattern}
                     </div>
-                    {agent.description && (
+                    {bot.description && (
                       <p className="text-xs text-gray-400 mt-0.5">
-                        {agent.description}
+                        {bot.description}
                       </p>
                     )}
                   </div>
@@ -820,21 +872,21 @@ export default function UserAgentsPage() {
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => openWalletsDrawer(agent)}
+                      onClick={() => openSubscriptionsDrawer(bot)}
                     >
-                      Wallets
+                      Subscriptions
                     </Button>
                     <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                       <DropdownMenu
                         items={[
-                          ...(!isPreset(agent)
-                            ? [{ label: "Edit", onClick: () => startEdit(agent) }]
+                          ...(!isPreset(bot)
+                            ? [{ label: "Edit", onClick: () => startEdit(bot) }]
                             : []),
                           {
                             label: "Remove",
-                            onClick: () => setConfirmTarget(agent),
+                            onClick: () => setConfirmTarget(bot),
                             variant: "danger" as const,
-                            separator: !isPreset(agent),
+                            separator: !isPreset(bot),
                           },
                         ]}
                       />
@@ -854,7 +906,7 @@ export default function UserAgentsPage() {
         description="This will remove the bot from your workspace and unlink it from all associated catalogs."
         confirmLabel="Remove"
         variant="danger"
-        onConfirm={() => confirmTarget && removeAgent(confirmTarget)}
+        onConfirm={() => confirmTarget && removeBot(confirmTarget)}
         onCancel={() => setConfirmTarget(null)}
       />
 
@@ -979,52 +1031,52 @@ export default function UserAgentsPage() {
         </div>
       )}
 
-      {/* Wallets drawer */}
-      {walletsFor && (
+      {/* Subscriptions drawer */}
+      {subscriptionsFor && (
         <div
           className="fixed inset-0 z-50 flex justify-end bg-black/40"
-          onClick={closeWalletsDrawer}
+          onClick={closeSubscriptionsDrawer}
         >
           <div
             className="h-full w-full max-w-xl bg-white shadow-xl overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            {activeWallet ? (
-              /* ===================== WALLET DETAIL ===================== */
+            {activeSubscription ? (
+              /* ===================== SUBSCRIPTION DETAIL ===================== */
               <>
                 <div className="px-6 py-4 border-b border-gray-200">
                   <button
-                    onClick={backToWalletList}
+                    onClick={backToSubscriptionList}
                     className="text-xs text-gray-500 hover:text-gray-800 mb-2"
                   >
-                    ← Back to wallets
+                    ← Back to subscriptions
                   </button>
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <h2 className="text-lg font-semibold text-gray-900 truncate">
-                        {activeWallet.label ?? (
-                          <span className="text-gray-400">Unlabeled wallet</span>
+                        {activeSubscription.label ?? (
+                          <span className="text-gray-400">Unlabeled subscription</span>
                         )}
                       </h2>
                       <div className="mt-1 text-xs text-gray-500 space-y-0.5">
                         <div>
                           Bot:{" "}
                           <span className="font-mono text-gray-700">
-                            {walletsFor.name}
+                            {subscriptionsFor.name}
                           </span>
                         </div>
-                        {activeWallet.external_user_id && (
+                        {activeSubscription.external_user_id && (
                           <div>
                             External user id:{" "}
                             <span className="font-mono text-gray-700">
-                              {activeWallet.external_user_id}
+                              {activeSubscription.external_user_id}
                             </span>
                           </div>
                         )}
                       </div>
                     </div>
                     <button
-                      onClick={closeWalletsDrawer}
+                      onClick={closeSubscriptionsDrawer}
                       className="text-gray-400 hover:text-gray-600 text-xl leading-none"
                       aria-label="Close"
                     >
@@ -1035,21 +1087,21 @@ export default function UserAgentsPage() {
                     <span className="rounded-full bg-gray-100 px-3 py-1 text-sm text-gray-900">
                       <span className="text-gray-500">Balance:</span>{" "}
                       <span className="font-mono font-medium">
-                        €{activeWallet.balance_eur.toFixed(2)}
+                        €{activeSubscription.balance_eur.toFixed(2)}
                       </span>
                     </span>
                     <Button
                       variant="ghost"
                       size="sm"
-                      onClick={() => setConfirmArchive(activeWallet)}
-                      disabled={activeWallet.balance_eur > 0}
+                      onClick={() => setConfirmArchive(activeSubscription)}
+                      disabled={activeSubscription.balance_eur > 0}
                       title={
-                        activeWallet.balance_eur > 0
-                          ? "Refund the wallet before archiving"
+                        activeSubscription.balance_eur > 0
+                          ? "Refund the subscription before archiving"
                           : undefined
                       }
                     >
-                      Archive wallet
+                      Archive subscription
                     </Button>
                   </div>
                 </div>
@@ -1087,7 +1139,7 @@ export default function UserAgentsPage() {
                     </h3>
                     <p className="text-xs text-gray-500 mb-3">
                       MVP: admin-driven credit. Requires at least one active key
-                      on this wallet.
+                      on this subscription.
                     </p>
                     <div className="grid grid-cols-[120px_1fr_auto] gap-2">
                       <input
@@ -1110,7 +1162,7 @@ export default function UserAgentsPage() {
                       <Button
                         type="submit"
                         loading={toppingUp}
-                        disabled={activeWallet.active_keys === 0}
+                        disabled={activeSubscription.active_keys === 0}
                       >
                         Credit
                       </Button>
@@ -1122,7 +1174,7 @@ export default function UserAgentsPage() {
                     className="rounded-lg border border-gray-200 bg-gray-50 p-4"
                   >
                     <h3 className="text-sm font-medium text-gray-900 mb-2">
-                      Generate a new key for this wallet
+                      Generate a new key for this subscription
                     </h3>
                     <div className="flex gap-2">
                       <input
@@ -1149,7 +1201,7 @@ export default function UserAgentsPage() {
                       </div>
                     ) : keys.length === 0 ? (
                       <div className="text-center py-6 text-gray-400 text-sm">
-                        No active keys on this wallet.
+                        No active keys on this subscription.
                       </div>
                     ) : (
                       <div className="space-y-2">
@@ -1192,22 +1244,22 @@ export default function UserAgentsPage() {
                 </div>
               </>
             ) : (
-              /* ===================== WALLET LIST ===================== */
+              /* ===================== SUBSCRIPTION LIST ===================== */
               <>
                 <div className="px-6 py-4 border-b border-gray-200 flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-lg font-semibold text-gray-900">
-                      Wallets
+                      Subscriptions
                     </h2>
                     <p className="text-xs text-gray-500 mt-0.5">
                       For bot{" "}
                       <span className="font-mono text-gray-700">
-                        {walletsFor.name}
+                        {subscriptionsFor.name}
                       </span>
                     </p>
                   </div>
                   <button
-                    onClick={closeWalletsDrawer}
+                    onClick={closeSubscriptionsDrawer}
                     className="text-gray-400 hover:text-gray-600 text-xl leading-none"
                     aria-label="Close"
                   >
@@ -1215,14 +1267,38 @@ export default function UserAgentsPage() {
                   </button>
                 </div>
 
+                {/* Workspace scope toggle (workspace_bots.scope_to_workspace) */}
+                <div className="px-6 py-3 border-b border-gray-100 bg-gray-50">
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={subscriptionsFor.scope_to_workspace ?? false}
+                      disabled={scopeUpdating}
+                      onChange={(e) => void toggleScopeToWorkspace(e.target.checked)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-900">
+                        Constrain to my workspace catalogs
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        When enabled, API keys for this bot only see catalogs you own.
+                        Use this for partner integrations where the consumer should not
+                        access other publishers&apos; content. Leave OFF for self-serve
+                        consumer keys that should reach every matching publisher.
+                      </div>
+                    </div>
+                  </label>
+                </div>
+
                 <div className="p-6 space-y-4">
-                  {showNewWallet ? (
+                  {showNewSubscription ? (
                     <form
-                      onSubmit={createWalletAndKey}
+                      onSubmit={createSubscriptionAndKey}
                       className="rounded-lg border border-gray-200 bg-gray-50 p-4 space-y-3"
                     >
                       <h3 className="text-sm font-medium text-gray-900">
-                        New wallet
+                        New subscription
                       </h3>
                       <p className="text-xs text-gray-500">
                         A first API key is generated at the same time and shown
@@ -1230,12 +1306,12 @@ export default function UserAgentsPage() {
                       </p>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">
-                          Wallet label (optional)
+                          Subscription label (optional)
                         </label>
                         <input
                           type="text"
-                          value={newWalletLabel}
-                          onChange={(e) => setNewWalletLabel(e.target.value)}
+                          value={newSubscriptionLabel}
+                          onChange={(e) => setNewSubscriptionLabel(e.target.value)}
                           placeholder="e.g. Seat 'acme-prod'"
                           maxLength={100}
                           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
@@ -1247,9 +1323,9 @@ export default function UserAgentsPage() {
                         </label>
                         <input
                           type="text"
-                          value={newWalletExternalId}
+                          value={newSubscriptionExternalId}
                           onChange={(e) =>
-                            setNewWalletExternalId(e.target.value)
+                            setNewSubscriptionExternalId(e.target.value)
                           }
                           placeholder="Your internal user/seat id — unique per bot"
                           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono"
@@ -1261,9 +1337,9 @@ export default function UserAgentsPage() {
                         </label>
                         <input
                           type="text"
-                          value={newWalletKeyLabel}
+                          value={newSubscriptionKeyLabel}
                           onChange={(e) =>
-                            setNewWalletKeyLabel(e.target.value)
+                            setNewSubscriptionKeyLabel(e.target.value)
                           }
                           placeholder="e.g. Production"
                           maxLength={100}
@@ -1275,65 +1351,65 @@ export default function UserAgentsPage() {
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => setShowNewWallet(false)}
+                          onClick={() => setShowNewSubscription(false)}
                         >
                           Cancel
                         </Button>
-                        <Button type="submit" loading={creatingWallet}>
-                          Create wallet + key
+                        <Button type="submit" loading={creatingSubscription}>
+                          Create subscription + key
                         </Button>
                       </div>
                     </form>
                   ) : (
                     <div className="flex justify-end">
-                      <Button onClick={() => setShowNewWallet(true)}>
-                        New wallet
+                      <Button onClick={() => setShowNewSubscription(true)}>
+                        New subscription
                       </Button>
                     </div>
                   )}
 
-                  {walletsLoading ? (
+                  {subscriptionsLoading ? (
                     <div className="text-center py-6 text-gray-500 text-sm">
                       Loading…
                     </div>
-                  ) : wallets.length === 0 ? (
+                  ) : subscriptions.length === 0 ? (
                     <div className="text-center py-6 text-gray-400 text-sm">
-                      No wallets yet for this bot.
+                      No subscriptions yet for this bot.
                     </div>
                   ) : (
                     <div className="space-y-2">
-                      {wallets.map((w) => (
+                      {subscriptions.map((s) => (
                         <button
-                          key={w.id}
-                          onClick={() => void openWalletDetail(w)}
+                          key={s.id}
+                          onClick={() => void openSubscriptionDetail(s)}
                           className="w-full text-left rounded-lg border border-gray-200 bg-white p-3 hover:bg-gray-50 transition-colors"
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
                               <div className="text-sm font-medium text-gray-900 truncate">
-                                {w.label ?? (
+                                {s.label ?? (
                                   <span className="text-gray-400">
-                                    Unlabeled wallet
+                                    Unlabeled subscription
                                   </span>
                                 )}
                               </div>
-                              {w.external_user_id && (
+                              {s.external_user_id && (
                                 <div className="text-xs text-gray-500 font-mono mt-0.5 truncate">
-                                  {w.external_user_id}
+                                  {s.external_user_id}
                                 </div>
                               )}
                               <div className="text-xs text-gray-400 mt-1">
-                                {w.active_keys} active key
-                                {w.active_keys === 1 ? "" : "s"} · created{" "}
-                                {w.created_at
-                                  ? new Date(w.created_at).toLocaleDateString()
+                                {s.active_keys} active key
+                                {s.active_keys === 1 ? "" : "s"} · created{" "}
+                                {s.created_at
+                                  ? new Date(s.created_at).toLocaleDateString()
                                   : "—"}
                               </div>
                             </div>
                             <span className="rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-900 whitespace-nowrap">
                               <span className="text-gray-500">€</span>
                               <span className="font-mono font-medium">
-                                {w.balance_eur.toFixed(2)}
+                                {s.balance_eur.toFixed(2)}
                               </span>
                             </span>
                           </div>
@@ -1351,7 +1427,7 @@ export default function UserAgentsPage() {
       <ConfirmDialog
         open={!!confirmRevoke}
         title="Revoke API key?"
-        description={`The key "${confirmRevoke?.label ?? confirmRevoke?.api_key_prefix}" will be invalidated immediately. The wallet's balance is preserved.`}
+        description={`The key "${confirmRevoke?.label ?? confirmRevoke?.api_key_prefix}" will be invalidated immediately. The subscription's balance is preserved.`}
         confirmLabel="Revoke"
         variant="danger"
         onConfirm={() => confirmRevoke && revokeKey(confirmRevoke)}
@@ -1360,11 +1436,11 @@ export default function UserAgentsPage() {
 
       <ConfirmDialog
         open={!!confirmArchive}
-        title="Archive wallet?"
-        description="All active keys on this wallet will be revoked. The wallet is soft-deleted and stops appearing in lists."
+        title="Archive subscription?"
+        description="All active keys on this subscription will be revoked. The subscription is soft-deleted and stops appearing in lists."
         confirmLabel="Archive"
         variant="danger"
-        onConfirm={() => confirmArchive && archiveWallet(confirmArchive)}
+        onConfirm={() => confirmArchive && archiveSubscription(confirmArchive)}
         onCancel={() => setConfirmArchive(null)}
       />
     </div>
