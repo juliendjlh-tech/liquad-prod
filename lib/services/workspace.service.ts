@@ -341,12 +341,17 @@ export async function inviteMember(
     throw new Error(`Failed to lookup user: ${lookupError.message}`);
   }
 
-  const targetUser = users.find(
+  let targetUser = users.find(
     (u) => u.email?.toLowerCase() === email.toLowerCase()
   );
 
   if (!targetUser) {
-    throw new Error("USER_NOT_FOUND");
+    const { data: inviteData, error: inviteError } =
+      await supabase.auth.admin.inviteUserByEmail(email);
+    if (inviteError || !inviteData.user) {
+      throw new Error(`Failed to invite user: ${inviteError?.message}`);
+    }
+    targetUser = inviteData.user;
   }
 
   const { data: existingMember } = await supabase
