@@ -37,10 +37,6 @@ export type CreateCustomBotInput = z.infer<typeof createCustomBotSchema>;
 // Update Schema — partial update of a custom bot
 //
 // If declared_ips is provided, it must stay non-empty and CIDR-valid.
-//
-// scope_to_workspace lives on the workspace_bots junction (per workspace),
-// not on the bots row, so it can be toggled even on preset bots which are
-// otherwise immutable. The PATCH handler routes it to workspace_bots.
 // ---------------------------------------------------------------------------
 
 export const updateBotSchema = z.object({
@@ -48,7 +44,6 @@ export const updateBotSchema = z.object({
   ua_pattern: z.string().trim().min(1).max(500).optional(),
   description: z.string().trim().max(500).optional(),
   declared_ips: z.array(cidr).min(1).optional(),
-  scope_to_workspace: z.boolean().optional(),
 });
 
 export type UpdateBotInput = z.infer<typeof updateBotSchema>;

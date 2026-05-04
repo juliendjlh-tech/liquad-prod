@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
+import { canonicalizeHostname } from "@/lib/utils/hostname";
 
 /**
  * Build a map of domain_id -> hostname for a workspace.
@@ -53,13 +54,27 @@ export async function resolvePublisherDomains(
 
   const supabase = await createServerClient();
 
+  const canonicalToOriginal = new Map<string, string[]>();
+  for (const h of hostnames) {
+    const canonical = canonicalizeHostname(h);
+    const list = canonicalToOriginal.get(canonical) ?? [];
+    list.push(h);
+    canonicalToOriginal.set(canonical, list);
+  }
+
   const { data } = await supabase
     .from("domains")
     .select("domain, workspace_id")
-    .in("domain", hostnames)
+    .in("domain", [...canonicalToOriginal.keys()])
     .eq("status", "verified");
 
-  return new Map((data ?? []).map((d) => [d.domain, d.workspace_id]));
+  const result = new Map<string, string>();
+  for (const row of data ?? []) {
+    for (const original of canonicalToOriginal.get(row.domain) ?? []) {
+      result.set(original, row.workspace_id);
+    }
+  }
+  return result;
 }
 
 /**

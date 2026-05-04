@@ -27,12 +27,6 @@ export interface BotRecord {
    */
   balance_eur?: number;
   bot_subscription_count?: number;
-  /**
-   * Per-(workspace, bot) flag from workspace_bots.scope_to_workspace.
-   * Optional: only populated by getWorkspaceBots() and getBotById() when
-   * a workspace context is available. See migration 030.
-   */
-  scope_to_workspace?: boolean;
 }
 
 export interface CatalogBotRecord {
@@ -102,9 +96,9 @@ export async function getWorkspaceBots(
 
   const { data, error } = await supabase
     .from("workspace_bots")
-    .select("bot_id, scope_to_workspace, bots(id, name, ua_pattern, declared_ips, type, description, created_at)")
+    .select("bot_id, bots(id, name, ua_pattern, declared_ips, type, description, created_at)")
     .eq("workspace_id", workspaceId) as unknown as {
-      data: Array<{ bot_id: string; scope_to_workspace: boolean; bots: BotRecord }> | null;
+      data: Array<{ bot_id: string; bots: BotRecord }> | null;
       error: { message: string } | null;
     };
 
@@ -138,7 +132,6 @@ export async function getWorkspaceBots(
       ...row.bots,
       balance_eur: t.balance,
       bot_subscription_count: t.count,
-      scope_to_workspace: row.scope_to_workspace,
     };
   });
 }

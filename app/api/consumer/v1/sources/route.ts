@@ -30,8 +30,9 @@ const PATH_PREFIX_RE = /^[\x21-\x7E]+$/;
  * - Idempotent and free: no token issued, no balance debited.
  * - Keyset pagination on indexed_sources.id (UUID, ascending). Stable order,
  *   constant-time per page. `next_cursor: null` signals end of pages.
- * - When the API key's workspace_bots row has scope_to_workspace=true, only
- *   catalogs owned by that workspace are visible (Mode B partnerships).
+ * - When the bot_subscription has scope_to_workspace=true (default), only
+ *   catalogs owned by that workspace are visible. Network access requires
+ *   an explicit per-subscription opt-in.
  *
  * RESPONSES:
  * - 200: { sources: [...], next_cursor: string | null }

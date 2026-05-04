@@ -28,6 +28,11 @@ export interface BotSubscriptionPublic {
   label: string | null;
   balance_eur: number;
   active_keys: number;
+  /**
+   * When true (default), this subscription only sees catalogs of its
+   * workspace. When false, opt-in network access — see migration 031.
+   */
+  scope_to_workspace: boolean;
   created_at: string | null;
   archived_at: string | null;
 }
@@ -93,7 +98,9 @@ export async function createBotSubscription(
       external_user_id: input.externalUserId ?? null,
       label: input.label ?? null,
     })
-    .select("id, workspace_id, bot_id, external_user_id, label, balance_eur, created_at, archived_at")
+    .select(
+      "id, workspace_id, bot_id, external_user_id, label, balance_eur, scope_to_workspace, created_at, archived_at"
+    )
     .single();
 
   if (error || !data) {
@@ -137,7 +144,9 @@ export async function listBotSubscriptions(
 
   let query = supabase
     .from("bot_subscriptions")
-    .select("id, workspace_id, bot_id, external_user_id, label, balance_eur, created_at, archived_at, bots(name)")
+    .select(
+      "id, workspace_id, bot_id, external_user_id, label, balance_eur, scope_to_workspace, created_at, archived_at, bots(name)"
+    )
     .eq("workspace_id", workspaceId)
     .is("archived_at", null)
     .order("created_at", { ascending: false });
@@ -175,6 +184,7 @@ export async function listBotSubscriptions(
       label: row.label,
       balance_eur: Number(row.balance_eur),
       active_keys: keyCounts.get(row.id) ?? 0,
+      scope_to_workspace: row.scope_to_workspace,
       created_at: row.created_at,
       archived_at: row.archived_at,
     };
@@ -295,4 +305,42 @@ export async function creditBotSubscriptionAsAdmin(
     new_balance: Number(result.new_balance),
     transaction_id: result.transaction_id,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Scope (Option F: opt-in network access)
+// ---------------------------------------------------------------------------
+
+/**
+ * Toggle bot_subscriptions.scope_to_workspace for a single subscription.
+ *
+ * - true  → subscription only sees catalogs of its workspace (default, safe).
+ * - false → opt-in network access; subscription sees all matching network
+ *           catalogs and the wallet is debited for paid content.
+ *
+ * The next /api/consumer/v1/* call observes the new scope; no API key
+ * rotation required.
+ */
+export async function setBotSubscriptionScope(
+  workspaceId: string,
+  userId: string,
+  botSubscriptionId: string,
+  scopeToWorkspace: boolean
+): Promise<{ scope_to_workspace: boolean }> {
+  await assertRole(workspaceId, userId, ["owner", "admin"]);
+
+  const supabase = await createServerClient();
+
+  const { data, error } = await supabase
+    .from("bot_subscriptions")
+    .update({ scope_to_workspace: scopeToWorkspace })
+    .eq("id", botSubscriptionId)
+    .eq("workspace_id", workspaceId)
+    .is("archived_at", null)
+    .select("scope_to_workspace")
+    .maybeSingle();
+
+  if (error) throw new Error(`SCOPE_UPDATE_FAILED: ${error.message}`);
+  if (!data) throw new Error("NOT_FOUND");
+  return { scope_to_workspace: data.scope_to_workspace };
 }

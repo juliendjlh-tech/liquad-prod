@@ -12,9 +12,10 @@
 //   - Bot-bound tokens: ua_pattern encoded in HMAC signature, gateway verifies
 //   - Publisher-controlled TTL: catalog.ttl_minutes, not consumer-provided
 //   - declared_ips required: bots without IP ranges cannot participate
-//   - Optional workspace scope: workspace_bots.scope_to_workspace=true
-//     restricts visible catalogs to the workspace owning the api_key
-//     (Mode B partnerships, see migration 030).
+//   - Per-subscription scope: bot_subscriptions.scope_to_workspace=true
+//     (default) restricts visible catalogs to the workspace owning the
+//     subscription. Network access is an explicit per-subscription opt-in
+//     (Option F, see migration 031).
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
@@ -35,6 +36,7 @@ import {
 } from "@/lib/db/queries/agents";
 import { normalizeUrl } from "@liquad/sdk/url-normalize";
 import { ok, err, type ServiceResult } from "@/lib/utils/service-result";
+import { canonicalizeHostname } from "@/lib/utils/hostname";
 import type { TransactionInput } from "@/lib/validations/authorize.schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -302,7 +304,7 @@ interface AccessibleCatalogInfo {
  *   4. Drop catalogs with empty intersection.
  *   5. Load CatalogRecords for the survivors with status=active filter,
  *      optional maxPriceEur, and optional scopeWorkspaceId (when
- *      scope_to_workspace=true on the workspace_bots row).
+ *      scope_to_workspace=true on the bot_subscriptions row).
  *
  * Returns:
  *   - accessible: Map<catalog_id, { catalog, allowedIps }>
@@ -750,7 +752,7 @@ export async function listAccessibleSources(
     const { data: domainRow } = await supabase
       .from("domains")
       .select("id")
-      .eq("domain", options.domain)
+      .eq("domain", canonicalizeHostname(options.domain))
       .maybeSingle();
     if (!domainRow) {
       // Unknown domain → consumer asked for a hostname not present in our index.

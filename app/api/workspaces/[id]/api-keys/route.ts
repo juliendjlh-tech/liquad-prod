@@ -73,6 +73,7 @@ export async function POST(
       botSubscriptionId: parsed.data.bot_subscription_id,
       botSubscriptionLabel: parsed.data.bot_subscription_label,
       botSubscriptionExternalUserId: parsed.data.bot_subscription_external_user_id,
+      botSubscriptionNetworkAccess: parsed.data.bot_subscription_network_access,
     });
 
     return NextResponse.json(result, { status: 201 });

@@ -12,6 +12,7 @@ import type {
 import { matchContentAgainstRules } from "@/lib/validations/catalog.schema";
 import { syncCatalogSources } from "@/lib/services/pipeline.service";
 import { getDomainMap } from "@/lib/db/queries/domains";
+import { canonicalizeHostname } from "@/lib/utils/hostname";
 import { getAllSourceUrls, getAllSourcesCustom } from "@/lib/db/queries/sources";
 import { getWorkspaceBots, getCatalogBots } from "@/lib/db/queries/agents";
 import { getCatalogs as queryCatalogs } from "@/lib/db/queries/catalogs";
@@ -411,7 +412,7 @@ export async function previewCatalogMatch(
   for (const source of sources) {
     try {
       const url = new URL(source.source_url);
-      const hostname = url.hostname;
+      const hostname = canonicalizeHostname(url.hostname);
       const pathname = url.pathname;
 
       let sourceDomainId: string | undefined;

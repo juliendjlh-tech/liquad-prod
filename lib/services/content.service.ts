@@ -12,6 +12,7 @@ import { createServerClient } from "@/lib/db/supabase-server";
 import type { Json } from "@/lib/db/types";
 import type { FilterRules } from "@/lib/validations/catalog.schema";
 import { evaluatePathRule, type PathRule } from "@/lib/validations/catalog.schema";
+import { canonicalizeHostname } from "@/lib/utils/hostname";
 
 // ---------------------------------------------------------------------------
 // Types — Domains
@@ -103,29 +104,30 @@ export async function ensureDomainExists(
   domain: string
 ): Promise<string> {
   const supabase = await createServerClient();
+  const host = canonicalizeHostname(domain);
 
   // Reject if another workspace already owns this domain as verified.
   const { data: claimed } = await supabase
     .from("domains")
     .select("id")
-    .eq("domain", domain)
+    .eq("domain", host)
     .eq("status", "verified")
     .neq("workspace_id", workspaceId)
     .maybeSingle();
 
   if (claimed) {
-    throw new Error(`domain_claimed: ${domain}`);
+    throw new Error(`domain_claimed: ${host}`);
   }
 
   const { error } = await supabase
     .from("domains")
     .upsert(
-      { workspace_id: workspaceId, domain },
+      { workspace_id: workspaceId, domain: host },
       { onConflict: "workspace_id,domain", ignoreDuplicates: true }
     );
 
   if (error) {
-    console.error(`Failed to ensure domain "${domain}":`, error.message);
+    console.error(`Failed to ensure domain "${host}":`, error.message);
     throw new Error(`Failed to create domain: ${error.message}`);
   }
 
@@ -133,11 +135,11 @@ export async function ensureDomainExists(
     .from("domains")
     .select("id")
     .eq("workspace_id", workspaceId)
-    .eq("domain", domain)
+    .eq("domain", host)
     .single();
 
   if (!existing) {
-    throw new Error(`Failed to resolve domain id for: ${domain}`);
+    throw new Error(`Failed to resolve domain id for: ${host}`);
   }
 
   return existing.id;
@@ -320,7 +322,7 @@ export async function getSources(
       .from("domains")
       .select("id")
       .eq("workspace_id", params.workspaceId)
-      .eq("domain", params.domain)
+      .eq("domain", canonicalizeHostname(params.domain))
       .single();
 
     if (!domainRecord) {

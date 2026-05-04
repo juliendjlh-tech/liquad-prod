@@ -84,8 +84,8 @@ export interface ConsumerKeyAuth {
   botSubscriptionId: string;
   /**
    * If true, /licenses and /sources only return catalogs owned by `workspaceId`.
-   * Sourced from workspace_bots(scope_to_workspace) — settable per (workspace, bot).
-   * Default false (cross-workspace reconciliation).
+   * Sourced from bot_subscriptions(scope_to_workspace) — per-subscription opt-in.
+   * Default true (secure by default); flipped to false via dashboard opt-in.
    */
   scopeToWorkspace: boolean;
 }
@@ -108,10 +108,19 @@ export async function authenticateConsumerKey(
 
   const { data: row } = await supabase
     .from("api_keys")
-    .select("id, workspace_id, bot_id, bot_subscription_id, api_key_hash")
+    .select(
+      "id, workspace_id, bot_id, bot_subscription_id, api_key_hash, bot_subscriptions!inner(scope_to_workspace)"
+    )
     .eq("api_key_prefix", prefix)
     .is("revoked_at", null)
-    .single();
+    .single<{
+      id: string;
+      workspace_id: string;
+      bot_id: string;
+      bot_subscription_id: string;
+      api_key_hash: string;
+      bot_subscriptions: { scope_to_workspace: boolean };
+    }>();
 
   if (!row?.api_key_hash) {
     return { error: "Invalid API key" };
@@ -121,16 +130,6 @@ export async function authenticateConsumerKey(
   if (!isValid) {
     return { error: "Invalid API key" };
   }
-
-  // Resolve scope_to_workspace from workspace_bots junction.
-  // Defaults to false if no row is found (defensive; should always exist
-  // since api_keys are created against workspace_bots).
-  const { data: wsBot } = await supabase
-    .from("workspace_bots")
-    .select("scope_to_workspace")
-    .eq("workspace_id", row.workspace_id)
-    .eq("bot_id", row.bot_id)
-    .maybeSingle();
 
   // Best-effort last_used_at — don't block auth on this.
   void supabase
@@ -143,6 +142,6 @@ export async function authenticateConsumerKey(
     botId: row.bot_id,
     apiKeyId: row.id,
     botSubscriptionId: row.bot_subscription_id,
-    scopeToWorkspace: wsBot?.scope_to_workspace ?? false,
+    scopeToWorkspace: row.bot_subscriptions.scope_to_workspace,
   };
 }

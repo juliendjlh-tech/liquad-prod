@@ -256,7 +256,7 @@ export default function DomainDetailPage() {
             size="sm"
             onClick={() => router.push(`/dashboard/domains/${domainId}/import`)}
           >
-            Import contents
+            Index contents
           </Button>
           <Button
             variant="secondary"

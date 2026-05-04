@@ -651,6 +651,7 @@ export type Database = {
           external_user_id: string | null
           label: string | null
           balance_eur: number
+          scope_to_workspace: boolean
           created_at: string | null
           archived_at: string | null
         }
@@ -661,6 +662,7 @@ export type Database = {
           external_user_id?: string | null
           label?: string | null
           balance_eur?: number
+          scope_to_workspace?: boolean
           created_at?: string | null
           archived_at?: string | null
         }
@@ -671,6 +673,7 @@ export type Database = {
           external_user_id?: string | null
           label?: string | null
           balance_eur?: number
+          scope_to_workspace?: boolean
           created_at?: string | null
           archived_at?: string | null
         }
@@ -702,17 +705,14 @@ export type Database = {
         Row: {
           workspace_id: string
           bot_id: string
-          scope_to_workspace: boolean
         }
         Insert: {
           workspace_id: string
           bot_id: string
-          scope_to_workspace?: boolean
         }
         Update: {
           workspace_id?: string
           bot_id?: string
-          scope_to_workspace?: boolean
         }
         Relationships: [
           {

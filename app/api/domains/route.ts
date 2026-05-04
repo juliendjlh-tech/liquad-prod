@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { createServerClient } from "@/lib/db/supabase-server";
 import { getDomainsWithContentCount } from "@/lib/services/content.service";
+import { canonicalizeHostname } from "@/lib/utils/hostname";
 
 const createDomainSchema = z.object({
   url: z
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     }
 
     const { url } = validation.data;
-    const hostname = new URL(url).hostname;
+    const hostname = canonicalizeHostname(new URL(url).hostname);
 
     // Check domain uniqueness within workspace
     const { data: existing } = await supabase

@@ -20,8 +20,9 @@ import { listAccessibleCatalogs } from "@/lib/services/consumer.service";
  * BEHAVIOUR:
  * - Idempotent and free: no token issued, no balance debited.
  * - No pagination — catalog cardinality is small (« sources).
- * - When the API key's workspace_bots row has scope_to_workspace=true, only
- *   catalogs owned by that workspace are visible (Mode B partnerships).
+ * - When the bot_subscription has scope_to_workspace=true (default), only
+ *   catalogs owned by that workspace are visible. Network access requires
+ *   an explicit per-subscription opt-in.
  *
  * RESPONSE (200):
  * {

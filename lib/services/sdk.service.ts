@@ -13,6 +13,7 @@ import { getCatalogs } from "@/lib/db/queries/catalogs";
 import type { MatchableBot, MatchableCatalog } from "@liquad/sdk/matcher";
 import type { SdkEventInput } from "@/lib/validations/sdk-event.schema";
 import { sdkEventSchema } from "@/lib/validations/sdk-event.schema";
+import { canonicalHostnameFromUrl } from "@/lib/utils/hostname";
 
 // ---------------------------------------------------------------------------
 // Types — Gateway
@@ -214,17 +215,80 @@ export async function ingestEvents(
       throw new Error(`Failed to insert events: ${error.message}`);
     }
 
-    const uniqueDomains = [...new Set(validEvents.map((e) => e.domain))];
+    const canonicalHostnames = new Set<string>();
+    for (const e of validEvents) {
+      const host = canonicalHostnameFromUrl(e.request_url);
+      if (host) canonicalHostnames.add(host);
+    }
+
     await Promise.all(
-      uniqueDomains.map(async (domain) => {
-        await supabase
-          .from("domains")
-          .update({ last_event_at: new Date().toISOString() })
-          .eq("workspace_id", workspaceId)
-          .eq("domain", domain);
-      })
+      [...canonicalHostnames].map((host) =>
+        upsertDomainAsVerified(workspaceId, host)
+      )
     );
   }
 
   return { accepted: validEvents.length, rejected };
+}
+
+/**
+ * Auto-verify a domain on first SDK event for a (workspace, hostname).
+ *
+ * - If the row exists and is already verified → only bump last_event_at.
+ * - If the row exists in pending_verification/unverified → flip to verified.
+ * - If the row doesn't exist → insert it directly as verified.
+ * - If another workspace owns this hostname as verified → the partial unique
+ *   index `idx_domains_verified_unique` blocks the write; we swallow the
+ *   conflict silently and only bump last_event_at on the existing row (if any
+ *   for this workspace).
+ */
+async function upsertDomainAsVerified(
+  workspaceId: string,
+  host: string
+): Promise<void> {
+  const supabase = await createServerClient();
+  const now = new Date().toISOString();
+
+  const { data: existing } = await supabase
+    .from("domains")
+    .select("id, status")
+    .eq("workspace_id", workspaceId)
+    .eq("domain", host)
+    .maybeSingle();
+
+  if (existing) {
+    if (existing.status === "verified") {
+      await supabase
+        .from("domains")
+        .update({ last_event_at: now })
+        .eq("id", existing.id);
+      return;
+    }
+
+    const { error } = await supabase
+      .from("domains")
+      .update({ status: "verified", verified_at: now, last_event_at: now })
+      .eq("id", existing.id);
+
+    if (error && !isUniqueViolation(error)) {
+      throw new Error(`Failed to verify domain: ${error.message}`);
+    }
+    return;
+  }
+
+  const { error } = await supabase.from("domains").insert({
+    workspace_id: workspaceId,
+    domain: host,
+    status: "verified",
+    verified_at: now,
+    last_event_at: now,
+  });
+
+  if (error && !isUniqueViolation(error)) {
+    throw new Error(`Failed to create verified domain: ${error.message}`);
+  }
+}
+
+function isUniqueViolation(error: { code?: string }): boolean {
+  return error.code === "23505";
 }

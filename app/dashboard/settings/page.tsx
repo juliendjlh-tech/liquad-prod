@@ -12,7 +12,7 @@ import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
 interface Member {
   user_id: string;
   email: string;
-  role: "owner" | "admin" | "viewer";
+  role: "owner" | "admin" | "member";
 }
 
 interface Domain {
@@ -48,7 +48,7 @@ export default function SettingsPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [apiKeyRevealed, setApiKeyRevealed] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<"admin" | "viewer">("viewer");
+  const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
   const [loading, setLoading] = useState(true);
   const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [removeMemberTarget, setRemoveMemberTarget] = useState<Member | null>(null);
@@ -150,7 +150,7 @@ export default function SettingsPage() {
     setRemoveMemberTarget(null);
   };
 
-  const changeRole = async (userId: string, newRole: "admin" | "viewer") => {
+  const changeRole = async (userId: string, newRole: "admin" | "member") => {
     const res = await fetch(
       `/api/workspaces/${workspaceId}/members/${userId}`,
       {
@@ -302,13 +302,13 @@ export default function SettingsPage() {
                     onChange={(e) =>
                       changeRole(
                         m.user_id,
-                        e.target.value as "admin" | "viewer"
+                        e.target.value as "admin" | "member"
                       )
                     }
                     className="rounded border border-gray-200 px-2 py-1 text-xs"
                   >
                     <option value="admin">Admin</option>
-                    <option value="viewer">Viewer</option>
+                    <option value="member">Member</option>
                   </select>
                   <button
                     onClick={() => setRemoveMemberTarget(m)}
@@ -334,11 +334,11 @@ export default function SettingsPage() {
           <select
             value={inviteRole}
             onChange={(e) =>
-              setInviteRole(e.target.value as "admin" | "viewer")
+              setInviteRole(e.target.value as "admin" | "member")
             }
             className="rounded-md border border-gray-300 px-3 py-2 text-sm"
           >
-            <option value="viewer">Viewer</option>
+            <option value="member">Member</option>
             <option value="admin">Admin</option>
           </select>
           <Button type="submit">Invite</Button>

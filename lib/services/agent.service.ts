@@ -230,13 +230,6 @@ export interface BotRow {
   balance_eur?: number;
   /** Number of non-archived bot subscriptions on this workspace/bot. */
   bot_subscription_count?: number;
-  /**
-   * Per-(workspace, bot) policy from workspace_bots.scope_to_workspace.
-   * When true, /api/consumer/v1/{licenses,sources,catalogs} only return
-   * catalogs owned by the workspace this bot is in. See migration 030.
-   * Populated by getWorkspaceBots() and getBotById(botId, workspaceId).
-   */
-  scope_to_workspace?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -275,14 +268,12 @@ export async function getPresetBots(): Promise<Array<BotRow & { operator?: strin
 }
 
 /**
- * Get a single bot by ID.
- *
- * If `workspaceId` is provided, the response also includes
- * `scope_to_workspace` resolved from workspace_bots(workspace_id, bot_id).
+ * Get a single bot by ID. The optional `workspaceId` parameter is currently
+ * unused — kept for API symmetry with callers that pass it.
  */
 export async function getBotById(
   botId: string,
-  workspaceId?: string
+  _workspaceId?: string
 ): Promise<BotRow | null> {
   const supabase = await createServerClient();
 
@@ -293,23 +284,7 @@ export async function getBotById(
     .single();
 
   if (error || !data) return null;
-
-  const bot = data as BotRow;
-
-  if (workspaceId) {
-    const { data: link } = await supabase
-      .from("workspace_bots")
-      .select("scope_to_workspace")
-      .eq("workspace_id", workspaceId)
-      .eq("bot_id", botId)
-      .maybeSingle();
-
-    if (link) {
-      bot.scope_to_workspace = link.scope_to_workspace;
-    }
-  }
-
-  return bot;
+  return data as BotRow;
 }
 
 /**
@@ -512,35 +487,6 @@ export async function updateBot(
 
   if (error || !updated) return null;
   return updated as BotRow;
-}
-
-/**
- * Toggle workspace_bots.scope_to_workspace for a given (workspace, bot).
- *
- * When true, /api/consumer/v1/{licenses,sources,catalogs} will only surface catalogs
- * owned by `workspaceId` to keys bound to this bot. Used by publishers
- * managing partner keys (Mode B).
- *
- * Returns the new value, or null if the workspace_bots row doesn't exist.
- */
-export async function setBotScopeToWorkspace(
-  workspaceId: string,
-  botId: string,
-  scopeToWorkspace: boolean
-): Promise<boolean | null> {
-  const supabase = await createServerClient();
-
-  const { data, error } = await supabase
-    .from("workspace_bots")
-    .update({ scope_to_workspace: scopeToWorkspace })
-    .eq("workspace_id", workspaceId)
-    .eq("bot_id", botId)
-    .select("scope_to_workspace")
-    .maybeSingle();
-
-  if (error) throw new Error(`Failed to update scope_to_workspace: ${error.message}`);
-  if (!data) return null;
-  return data.scope_to_workspace;
 }
 
 /**

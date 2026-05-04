@@ -3,6 +3,7 @@ import { z } from "zod";
 import { createServerClient } from "@/lib/db/supabase-server";
 import { fetchAndParseSitemap } from "@/lib/services/content.service";
 import { evaluatePathRule, pathRuleSchema } from "@/lib/validations/catalog.schema";
+import { canonicalizeHostname } from "@/lib/utils/hostname";
 
 const previewSchema = z.object({
   url: z
@@ -69,7 +70,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     // Check if domain already exists in this workspace (skip if domain_id is provided,
     // meaning we're importing for an existing domain)
     if (!domain_id) {
-      const hostname = new URL(url).hostname;
+      const hostname = canonicalizeHostname(new URL(url).hostname);
       const { data: existingDomain } = await supabase
         .from("domains")
         .select("id")

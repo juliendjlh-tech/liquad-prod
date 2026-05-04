@@ -18,6 +18,8 @@ export const createApiKeySchema = z.object({
   bot_subscription_label: z.string().min(1).max(100).optional(),
   /** external_user_id for the implicit bot subscription (ignored when bot_subscription_id is provided). */
   bot_subscription_external_user_id: z.string().min(1).max(200).optional(),
+  /** When true, the new subscription gets network access (scope_to_workspace=false). Default: false (workspace-only). */
+  bot_subscription_network_access: z.boolean().optional(),
 });
 
 export type CreateApiKeyInput = z.infer<typeof createApiKeySchema>;

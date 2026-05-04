@@ -28,6 +28,8 @@ export interface CreateApiKeyInput {
   botSubscriptionLabel?: string;
   /** Used when botSubscriptionId is omitted — external user id mapped to the new subscription. */
   botSubscriptionExternalUserId?: string;
+  /** When true, the new subscription gets network access (scope_to_workspace=false). Default: workspace-only. */
+  botSubscriptionNetworkAccess?: boolean;
 }
 
 export interface ApiKeyPublic {
@@ -129,6 +131,7 @@ export async function createApiKey(
         bot_id: input.botId,
         label: input.botSubscriptionLabel ?? null,
         external_user_id: input.botSubscriptionExternalUserId ?? null,
+        scope_to_workspace: input.botSubscriptionNetworkAccess ? false : true,
       })
       .select("id")
       .single();

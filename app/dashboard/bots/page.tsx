@@ -20,8 +20,6 @@ interface Bot {
   created_at: string;
   balance_eur: number;
   bot_subscription_count: number;
-  /** workspace_bots.scope_to_workspace — Mode B isolation for partner keys. */
-  scope_to_workspace?: boolean;
 }
 
 interface Preset {
@@ -40,6 +38,7 @@ interface BotSubscription {
   label: string | null;
   balance_eur: number;
   active_keys: number;
+  scope_to_workspace: boolean;
   created_at: string | null;
   archived_at: string | null;
 }
@@ -91,6 +90,11 @@ export default function BotsPage() {
   const [confirmTarget, setConfirmTarget] = useState<Bot | null>(null);
   const [search, setSearch] = useState("");
 
+  // Scope toggle (Option F: opt-in network access per subscription)
+  const [confirmScopeToggle, setConfirmScopeToggle] =
+    useState<{ subscription: BotSubscription; nextScope: boolean } | null>(null);
+  const [togglingScope, setTogglingScope] = useState(false);
+
   // Subscriptions drawer state
   const [subscriptionsFor, setSubscriptionsFor] = useState<Bot | null>(null);
   const [subscriptions, setSubscriptions] = useState<BotSubscription[]>([]);
@@ -99,6 +103,7 @@ export default function BotsPage() {
   const [newSubscriptionLabel, setNewSubscriptionLabel] = useState("");
   const [newSubscriptionExternalId, setNewSubscriptionExternalId] = useState("");
   const [newSubscriptionKeyLabel, setNewSubscriptionKeyLabel] = useState("");
+  const [newSubscriptionNetworkAccess, setNewSubscriptionNetworkAccess] = useState(false);
   const [creatingSubscription, setCreatingSubscription] = useState(false);
 
   // Subscription detail state
@@ -115,9 +120,6 @@ export default function BotsPage() {
   const [topUpAmount, setTopUpAmount] = useState("");
   const [topUpDescription, setTopUpDescription] = useState("");
   const [toppingUp, setToppingUp] = useState(false);
-
-  // Workspace scope toggle state (per-bot, persisted on workspace_bots)
-  const [scopeUpdating, setScopeUpdating] = useState(false);
 
   const [toast, setToast] = useState<{
     message: string;
@@ -324,53 +326,6 @@ export default function BotsPage() {
     [workspaceId]
   );
 
-  // Toggle workspace_bots.scope_to_workspace for the bot in the drawer.
-  // Optimistic update + rollback on failure.
-  const toggleScopeToWorkspace = async (next: boolean) => {
-    if (!subscriptionsFor || scopeUpdating) return;
-    const prev = subscriptionsFor.scope_to_workspace ?? false;
-    setSubscriptionsFor({ ...subscriptionsFor, scope_to_workspace: next });
-    setBots((current) =>
-      current.map((b) =>
-        b.id === subscriptionsFor.id ? { ...b, scope_to_workspace: next } : b
-      )
-    );
-    setScopeUpdating(true);
-    try {
-      const res = await fetch(`/api/bots/${subscriptionsFor.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
-        body: JSON.stringify({ scope_to_workspace: next }),
-      });
-      if (!res.ok) {
-        const json = await res.json().catch(() => ({}));
-        throw new Error(json.message ?? json.error ?? "Failed to update scope");
-      }
-      showToast(
-        next
-          ? "Catalog access constrained to this workspace"
-          : "Catalog access opened to all matching publishers",
-        "success"
-      );
-    } catch (err) {
-      // Rollback
-      setSubscriptionsFor((cur) =>
-        cur ? { ...cur, scope_to_workspace: prev } : cur
-      );
-      setBots((current) =>
-        current.map((b) =>
-          b.id === subscriptionsFor.id ? { ...b, scope_to_workspace: prev } : b
-        )
-      );
-      showToast(err instanceof Error ? err.message : "Failed to update scope", "error");
-    } finally {
-      setScopeUpdating(false);
-    }
-  };
-
   const openSubscriptionsDrawer = useCallback(
     (bot: Bot) => {
       setSubscriptionsFor(bot);
@@ -410,6 +365,7 @@ export default function BotsPage() {
           label: newSubscriptionKeyLabel || undefined,
           bot_subscription_label: newSubscriptionLabel || undefined,
           bot_subscription_external_user_id: newSubscriptionExternalId || undefined,
+          bot_subscription_network_access: newSubscriptionNetworkAccess || undefined,
         }),
       });
       if (!res.ok) {
@@ -426,6 +382,7 @@ export default function BotsPage() {
       setNewSubscriptionLabel("");
       setNewSubscriptionExternalId("");
       setNewSubscriptionKeyLabel("");
+      setNewSubscriptionNetworkAccess(false);
 
       await fetchSubscriptions(subscriptionsFor.id);
       void fetchBots();
@@ -437,6 +394,7 @@ export default function BotsPage() {
         bot_name: payload.record.bot_name,
         external_user_id: payload.record.bot_subscription_external_user_id,
         label: payload.record.bot_subscription_label,
+        scope_to_workspace: !newSubscriptionNetworkAccess,
         balance_eur: payload.record.bot_subscription_balance_eur,
         active_keys: 1,
         created_at: payload.record.created_at,
@@ -598,6 +556,58 @@ export default function BotsPage() {
   };
 
   // ---------------------------------------------------------------------------
+  // Subscription scope toggle (Option F: opt-in network access)
+  // ---------------------------------------------------------------------------
+
+  const requestScopeToggle = (subscription: BotSubscription, nextScope: boolean) => {
+    setConfirmScopeToggle({ subscription, nextScope });
+  };
+
+  const cancelScopeToggle = () => {
+    setConfirmScopeToggle(null);
+  };
+
+  const applyScopeToggle = async () => {
+    if (!confirmScopeToggle) return;
+    const { subscription, nextScope } = confirmScopeToggle;
+    setTogglingScope(true);
+    try {
+      const res = await fetch(
+        `/api/workspaces/${workspaceId}/bot-subscriptions/${subscription.id}/scope`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ scope_to_workspace: nextScope }),
+        }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        showToast(body.error ?? "Failed to update scope", "error");
+        return;
+      }
+      setSubscriptions((prev) =>
+        prev.map((s) =>
+          s.id === subscription.id ? { ...s, scope_to_workspace: nextScope } : s
+        )
+      );
+      setActiveSubscription((prev) =>
+        prev && prev.id === subscription.id
+          ? { ...prev, scope_to_workspace: nextScope }
+          : prev
+      );
+      showToast(
+        nextScope
+          ? "Subscription restricted to this workspace"
+          : "Network access enabled — share carefully",
+        "success"
+      );
+      cancelScopeToggle();
+    } finally {
+      setTogglingScope(false);
+    }
+  };
+
+  // ---------------------------------------------------------------------------
   // Derived data
   // ---------------------------------------------------------------------------
 
@@ -638,9 +648,16 @@ export default function BotsPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">AI Bots</h1>
-        <div className="flex gap-2">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">AI Bots</h1>
+        <p className="text-sm text-gray-500">
+          All bots are blocked by default and require explicit catalog access. Each authorized bot receives a workspace-scoped API key and is continuously monitored.
+        </p>
+      </div>
+
+      {/* Actions */}
+      <div className="mb-6">
+        <div className="flex gap-2 justify-end">
           <Button
             variant="secondary"
             onClick={() => {
@@ -751,7 +768,9 @@ export default function BotsPage() {
         <div className="text-center py-12 text-gray-500">Loading...</div>
       ) : bots.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
-          <p className="text-sm mb-4">No bots added yet.</p>
+          <p className="text-sm mb-4">
+            No bots added yet.
+          </p>
           <div className="flex justify-center gap-3">
             <Button
               variant="secondary"
@@ -1107,6 +1126,60 @@ export default function BotsPage() {
                 </div>
 
                 <div className="p-6 space-y-6">
+                  {/* Scope banner (Option F: opt-in network access) */}
+                  <div
+                    className={`rounded-lg border p-4 ${
+                      activeSubscription.scope_to_workspace
+                        ? "border-emerald-200 bg-emerald-50"
+                        : "border-orange-300 bg-orange-50"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div
+                          className={`text-sm font-semibold mb-1 ${
+                            activeSubscription.scope_to_workspace
+                              ? "text-emerald-900"
+                              : "text-orange-900"
+                          }`}
+                        >
+                          {activeSubscription.scope_to_workspace
+                            ? "Workspace only"
+                            : "Network access"}
+                        </div>
+                        <p
+                          className={`text-xs leading-relaxed ${
+                            activeSubscription.scope_to_workspace
+                              ? "text-emerald-800"
+                              : "text-orange-800"
+                          }`}
+                        >
+                          {activeSubscription.scope_to_workspace
+                            ? "Keys on this subscription only see catalogs of this workspace. Safe to share with partners or customers."
+                            : "Keys on this subscription see all matching network catalogs and the balance is debited for paid content. Use only for trusted internal use — never share with a third party."}
+                        </p>
+                      </div>
+                      <Button
+                        variant={
+                          activeSubscription.scope_to_workspace
+                            ? "secondary"
+                            : "ghost"
+                        }
+                        size="sm"
+                        onClick={() =>
+                          requestScopeToggle(
+                            activeSubscription,
+                            !activeSubscription.scope_to_workspace
+                          )
+                        }
+                      >
+                        {activeSubscription.scope_to_workspace
+                          ? "Allow network access"
+                          : "Restrict to workspace only"}
+                      </Button>
+                    </div>
+                  </div>
+
                   {justCreatedKey && (
                     <div className="rounded-lg border border-green-300 bg-green-50 p-4">
                       <p className="text-sm font-medium text-green-900 mb-2">
@@ -1174,8 +1247,13 @@ export default function BotsPage() {
                     className="rounded-lg border border-gray-200 bg-gray-50 p-4"
                   >
                     <h3 className="text-sm font-medium text-gray-900 mb-2">
-                      Generate a new key for this subscription
+                      Generate a new key
                     </h3>
+                    <p className="text-xs text-gray-500 mb-3">
+                      {activeSubscription.scope_to_workspace
+                        ? "Share this key with your partner or customer — it only sees catalogs of your workspace."
+                        : "This key has network access. Use it in your crawler or application — never share it with a third party."}
+                    </p>
                     <div className="flex gap-2">
                       <input
                         type="text"
@@ -1267,30 +1345,6 @@ export default function BotsPage() {
                   </button>
                 </div>
 
-                {/* Workspace scope toggle (workspace_bots.scope_to_workspace) */}
-                <div className="px-6 py-3 border-b border-gray-100 bg-gray-50">
-                  <label className="flex items-start gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={subscriptionsFor.scope_to_workspace ?? false}
-                      disabled={scopeUpdating}
-                      onChange={(e) => void toggleScopeToWorkspace(e.target.checked)}
-                      className="mt-0.5"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-900">
-                        Constrain to my workspace catalogs
-                      </div>
-                      <div className="text-xs text-gray-500 mt-0.5">
-                        When enabled, API keys for this bot only see catalogs you own.
-                        Use this for partner integrations where the consumer should not
-                        access other publishers&apos; content. Leave OFF for self-serve
-                        consumer keys that should reach every matching publisher.
-                      </div>
-                    </div>
-                  </label>
-                </div>
-
                 <div className="p-6 space-y-4">
                   {showNewSubscription ? (
                     <form
@@ -1301,8 +1355,7 @@ export default function BotsPage() {
                         New subscription
                       </h3>
                       <p className="text-xs text-gray-500">
-                        A first API key is generated at the same time and shown
-                        once on the next screen.
+                        A first API key is generated at the same time and shown once on the next screen.
                       </p>
                       <div>
                         <label className="block text-xs font-medium text-gray-700 mb-1">
@@ -1346,6 +1399,28 @@ export default function BotsPage() {
                           className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
                         />
                       </div>
+                      <div>
+                        <label className="flex items-start gap-2 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={newSubscriptionNetworkAccess}
+                            onChange={(e) =>
+                              setNewSubscriptionNetworkAccess(e.target.checked)
+                            }
+                            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-orange-600 focus:ring-orange-500"
+                          />
+                          <span className="text-sm font-medium text-gray-900">
+                            Allow network access
+                          </span>
+                        </label>
+                        <p className="mt-1 ml-6 text-xs text-gray-500">
+                          If unchecked (recommended): subscribers access your workspace catalogs only, safe to share with
+                          partners.
+                          If checked: subscribers access all matching network catalogs
+                          and the balance is debited for paid content (use only
+                          for internal use).
+                        </p>
+                      </div>
                       <div className="flex justify-end gap-2">
                         <Button
                           type="button"
@@ -1386,10 +1461,21 @@ export default function BotsPage() {
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0">
-                              <div className="text-sm font-medium text-gray-900 truncate">
-                                {s.label ?? (
-                                  <span className="text-gray-400">
-                                    Unlabeled subscription
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-sm font-medium text-gray-900 truncate">
+                                  {s.label ?? (
+                                    <span className="text-gray-400">
+                                      Unlabeled subscription
+                                    </span>
+                                  )}
+                                </span>
+                                {s.scope_to_workspace ? (
+                                  <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-medium text-emerald-700 whitespace-nowrap">
+                                    Workspace only
+                                  </span>
+                                ) : (
+                                  <span className="rounded-full bg-orange-50 border border-orange-200 px-2 py-0.5 text-[11px] font-medium text-orange-700 whitespace-nowrap">
+                                    Network access
                                   </span>
                                 )}
                               </div>
@@ -1443,6 +1529,87 @@ export default function BotsPage() {
         onConfirm={() => confirmArchive && archiveSubscription(confirmArchive)}
         onCancel={() => setConfirmArchive(null)}
       />
+
+      {/* Scope toggle modal (Option F: opt-in network access) */}
+      {confirmScopeToggle && (() => {
+        const { subscription, nextScope } = confirmScopeToggle;
+        const isOptIn = nextScope === false; // turning network access ON
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            role="dialog"
+            aria-modal="true"
+          >
+            <div
+              className="absolute inset-0 bg-black/40"
+              onClick={cancelScopeToggle}
+            />
+            <div className="relative w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+              {isOptIn && (
+                <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-orange-100">
+                  <svg
+                    width="20"
+                    height="20"
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M10 6v4m0 4h.01M10 18a8 8 0 100-16 8 8 0 000 16z"
+                      stroke="#EA580C"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+              )}
+              <h3 className="text-base font-semibold text-gray-900">
+                {isOptIn
+                  ? "Allow network access?"
+                  : "Restrict to workspace only?"}
+              </h3>
+              {isOptIn ? (
+                <div className="mt-2 space-y-3 text-sm text-gray-600">
+                  <p>
+                    This subscription will be able to access{" "}
+                    <strong>all network catalogs</strong> matching this bot, and
+                    the wallet (€{subscription.balance_eur.toFixed(2)}) will be
+                    debited for paid content.
+                  </p>
+                  <p className="text-orange-700">
+                    This is intended for <strong>internal use only</strong> —
+                    never share keys from a network-access subscription with a
+                    third party.
+                  </p>
+                </div>
+              ) : (
+                <p className="mt-2 text-sm text-gray-600">
+                  Keys on this subscription will only see catalogs of{" "}
+                  <strong>this workspace</strong> again. Existing licenses for
+                  cross-workspace catalogs will stop being granted on the next
+                  authorize call.
+                </p>
+              )}
+              <div className="mt-5 flex justify-end gap-2">
+                <Button variant="secondary" onClick={cancelScopeToggle}>
+                  Cancel
+                </Button>
+                <Button
+                  variant={isOptIn ? "danger" : "primary"}
+                  loading={togglingScope}
+                  onClick={() => void applyScopeToggle()}
+                >
+                  {isOptIn
+                    ? "Allow network access"
+                    : "Restrict to workspace"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

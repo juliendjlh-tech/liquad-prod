@@ -5,7 +5,6 @@ import {
   getBotById,
   updateBot,
   removeBotFromWorkspace,
-  setBotScopeToWorkspace,
 } from "@/lib/services/agent.service";
 
 /**
@@ -53,14 +52,13 @@ export async function GET(
 /**
  * PATCH /api/bots/:id
  *
- * Update a bot. Two kinds of fields:
- *   - bot fields (name, ua_pattern, description, declared_ips):
- *     mutate the global `bots` row. Presets are immutable for clients.
- *   - scope_to_workspace: lives on workspace_bots(workspace_id, bot_id) and
- *     is per-workspace. Settable on presets too (it's a workspace-local
- *     policy, not a property of the bot identity).
+ * Update a custom bot's name, ua_pattern, description, or declared_ips.
+ * Only the workspace that owns the custom bot can edit it; presets are
+ * immutable for clients.
  *
- * Only the workspace that owns the custom bot (has it in workspace_bots) can edit it.
+ * Subscription scope (Option F opt-in network access) is no longer set on
+ * the bot — it lives per-bot-subscription. See
+ * /api/workspaces/:id/bot-subscriptions/:subId/scope.
  */
 export async function PATCH(
   request: NextRequest,
@@ -100,31 +98,11 @@ export async function PATCH(
 
     if (!membership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
-    // Split the body: bot fields go to updateBot, scope_to_workspace goes to
-    // workspace_bots. They can be sent in the same request.
-    const { scope_to_workspace, ...botFields } = validation.data;
-    const hasBotFields = Object.keys(botFields).length > 0;
-
-    let updated = hasBotFields
-      ? await updateBot(botId, botFields, workspaceId)
+    const updated = Object.keys(validation.data).length > 0
+      ? await updateBot(botId, validation.data, workspaceId)
       : await getBotById(botId, workspaceId);
 
     if (!updated) return NextResponse.json({ error: "Bot not found" }, { status: 404 });
-
-    if (scope_to_workspace !== undefined) {
-      const newScope = await setBotScopeToWorkspace(
-        workspaceId,
-        botId,
-        scope_to_workspace
-      );
-      if (newScope === null) {
-        return NextResponse.json(
-          { error: "Bot not found in this workspace" },
-          { status: 404 }
-        );
-      }
-      updated = { ...updated, scope_to_workspace: newScope };
-    }
 
     return NextResponse.json(updated, { status: 200 });
   } catch (err) {

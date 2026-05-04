@@ -23,3 +23,14 @@ export const creditBotSubscriptionSchema = z.object({
 });
 
 export type CreditBotSubscriptionInput = z.infer<typeof creditBotSubscriptionSchema>;
+
+/**
+ * Body schema for PATCH /api/workspaces/:id/bot-subscriptions/:botSubscriptionId/scope —
+ * toggle Option F's per-subscription scope. true = workspace-only (safe
+ * default), false = opt-in network access.
+ */
+export const updateBotSubscriptionScopeSchema = z.object({
+  scope_to_workspace: z.boolean(),
+});
+
+export type UpdateBotSubscriptionScopeInput = z.infer<typeof updateBotSubscriptionScopeSchema>;
