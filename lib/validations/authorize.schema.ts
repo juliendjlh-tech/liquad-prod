@@ -4,8 +4,9 @@ import { z } from "zod";
  * Schema for POST /api/consumer/v1/licenses request body.
  *
  * - urls: Array of content URLs to pre-authorize (batch).
- * - bot_id: Optional. If provided, must match the bot bound to the API key.
- *   The effective bot identity is always derived from the key.
+ * - bot_id: Optional at the schema level. The route enforces presence after
+ *   falling back to api_keys.default_bot_id. If neither the body nor the key
+ *   carry one, the service returns 422 `bot_id_required`.
  * - max_price_eur: Optional price ceiling per URL.
  *
  * TTL is controlled by the publisher (catalog.ttl_minutes), not the consumer.

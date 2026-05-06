@@ -5,22 +5,13 @@ import { createServerClient } from "@/lib/db/supabase-server";
 /**
  * GET /api/consumer/v1/balance
  *
- * Returns the bot subscription balance and spending summary for the
- * subscription bound to the calling API key. Since migration 025, balance
- * lives on the bot subscription entity; multiple keys can point at the same
- * subscription, and one (workspace, bot) pair can host multiple subscriptions
- * for per-end-user budgets.
- *
- * Authentication: API key via Authorization: Bearer <key>
+ * Returns the subscription balance and spending summary for the subscription
+ * bound to the calling API key. Subscriptions are workspace-scoped and
+ * bot-agnostic since migration 032.
  *
  * RESPONSE (200):
  * {
- *   workspace_id: string,
- *   bot_id: string,
- *   bot_subscription_id: string,
- *   balance_eur: number,
- *   total_spent_eur: number,
- *   transaction_count: number
+ *   workspace_id, subscription_id, balance_eur, total_spent_eur, transaction_count
  * }
  */
 export async function GET(request: NextRequest): Promise<NextResponse> {
@@ -34,15 +25,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const supabase = await createServerClient();
 
-    const { data: botSubscription } = await supabase
-      .from("bot_subscriptions")
+    const { data: subscription } = await supabase
+      .from("subscriptions")
       .select("balance_eur")
-      .eq("id", authResult.botSubscriptionId)
+      .eq("id", authResult.subscriptionId)
       .single();
 
-    if (!botSubscription) {
+    if (!subscription) {
       return NextResponse.json(
-        { error: "bot_subscription_not_found" },
+        { error: "subscription_not_found" },
         { status: 404 }
       );
     }
@@ -50,7 +41,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const { data: debits } = await supabase
       .from("credit_transactions")
       .select("amount_eur")
-      .eq("bot_subscription_id", authResult.botSubscriptionId)
+      .eq("subscription_id", authResult.subscriptionId)
       .eq("type", "debit");
 
     const transactions = debits ?? [];
@@ -61,16 +52,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({
       workspace_id: authResult.workspaceId,
-      bot_id: authResult.botId,
-      bot_subscription_id: authResult.botSubscriptionId,
-      balance_eur: Number(botSubscription.balance_eur),
+      subscription_id: authResult.subscriptionId,
+      balance_eur: Number(subscription.balance_eur),
       total_spent_eur: Math.round(totalSpent * 100) / 100,
       transaction_count: transactions.length,
     });
   } catch {
-    return NextResponse.json(
-      { error: "internal_error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

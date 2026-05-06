@@ -109,6 +109,15 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       }
     }
 
+    // ── bot_id (required since migration 032) ──
+    const botId = url.searchParams.get("bot_id");
+    if (!botId || !UUID_RE.test(botId)) {
+      return NextResponse.json(
+        { error: "validation_error", message: "bot_id query param is required (UUID)" },
+        { status: 400 }
+      );
+    }
+
     // ── catalog_id (repeatable) ──
     const catalogIds = url.searchParams.getAll("catalog_id");
     if (catalogIds.length > SOURCES_LIMITS.catalogIdFilterMax) {
@@ -131,7 +140,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const result = await listAccessibleSources(
       authResult.workspaceId,
-      authResult.botId,
+      botId,
       authResult.scopeToWorkspace,
       {
         cursor: cursorParam,

@@ -1,18 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { archiveBotSubscription } from "@/lib/services/wallet.service";
+import { archiveSubscription } from "@/lib/services/subscription.service";
 
 /**
- * DELETE /api/workspaces/:id/bot-subscriptions/:botSubscriptionId
- * Archive a bot subscription (owner/admin). Fails if balance > 0.
- * All active keys pointing at the subscription are revoked as part of the archive.
+ * DELETE /api/workspaces/:id/subscriptions/:subscriptionId
+ * Archive a subscription (owner/admin). Fails if balance > 0.
  */
 export async function DELETE(
   _request: NextRequest,
-  { params }: { params: Promise<{ id: string; botSubscriptionId: string }> }
+  { params }: { params: Promise<{ id: string; subscriptionId: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id: workspaceId, botSubscriptionId } = await params;
+    const { id: workspaceId, subscriptionId } = await params;
 
     const supabase = await createServerClient();
     const {
@@ -23,7 +22,7 @@ export async function DELETE(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    await archiveBotSubscription(workspaceId, user.id, botSubscriptionId);
+    await archiveSubscription(workspaceId, user.id, subscriptionId);
     return new NextResponse(null, { status: 204 });
   } catch (err) {
     if (err instanceof Error) {
@@ -34,11 +33,11 @@ export async function DELETE(
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       if (err.message === "NOT_FOUND") {
-        return NextResponse.json({ error: "Bot subscription not found" }, { status: 404 });
+        return NextResponse.json({ error: "Subscription not found" }, { status: 404 });
       }
-      if (err.message === "BOT_SUBSCRIPTION_HAS_BALANCE") {
+      if (err.message === "SUBSCRIPTION_HAS_BALANCE") {
         return NextResponse.json(
-          { error: "Bot subscription still has a balance — refund before archiving" },
+          { error: "Subscription still has a balance — refund before archiving" },
           { status: 409 }
         );
       }

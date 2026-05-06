@@ -53,19 +53,41 @@ Une `bots` row est globale à la plateforme (déduplication par nom). Sa
 présence dans un workspace est représentée par la table de jonction
 `workspace_bots`.
 
-### 1.2 Bot subscription
+### 1.2 Subscription
 
-Une **bot subscription** porte le solde (`balance_eur`) et un identifiant
-optionnel d'utilisateur final (`external_user_id`) pour le cas multi-tenant
-(ex : ChatGPT-style : une subscription par end-user de votre produit).
+Une **subscription** est un compte prépayé **workspace-scoped et
+bot-agnostique**. Elle porte :
 
-Une même paire `(workspace, bot)` peut héberger plusieurs subscriptions —
-chacune avec son propre budget et ses propres clés API.
+- `balance_eur` — solde prépayé,
+- `scope_to_workspace` — mode end-user (`true`, défaut, partage avec
+  partenaires) ou client (`false`, accès réseau pour usage interne),
+- `external_user_id` — identifiant optionnel pour le cas multi-tenant
+  (ex : une subscription par end-user de votre produit). Unique par
+  workspace.
+
+Le bot avec lequel on opère est **précisé par appel** dans `/licenses`,
+ou hérité de la clé via `default_bot_id` (cf. §1.3). Une même
+subscription peut donc servir à plusieurs bots successivement.
 
 ### 1.3 API key
 
-Une **API key** est attachée à exactement une bot subscription. Elle hérite
-donc d'une identité bot (`bot_id`) et d'un workspace (`workspace_id`).
+Une **API key** est attachée à exactement une subscription et hérite donc
+de son `workspace_id` et de son scope. Elle peut **optionnellement** être
+créée avec un `default_bot_id` :
+
+- `default_bot_id = NULL` (clé bot-agnostique) : le caller doit fournir
+  `bot_id` à chaque appel `/licenses`. Cas par défaut pour un usage
+  multi-bot.
+- `default_bot_id = <uuid>` (clé bound à un bot par défaut) : le caller
+  peut omettre `bot_id` dans `/licenses` — le serveur fallback sur ce
+  default. Idéal pour le scénario *partenaire d'un publisher* : le
+  publisher binde la clé au bot custom qu'il a créé pour le partenaire,
+  qui n'a alors **rien d'autre que sa clé** à envoyer. `body.bot_id`
+  override le default si fourni explicitement.
+
+Le `default_bot_id` est validé à la création contre `workspace_bots`. Si
+le bot est supprimé plus tard, la colonne passe à NULL et la clé
+redevient bot-agnostique (le partenaire devra alors envoyer `bot_id`).
 
 Format : `lq_<random>` — préfixe sur 11 caractères + secret. Hashée en
 base de données ; ne peut être révélée qu'au moment de la création.
@@ -119,8 +141,8 @@ intéresse.
 | | |
 |---|---|
 | `workspace_bots.workspace_id` | votre workspace |
-| `workspace_bots.scope_to_workspace` | `false` (par défaut) |
-| `bot_subscription.workspace_id` | votre workspace |
+| `subscription.scope_to_workspace` | `false` (mode client) |
+| `subscription.workspace_id` | votre workspace |
 | Catalogues visibles | tous les catalogues de tous les publishers dont le bot lié partage votre `ua_pattern` et au moins une IP |
 | Qui finance | vous (top-up sur votre wallet) |
 
@@ -137,17 +159,22 @@ et la clé API dans son propre workspace, puis l'envoie au partenaire.
 | | |
 |---|---|
 | `workspace_bots.workspace_id` | workspace du **publisher** |
-| `workspace_bots.scope_to_workspace` | `true` (à activer côté publisher) |
-| `bot_subscription.workspace_id` | workspace du **publisher** |
+| `subscription.scope_to_workspace` | `true` (mode end-user, défaut) |
+| `subscription.workspace_id` | workspace du **publisher** |
+| `api_key.default_bot_id` | typiquement le bot custom créé pour ce partenaire (optionnel) |
 | Catalogues visibles | **uniquement** les catalogues du publisher hôte |
 | Qui finance | le publisher (top-up sur son propre wallet) |
 
 L'isolation est strictement appliquée par
-`workspace_bots.scope_to_workspace = true` : `/catalogs`, `/sources` et
+`subscription.scope_to_workspace = true` : `/catalogs`, `/sources` et
 `/licenses` filtrent les catalogues retournés à
 `workspace_id = <workspace du publisher>`. Toggable à tout moment côté
-publisher (via le drawer du bot dans le dashboard) — n'invalide aucune
-clé API existante, prend effet à l'appel suivant.
+publisher (via le détail subscription dans le dashboard) — n'invalide
+aucune clé API existante, prend effet à l'appel suivant.
+
+Quand le publisher bind un `default_bot_id` à la clé du partenaire, ce
+dernier peut appeler `/licenses` **sans rien savoir du UUID du bot** —
+sa clé suffit.
 
 > **Note pour l'intégrateur** : du point de vue de votre code, **rien ne
 > change** entre Mode A et Mode B. Vous appelez les mêmes endpoints avec la
@@ -175,8 +202,14 @@ Content-Type: application/json
 { "error": "invalid_api_key" }
 ```
 
-L'identité bot et le workspace de débit sont **dérivés de la clé**. Vous
-n'avez jamais à les fournir — ils sont implicites dans toutes les requêtes.
+Le workspace de débit et la subscription sont **dérivés de la clé**. Vous
+n'avez jamais à les fournir.
+
+L'identité bot, en revanche :
+- est **fournie par appel** dans `/licenses` (`body.bot_id`),
+- ou héritée de la clé si elle a été créée avec un `default_bot_id`,
+- est **toujours requise** sur `/sources` et `/catalogs` (paramètre
+  `?bot_id=<uuid>`).
 
 ---
 
@@ -194,12 +227,14 @@ Endpoint **idempotent et gratuit** : aucun token, aucun débit.
 ### Requête
 
 ```http
-GET /api/consumer/v1/catalogs HTTP/1.1
+GET /api/consumer/v1/catalogs?bot_id=<uuid> HTTP/1.1
 Host: app.liquad.io
 Authorization: Bearer lq_...
 ```
 
-Aucun paramètre.
+| Paramètre | Type | Requis | Description |
+|---|---|---|---|
+| `bot_id` | uuid | oui | Bot avec lequel le filtrage est effectué (UA + IP intersection). Doit appartenir à `workspace_bots(subscription.workspace_id)`. |
 
 ### Réponse 200
 
@@ -259,13 +294,14 @@ Pagination par **cursor keyset** : performance constante, ordre stable.
 ### Requête
 
 ```http
-GET /api/consumer/v1/sources?domain=example.com&path_prefix=/blog/&limit=2000 HTTP/1.1
+GET /api/consumer/v1/sources?bot_id=<uuid>&domain=example.com&path_prefix=/blog/&limit=2000 HTTP/1.1
 Host: app.liquad.io
 Authorization: Bearer lq_...
 ```
 
 | Paramètre | Type | Défaut | Description |
 |---|---|---|---|
+| `bot_id` | UUID | **requis** | Bot avec lequel le filtrage est effectué. Doit appartenir à `workspace_bots(subscription.workspace_id)`. |
 | `cursor` | UUID | (aucun) | Curseur opaque renvoyé par la réponse précédente (`next_cursor`). Omettre pour la première page. |
 | `limit` | int | 1000 | Plage : 1–5000. Nombre max d'URLs renvoyées sur cette page. |
 | `domain` | string | (aucun) | Filtre par hostname publisher (ex : `example.com`). Format : `[a-zA-Z0-9.-]+`, max 253 caractères. |
@@ -338,9 +374,14 @@ pas le passé.
 
 ## 6. Achat de licences — `POST /api/consumer/v1/licenses`
 
-Achète des tokens HMAC pré-signés pour un batch d'URLs. Chaque token est
-ensuite envoyé à la requête HTTP de scraping (header ou query param) ; le
-SDK déployé chez le publisher le vérifie localement, sans callback réseau.
+Achète des tokens HMAC pré-signés pour un batch d'URLs. Chaque résultat
+contient un `crawl_url` directement utilisable : si l'URL est licenciée,
+`crawl_url` = URL d'origine + `?_lq=<token>` ; sinon `crawl_url` = URL
+d'origine telle quelle (le SDK côté publisher bloquera la requête sans
+token et émettra un événement de visibilité s'il est installé).
+
+Avec ce contrat, un consommateur (ex. Custom GPT ChatGPT) peut toujours
+fetch `results[].crawl_url` sans logique de fallback côté client.
 
 ### Requête
 
@@ -362,7 +403,7 @@ Content-Type: application/json
 | Champ | Type | Requis | Description |
 |---|---|---|---|
 | `urls` | string[] | oui | 1 à 100 URLs absolues (`http(s)://...`). Normalisation appliquée côté serveur (suppression du fragment, tri des query params). |
-| `bot_id` | uuid | non | Si fourni, doit correspondre exactement au `bot_id` lié à la clé API. Si différent → 422 `bot_mismatch`. Recommandé : omettre. |
+| `bot_id` | uuid | conditionnel | Identifiant du bot avec lequel vous opérez. **Requis** sauf si la clé API a été créée avec un `default_bot_id` — dans ce cas, omettre fait fallback sur le default. Si fourni explicitement, override le default. Validé contre `workspace_bots(subscription.workspace_id)`. |
 | `max_price_eur` | number | non | Plafond de prix par URL (0 ≤ x ≤ 100). Les catalogues plus chers sont ignorés pour cet appel. |
 
 ### Réponse 200
@@ -372,17 +413,18 @@ Content-Type: application/json
   "results": [
     {
       "url": "https://example.com/articles/2026/billing-guide",
+      "crawl_url": "https://example.com/articles/2026/billing-guide?_lq=abc123...",
+      "reason": "granted",
       "token": "abc123...base64url...",
       "price_eur": 0.05,
       "catalog_id": "8c2f...",
       "expires_at": "2026-04-29T15:34:00.000Z",
       "cached": false,
       "allowed_ips": ["203.0.113.0/24"]
-    }
-  ],
-  "unmatched": [
+    },
     {
       "url": "https://example.com/articles/2026/refund-policy",
+      "crawl_url": "https://example.com/articles/2026/refund-policy",
       "reason": "no_match"
     }
   ],
@@ -393,20 +435,40 @@ Content-Type: application/json
 
 | Champ | Description |
 |---|---|
-| `results[].token` | Token base64url à fournir au scrape. **Conservez-le** jusqu'à `expires_at`. |
-| `results[].cached` | `true` si un grant actif existait déjà pour cette URL — **aucun débit** appliqué pour ce résultat. Idempotence native dans la fenêtre TTL. |
-| `results[].allowed_ips` | IPs depuis lesquelles le gateway acceptera le token. Toute IP source en dehors → rejet 403, même avec un token valide. |
-| `unmatched[].reason` | Voir tableau ci-dessous. |
-| `total_cost_eur` | Somme des `price_eur` des résultats **non cachés**. |
-| `balance_remaining_eur` | Solde de votre bot subscription après ce débit. |
+| `results[].url` | URL d'origine telle qu'envoyée par le caller (echo). |
+| `results[].crawl_url` | **URL prête à fetch.** Pour `granted` : URL + `?_lq=<token>`. Pour toute autre `reason` : URL d'origine inchangée (sans token). |
+| `results[].reason` | Statut par URL — voir tableau ci-dessous. |
+| `results[].token` | (granted uniquement) Token base64url. Disponible aussi via `crawl_url`. |
+| `results[].cached` | (granted uniquement) `true` si un grant actif existait déjà — aucun débit. Idempotence native dans la fenêtre TTL. |
+| `results[].allowed_ips` | (granted uniquement) IPs depuis lesquelles le gateway acceptera le token. Toute IP source en dehors → rejet 403, même avec un token valide. |
+| `total_cost_eur` | Somme des `price_eur` des résultats `granted` **non cachés**. `0` en cas de dégradation `insufficient_balance`. |
+| `balance_remaining_eur` | Solde de votre subscription après ce débit (inchangé en cas de dégradation). |
 
-### Raisons de `unmatched`
+### Valeurs de `reason`
 
 | Code | Signification | Action recommandée |
 |---|---|---|
+| `granted` | Token émis et débité (ou cached). `crawl_url` contient le token. | Fetch `crawl_url`. |
 | `no_match` | L'URL n'est indexée par aucun publisher Liquad. | Vérifier l'URL ; appeler `/sources` pour découvrir les URLs accessibles. |
 | `no_catalog` | L'URL est indexée mais aucun catalogue actif ne couvre votre `ua_pattern` (ou tous les catalogues UA-compatibles ont été filtrés par votre `max_price_eur` ou par le `scope_to_workspace=true` de votre clé). | Augmenter `max_price_eur` ; demander au publisher d'ajouter votre bot à un catalogue ; vérifier que vous êtes sur le bon workspace si vous êtes en Mode B. |
 | `no_matching_ips` | Catalogue(s) UA-compatibles existent mais aucun ne partage d'IP avec votre bot. | Mettre à jour `declared_ips` de votre bot pour inclure les IPs réellement utilisées par votre crawler. |
+| `domain_not_registered` | Aucun publisher Liquad n'opère ce hostname. | URL hors-système — le crawl direct passe en clair, aucune visibilité Liquad possible. |
+| `insufficient_balance` | Solde insuffisant — **dégradation gracieuse** appliquée à toutes les URLs du batch. Aucun token émis, aucun débit. | Recharger la subscription puis réessayer. |
+
+### Exemple — partenaire avec `default_bot_id` sur la clé
+
+Si le publisher vous a fourni une clé créée avec un `default_bot_id`,
+vous pouvez omettre `bot_id` dans le body :
+
+```bash
+curl -X POST https://app.liquad.io/api/consumer/v1/licenses \
+  -H "Authorization: Bearer lq_..." \
+  -H "Content-Type: application/json" \
+  -d '{ "urls": ["https://example.com/articles/2026/billing-guide"] }'
+```
+
+Le serveur résout automatiquement `bot_id` depuis la clé. Le résultat
+est strictement identique à un appel avec `bot_id` explicite.
 
 ### Idempotence
 
@@ -419,14 +481,17 @@ risquer la double facturation.
 
 | Statut | Code | Cause |
 |---|---|---|
-| 401 | `invalid_api_key` | Clé absente / invalide. |
-| 402 | `insufficient_balance` | Solde insuffisant. Détails : `{ balance_eur, required_eur }`. |
-| 403 | `bot_not_in_workspace` | Bot inactif pour le workspace. |
-| 404 | `bot_not_found` | Le bot lié à la clé n'existe plus. |
-| 404 | `domain_not_found` | Aucun publisher n'opère ce hostname. Détails : `{ domain }`. |
-| 422 | `bot_mismatch` | `body.bot_id` ne correspond pas à la clé. |
+| 401 | `invalid_api_key` | Clé absente / invalide. **Strict** — jamais dégradé en 200. |
+| 403 | `bot_not_in_workspace` | Le `bot_id` résolu (body ou default) n'appartient pas à `workspace_bots(subscription.workspace_id)`. |
+| 404 | `bot_not_found` | Le `bot_id` fourni n'existe pas. |
 | 422 | `bot_missing_ips` | Le bot n'a aucune IP déclarée. |
-| 422 | `bot_id_required` | `bot_id` non résolvable (cas interne improbable). |
+| 422 | `bot_id_required` | Aucun `bot_id` fourni dans le body et la clé n'a pas de `default_bot_id`. |
+| 422 | `invalid_url` | Une des URLs est malformée. |
+
+> **Note** : `insufficient_balance` et `domain_not_registered` ne sont
+> **plus** des erreurs HTTP. Elles remontent maintenant par-URL via
+> `results[].reason` avec un statut 200, pour que l'appelant puisse
+> traiter chaque URL de façon uniforme.
 | 422 | `invalid_url` | URL malformée. Détails : `{ url }`. |
 | 422 | `validation_error` | Body invalide (schéma Zod). |
 | 500 | `internal_error` | |
@@ -486,16 +551,15 @@ Voir la doc RAG dédiée (à venir). Structure typique : `results[]` avec
 
 ## 8. Solde — `GET /api/consumer/v1/balance`
 
-Retourne le solde et le résumé de dépense pour la bot subscription liée à
-la clé API.
+Retourne le solde et le résumé de dépense pour la subscription liée à la
+clé API.
 
 ### Réponse 200
 
 ```json
 {
   "workspace_id": "<uuid>",
-  "bot_id": "<uuid>",
-  "bot_subscription_id": "<uuid>",
+  "subscription_id": "<uuid>",
   "balance_eur": 12.45,
   "total_spent_eur": 4.23,
   "transaction_count": 87
@@ -508,7 +572,7 @@ la clé API.
 
 ## 9. Historique — `GET /api/consumer/v1/transactions`
 
-Historique paginé des débits de la bot subscription liée à la clé.
+Historique paginé des débits de la subscription liée à la clé.
 
 ### Requête
 
@@ -619,15 +683,16 @@ ré-appelant `/licenses`).
 |---|---|---|---|
 | 400 | `validation_error` | Param ou body invalide (cursor, limit, domain, path_prefix, catalog_id). | `/sources`, `/transactions` |
 | 401 | `invalid_api_key` | Clé absente / révoquée / inconnue. | tous |
-| 402 | `insufficient_balance` | Solde insuffisant. Détails : `{ balance_eur, required_eur }`. | `/licenses`, `/query` |
-| 403 | `bot_not_in_workspace` | Bot retiré du workspace après création de la clé. | `/catalogs`, `/sources`, `/licenses` |
-| 404 | `bot_not_found` | Le bot lié à la clé a été supprimé. | `/licenses` |
-| 404 | `domain_not_found` | Aucun publisher n'opère ce hostname. | `/licenses` |
+| 402 | `insufficient_balance` | Solde insuffisant. Détails : `{ balance_eur, required_eur }`. | `/query` |
+| 403 | `bot_not_in_workspace` | Le `bot_id` résolu n'appartient pas à `workspace_bots` du workspace de la subscription. | `/catalogs`, `/sources`, `/licenses` |
+| 404 | `bot_not_found` | Le `bot_id` fourni n'existe pas. | `/licenses` |
 | 422 | `bot_missing_ips` | Bot sans IP déclarée → impossible d'établir la confiance. | `/catalogs`, `/sources`, `/licenses` |
-| 422 | `bot_mismatch` | `body.bot_id` ≠ clé. | `/licenses` |
+| 422 | `bot_id_required` | Aucun `bot_id` dans le body et clé sans `default_bot_id`. | `/licenses` |
 | 422 | `invalid_url` | URL malformée. | `/licenses` |
-| 422 | `validation_error` | Body invalide (Zod). | `/licenses`, `/query` |
+| 422 | `validation_error` | Body invalide (Zod) ou paramètre query invalide. | tous |
 | 500 | `internal_error` | Erreur serveur. | tous |
+
+> Pour `/licenses`, `insufficient_balance` et le hostname inconnu (anciennement `domain_not_found`) ne sont **plus** retournés en HTTP 4xx — ils remontent par-URL via `results[].reason` avec un statut 200.
 
 Toutes les erreurs renvoient un body JSON `{ error: "<code>", message?: ..., details?: {...} }`.
 
@@ -695,7 +760,7 @@ les en-têtes de réponse (`X-RateLimit-*`).
   lentement (re-scrape périodique du publisher).
 - **Cache les tokens** côté client jusqu'à `expires_at`. L'idempotence de
   `/licenses` couvre les ratés mais évitez les appels superflus.
-- **Surveillez `unmatched.reason`** : un volume anormal de `no_match`
+- **Surveillez `results[].reason`** : un volume anormal de `no_match`
   signale que vos URLs sont obsolètes ; un volume de `no_matching_ips`
   signale qu'il faut mettre à jour vos `declared_ips`.
 - **Top-up généreusement** : un solde à zéro renvoie 402 sur tout le

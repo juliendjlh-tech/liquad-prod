@@ -48,7 +48,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       .select(
         "id, type, amount_eur, content_url, publisher_workspace_id, created_at"
       )
-      .eq("bot_subscription_id", authResult.botSubscriptionId)
+      .eq("subscription_id", authResult.subscriptionId)
       .order("created_at", { ascending: false })
       .order("id", { ascending: false })
       .limit(limitParam + 1);

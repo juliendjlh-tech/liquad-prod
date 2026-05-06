@@ -77,23 +77,27 @@ export async function authenticateSdkKey(
 export interface ConsumerKeyAuth {
   /** Workspace that owns the key and is debited. */
   workspaceId: string;
-  /** Bot identity the key is bound to (NOT NULL invariant enforced in DB). */
-  botId: string;
   apiKeyId: string;
-  /** Bot subscription the key authorises spending from (NOT NULL since migration 025). */
-  botSubscriptionId: string;
+  /** Subscription the key authorises spending from. */
+  subscriptionId: string;
   /**
-   * If true, /licenses and /sources only return catalogs owned by `workspaceId`.
-   * Sourced from bot_subscriptions(scope_to_workspace) — per-subscription opt-in.
-   * Default true (secure by default); flipped to false via dashboard opt-in.
+   * true → only catalogs owned by `workspaceId` are visible (end-user mode).
+   * false → opt-in network access (client mode).
+   * Sourced from subscriptions.scope_to_workspace.
    */
   scopeToWorkspace: boolean;
+  /**
+   * Optional default bot used as fallback by /licenses when the body omits
+   * bot_id. Validated at key creation; NULL if the key was issued without
+   * one (caller must pass bot_id at every call).
+   */
+  defaultBotId: string | null;
 }
 
 /**
  * Authenticate a consumer request.
  * Used by /api/consumer/v1/* and the RAG pipeline.
- * Each key is bound to a bot; debits hit workspaceId.
+ * Keys are workspace+subscription scoped; bot identity is supplied per call.
  */
 export async function authenticateConsumerKey(
   authHeader: string | null
@@ -109,17 +113,17 @@ export async function authenticateConsumerKey(
   const { data: row } = await supabase
     .from("api_keys")
     .select(
-      "id, workspace_id, bot_id, bot_subscription_id, api_key_hash, bot_subscriptions!inner(scope_to_workspace)"
+      "id, workspace_id, subscription_id, default_bot_id, api_key_hash, subscriptions!inner(scope_to_workspace)"
     )
     .eq("api_key_prefix", prefix)
     .is("revoked_at", null)
     .single<{
       id: string;
       workspace_id: string;
-      bot_id: string;
-      bot_subscription_id: string;
+      subscription_id: string;
+      default_bot_id: string | null;
       api_key_hash: string;
-      bot_subscriptions: { scope_to_workspace: boolean };
+      subscriptions: { scope_to_workspace: boolean };
     }>();
 
   if (!row?.api_key_hash) {
@@ -131,7 +135,6 @@ export async function authenticateConsumerKey(
     return { error: "Invalid API key" };
   }
 
-  // Best-effort last_used_at — don't block auth on this.
   void supabase
     .from("api_keys")
     .update({ last_used_at: new Date().toISOString() })
@@ -139,9 +142,9 @@ export async function authenticateConsumerKey(
 
   return {
     workspaceId: row.workspace_id,
-    botId: row.bot_id,
     apiKeyId: row.id,
-    botSubscriptionId: row.bot_subscription_id,
-    scopeToWorkspace: row.bot_subscriptions.scope_to_workspace,
+    subscriptionId: row.subscription_id,
+    scopeToWorkspace: row.subscriptions.scope_to_workspace,
+    defaultBotId: row.default_bot_id,
   };
 }

@@ -163,6 +163,8 @@ Content-Type: application/json
   "results": [
     {
       "url": "https://publisher-a.com/article/123",
+      "crawl_url": "https://publisher-a.com/article/123?_lq=dG9rZW4t...",
+      "reason": "granted",
       "token": "dG9rZW4tZXhhbXBsZS1obWFjLXNpZ...",
       "price_eur": 0.10,
       "catalog_id": "cat_abc123",
@@ -172,17 +174,18 @@ Content-Type: application/json
     },
     {
       "url": "https://publisher-b.com/research/ai-trends",
+      "crawl_url": "https://publisher-b.com/research/ai-trends?_lq=dG9rZW4t...",
+      "reason": "granted",
       "token": "dG9rZW4tZXhhbXBsZS1obWFjLXNpZ...",
       "price_eur": 0.25,
       "catalog_id": "cat_def456",
       "expires_at": "2026-04-24T13:00:00Z",
       "cached": true,
       "allowed_ips": ["203.0.113.0/24"]
-    }
-  ],
-  "unmatched": [
+    },
     {
       "url": "https://publisher-c.com/unknown-article",
+      "crawl_url": "https://publisher-c.com/unknown-article",
       "reason": "no_match"
     }
   ],

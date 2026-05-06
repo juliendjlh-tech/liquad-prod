@@ -8,21 +8,22 @@ import Button from "@/app/components/ui/Button";
 interface SidebarProps {
   workspace: { id: string; name: string };
   userEmail: string;
-  mode: "license" | "access";
+  mode: "publisher" | "access";
 }
 
-const licenseLinks = [
-  { label: "Overview", href: "/dashboard" },
-  { label: "Domains", href: "/dashboard/domains" },
-  { label: "Bots", href: "/dashboard/bots" },
-  { label: "Catalogs", href: "/dashboard/catalogs" },
-  { label: "Integration", href: "/dashboard/integration" },
-  { label: "Settings", href: "/dashboard/settings" },
+const publisherLinks = [
+  { label: "Overview", href: "/dashboard/publisher" },
+  { label: "Domains", href: "/dashboard/publisher/domains" },
+  { label: "Bots", href: "/dashboard/publisher/bots" },
+  { label: "Subscriptions", href: "/dashboard/publisher/subscriptions" },
+  { label: "Catalogs", href: "/dashboard/publisher/catalogs" },
+  { label: "Integration", href: "/dashboard/publisher/integration" },
+  { label: "Settings", href: "/dashboard/publisher/settings" },
 ];
 
 const accessLinks = [
   { label: "Overview", href: "/dashboard/access" },
-  { label: "Bots", href: "/dashboard/bots" },
+  { label: "Subscriptions", href: "/dashboard/access/subscriptions" },
   { label: "Search Configs", href: "/dashboard/access/search" },
   //{ label: "Integration", href: "/dashboard/access/integration" },
   //{ label: "Marketplace", href: "/dashboard/access/marketplace" },
@@ -35,10 +36,10 @@ export default function Sidebar({ workspace, userEmail, mode }: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const navLinks = mode === "access" ? accessLinks : licenseLinks;
+  const navLinks = mode === "access" ? accessLinks : publisherLinks;
 
   const isActive = (href: string) => {
-    if (href === "/dashboard") return pathname === "/dashboard";
+    if (href === "/dashboard/publisher") return pathname === "/dashboard/publisher";
     if (href === "/dashboard/access") return pathname === "/dashboard/access";
     return pathname.startsWith(href);
   };

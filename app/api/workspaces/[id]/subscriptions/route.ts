@@ -1,15 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { createBotSubscriptionSchema } from "@/lib/validations/wallet.schema";
+import { createSubscriptionSchema } from "@/lib/validations/subscription.schema";
 import {
-  createBotSubscription,
-  listBotSubscriptions,
-} from "@/lib/services/wallet.service";
+  createSubscription,
+  listSubscriptions,
+  type SubscriptionMode,
+} from "@/lib/services/subscription.service";
 
 /**
- * GET /api/workspaces/:id/bot-subscriptions
- * List non-archived bot subscriptions for the workspace.
- * Optional ?bot_id= filter.
+ * GET /api/workspaces/:id/subscriptions
+ * List non-archived subscriptions for the workspace.
+ *
+ * Optional `?mode=publisher|access` filters by scope_to_workspace.
  */
 export async function GET(
   request: NextRequest,
@@ -17,7 +19,6 @@ export async function GET(
 ): Promise<NextResponse> {
   try {
     const { id: workspaceId } = await params;
-    const botId = request.nextUrl.searchParams.get("bot_id") ?? undefined;
 
     const supabase = await createServerClient();
     const {
@@ -28,7 +29,11 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const subscriptions = await listBotSubscriptions(workspaceId, user.id, { botId });
+    const modeParam = request.nextUrl.searchParams.get("mode");
+    const mode: SubscriptionMode | undefined =
+      modeParam === "publisher" || modeParam === "access" ? modeParam : undefined;
+
+    const subscriptions = await listSubscriptions(workspaceId, user.id, mode);
     return NextResponse.json(subscriptions, { status: 200 });
   } catch (err) {
     return mapError(err);
@@ -36,8 +41,9 @@ export async function GET(
 }
 
 /**
- * POST /api/workspaces/:id/bot-subscriptions
- * Create a new bot subscription for a subscribed bot (owner/admin only).
+ * POST /api/workspaces/:id/subscriptions
+ * Create a new subscription (owner/admin only). The body must include
+ * `mode: 'publisher' | 'access'` which determines scope_to_workspace.
  */
 export async function POST(
   request: NextRequest,
@@ -47,7 +53,7 @@ export async function POST(
     const { id: workspaceId } = await params;
 
     const body = await request.json().catch(() => null);
-    const parsed = createBotSubscriptionSchema.safeParse(body);
+    const parsed = createSubscriptionSchema.safeParse(body);
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -65,8 +71,8 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const subscription = await createBotSubscription(workspaceId, user.id, {
-      botId: parsed.data.bot_id,
+    const subscription = await createSubscription(workspaceId, user.id, {
+      mode: parsed.data.mode,
       externalUserId: parsed.data.external_user_id ?? null,
       label: parsed.data.label ?? null,
     });
@@ -85,15 +91,15 @@ function mapError(err: unknown): NextResponse {
     if (err.message === "FORBIDDEN") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    if (err.message === "BOT_NOT_IN_WORKSPACE") {
+    if (err.message === "PUBLISHER_DISABLED") {
       return NextResponse.json(
-        { error: "bot_not_in_workspace" },
-        { status: 422 }
+        { error: "Workspace is not a publisher" },
+        { status: 403 }
       );
     }
-    if (err.message === "BOT_SUBSCRIPTION_DUPLICATE") {
+    if (err.message === "SUBSCRIPTION_DUPLICATE") {
       return NextResponse.json(
-        { error: "external_user_id already exists for this bot" },
+        { error: "external_user_id already exists in this workspace" },
         { status: 409 }
       );
     }

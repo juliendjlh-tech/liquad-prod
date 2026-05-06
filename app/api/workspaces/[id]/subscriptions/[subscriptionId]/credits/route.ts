@@ -1,24 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerClient } from "@/lib/db/supabase-server";
-import { creditBotSubscriptionSchema } from "@/lib/validations/wallet.schema";
-import { creditBotSubscriptionAsAdmin } from "@/lib/services/wallet.service";
+import { creditSubscriptionSchema } from "@/lib/validations/subscription.schema";
+import { creditSubscriptionAsAdmin } from "@/lib/services/subscription.service";
 
 /**
- * POST /api/workspaces/:id/bot-subscriptions/:botSubscriptionId/credits
- * Admin-driven top-up for MVP. Will be replaced by a Stripe webhook that calls
- * the credit_bot_subscription RPC directly once payment integration lands.
- *
- * Returns { new_balance, transaction_id }.
+ * POST /api/workspaces/:id/subscriptions/:subscriptionId/credits
+ * Admin-driven top-up (MVP). Stripe webhook will replace this path later.
  */
 export async function POST(
   request: NextRequest,
-  { params }: { params: Promise<{ id: string; botSubscriptionId: string }> }
+  { params }: { params: Promise<{ id: string; subscriptionId: string }> }
 ): Promise<NextResponse> {
   try {
-    const { id: workspaceId, botSubscriptionId } = await params;
+    const { id: workspaceId, subscriptionId } = await params;
 
     const body = await request.json().catch(() => null);
-    const parsed = creditBotSubscriptionSchema.safeParse(body);
+    const parsed = creditSubscriptionSchema.safeParse(body);
 
     if (!parsed.success) {
       return NextResponse.json(
@@ -36,10 +33,10 @@ export async function POST(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const result = await creditBotSubscriptionAsAdmin(
+    const result = await creditSubscriptionAsAdmin(
       workspaceId,
       user.id,
-      botSubscriptionId,
+      subscriptionId,
       parsed.data.amount_eur,
       parsed.data.description
     );
@@ -54,11 +51,11 @@ export async function POST(
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
       }
       if (err.message === "NOT_FOUND") {
-        return NextResponse.json({ error: "Bot subscription not found" }, { status: 404 });
+        return NextResponse.json({ error: "Subscription not found" }, { status: 404 });
       }
       if (err.message === "NO_ACTIVE_KEY") {
         return NextResponse.json(
-          { error: "Create an API key on this bot subscription before crediting" },
+          { error: "Create an API key on this subscription before crediting" },
           { status: 422 }
         );
       }

@@ -50,9 +50,19 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       return NextResponse.json({ error: "invalid_api_key" }, { status: 401 });
     }
 
+    const url = new URL(request.url);
+    const botId = url.searchParams.get("bot_id");
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!botId || !UUID_RE.test(botId)) {
+      return NextResponse.json(
+        { error: "validation_error", message: "bot_id query param is required (UUID)" },
+        { status: 400 }
+      );
+    }
+
     const result = await listAccessibleCatalogs(
       authResult.workspaceId,
-      authResult.botId,
+      botId,
       authResult.scopeToWorkspace
     );
 

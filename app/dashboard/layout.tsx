@@ -18,30 +18,16 @@ export default async function DashboardLayout({
   }
 
   // Fetch user's first workspace (MVP: single workspace)
-  // Try with max_pages first; fall back without it if column doesn't exist yet
   const { data: membership } = await supabase
     .from("workspace_members")
-    .select("workspace_id, workspaces(id, name, max_pages)")
+    .select("workspace_id, workspaces(id, name, max_pages, is_publisher)")
     .eq("user_id", user.id)
     .limit(1)
     .single();
 
-  let workspaceData: { id: string; name: string; max_pages?: number } | null = null;
-
-  if (membership?.workspaces) {
-    workspaceData = membership.workspaces as unknown as { id: string; name: string; max_pages?: number };
-  } else {
-    // Retry without max_pages (column may not exist before migration 011)
-    const { data: fallback } = await supabase
-      .from("workspace_members")
-      .select("workspace_id, workspaces(id, name)")
-      .eq("user_id", user.id)
-      .limit(1)
-      .single();
-    if (fallback?.workspaces) {
-      workspaceData = fallback.workspaces as unknown as { id: string; name: string };
-    }
-  }
+  const workspaceData = membership?.workspaces as
+    | { id: string; name: string; max_pages?: number; is_publisher?: boolean }
+    | null;
 
   if (!workspaceData) {
     redirect("/onboarding");
@@ -51,6 +37,7 @@ export default async function DashboardLayout({
     id: workspaceData.id,
     name: workspaceData.name,
     max_pages: workspaceData.max_pages ?? 2000,
+    is_publisher: workspaceData.is_publisher ?? false,
   };
 
   return (

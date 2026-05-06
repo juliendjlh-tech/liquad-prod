@@ -357,7 +357,7 @@ export type Database = {
           id: string
           publisher_workspace_id: string | null
           type: string
-          bot_subscription_id: string | null
+          subscription_id: string | null
         }
         Insert: {
           bot_id?: string | null
@@ -373,7 +373,7 @@ export type Database = {
           id?: string
           publisher_workspace_id?: string | null
           type: string
-          bot_subscription_id?: string | null
+          subscription_id?: string | null
         }
         Update: {
           bot_id?: string | null
@@ -389,7 +389,7 @@ export type Database = {
           id?: string
           publisher_workspace_id?: string | null
           type?: string
-          bot_subscription_id?: string | null
+          subscription_id?: string | null
         }
         Relationships: [
           {
@@ -428,10 +428,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "credit_transactions_bot_subscription_id_fkey"
-            columns: ["bot_subscription_id"]
+            foreignKeyName: "credit_transactions_subscription_id_fkey"
+            columns: ["subscription_id"]
             isOneToOne: false
-            referencedRelation: "bot_subscriptions"
+            referencedRelation: "subscriptions"
             referencedColumns: ["id"]
           },
         ]
@@ -586,8 +586,8 @@ export type Database = {
         Row: {
           id: string
           workspace_id: string
-          bot_id: string
-          bot_subscription_id: string
+          subscription_id: string
+          default_bot_id: string | null
           api_key_hash: string
           api_key_prefix: string
           label: string | null
@@ -598,8 +598,8 @@ export type Database = {
         Insert: {
           id?: string
           workspace_id: string
-          bot_id: string
-          bot_subscription_id: string
+          subscription_id: string
+          default_bot_id?: string | null
           api_key_hash: string
           api_key_prefix: string
           label?: string | null
@@ -610,8 +610,8 @@ export type Database = {
         Update: {
           id?: string
           workspace_id?: string
-          bot_id?: string
-          bot_subscription_id?: string
+          subscription_id?: string
+          default_bot_id?: string | null
           api_key_hash?: string
           api_key_prefix?: string
           label?: string | null
@@ -628,26 +628,25 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "api_keys_bot_id_fkey"
-            columns: ["bot_id"]
+            foreignKeyName: "api_keys_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "subscriptions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "api_keys_default_bot_id_fkey"
+            columns: ["default_bot_id"]
             isOneToOne: false
             referencedRelation: "bots"
             referencedColumns: ["id"]
           },
-          {
-            foreignKeyName: "api_keys_bot_subscription_id_fkey"
-            columns: ["bot_subscription_id"]
-            isOneToOne: false
-            referencedRelation: "bot_subscriptions"
-            referencedColumns: ["id"]
-          },
         ]
       }
-      bot_subscriptions: {
+      subscriptions: {
         Row: {
           id: string
           workspace_id: string
-          bot_id: string
           external_user_id: string | null
           label: string | null
           balance_eur: number
@@ -658,7 +657,6 @@ export type Database = {
         Insert: {
           id?: string
           workspace_id: string
-          bot_id: string
           external_user_id?: string | null
           label?: string | null
           balance_eur?: number
@@ -669,7 +667,6 @@ export type Database = {
         Update: {
           id?: string
           workspace_id?: string
-          bot_id?: string
           external_user_id?: string | null
           label?: string | null
           balance_eur?: number
@@ -679,25 +676,11 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "bot_subscriptions_workspace_id_fkey"
+            foreignKeyName: "subscriptions_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bot_subscriptions_bot_id_fkey"
-            columns: ["bot_id"]
-            isOneToOne: false
-            referencedRelation: "bots"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "bot_subscriptions_workspace_bot_fkey"
-            columns: ["workspace_id", "bot_id"]
-            isOneToOne: false
-            referencedRelation: "workspace_bots"
-            referencedColumns: ["workspace_id", "bot_id"]
           },
         ]
       }
@@ -891,6 +874,7 @@ export type Database = {
           api_key_prefix: string | null
           created_at: string | null
           id: string
+          is_publisher: boolean
           jwt_signing_secret: string
           max_pages: number
           name: string
@@ -901,6 +885,7 @@ export type Database = {
           api_key_prefix?: string | null
           created_at?: string | null
           id?: string
+          is_publisher?: boolean
           jwt_signing_secret?: string
           max_pages?: number
           name: string
@@ -911,6 +896,7 @@ export type Database = {
           api_key_prefix?: string | null
           created_at?: string | null
           id?: string
+          is_publisher?: boolean
           jwt_signing_secret?: string
           max_pages?: number
           name?: string
@@ -939,7 +925,7 @@ export type Database = {
         }
         Returns: Json
       }
-      credit_bot_subscription: {
+      credit_subscription: {
         Args: {
           p_api_key_id: string
           p_amount_eur: number

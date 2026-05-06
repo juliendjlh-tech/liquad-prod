@@ -6,6 +6,7 @@ interface WorkspaceContextValue {
   id: string;
   name: string;
   max_pages: number;
+  is_publisher: boolean;
 }
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);

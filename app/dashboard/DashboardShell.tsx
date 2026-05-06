@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import Sidebar from "@/app/components/Sidebar";
 import ModeNav from "@/app/components/ModeNav";
 import Breadcrumb from "@/app/components/ui/Breadcrumb";
+import { useWorkspace } from "@/app/dashboard/workspace-context";
 
 interface DashboardShellProps {
   workspace: { id: string; name: string };
@@ -17,11 +18,12 @@ export default function DashboardShell({
   children,
 }: DashboardShellProps) {
   const pathname = usePathname();
-  const mode = pathname.startsWith("/dashboard/access") ? "access" : "license";
+  const { is_publisher } = useWorkspace();
+  const mode = pathname.startsWith("/dashboard/access") ? "access" : "publisher";
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
-      {/*<ModeNav />*/}
+      {is_publisher && <ModeNav />}
       <div className="flex flex-1">
         <Sidebar workspace={workspace} userEmail={userEmail} mode={mode} />
         <main className="flex-1 p-6 md:p-8 overflow-auto">

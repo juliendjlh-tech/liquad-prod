@@ -12,10 +12,9 @@
 //   - Bot-bound tokens: ua_pattern encoded in HMAC signature, gateway verifies
 //   - Publisher-controlled TTL: catalog.ttl_minutes, not consumer-provided
 //   - declared_ips required: bots without IP ranges cannot participate
-//   - Per-subscription scope: bot_subscriptions.scope_to_workspace=true
+//   - Per-subscription scope: subscriptions.scope_to_workspace=true
 //     (default) restricts visible catalogs to the workspace owning the
-//     subscription. Network access is an explicit per-subscription opt-in
-//     (Option F, see migration 031).
+//     subscription. Network access is an explicit per-subscription opt-in.
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
@@ -50,8 +49,18 @@ const DEFAULT_TTL_MINUTES = 60;
 // Types
 // ---------------------------------------------------------------------------
 
-interface AuthorizeUrlResult {
+export type AuthorizeReason =
+  | "granted"
+  | "no_match"
+  | "no_catalog"
+  | "no_matching_ips"
+  | "domain_not_registered"
+  | "insufficient_balance";
+
+interface AuthorizeUrlGranted {
   url: string;
+  crawl_url: string;
+  reason: "granted";
   token: string;
   price_eur: number;
   catalog_id: string;
@@ -60,16 +69,33 @@ interface AuthorizeUrlResult {
   allowed_ips: string[];
 }
 
-interface UnmatchedUrl {
+interface AuthorizeUrlUnmatched {
   url: string;
-  reason: "no_match" | "no_catalog" | "no_matching_ips";
+  crawl_url: string;
+  reason: Exclude<AuthorizeReason, "granted">;
 }
+
+export type AuthorizeUrlResult = AuthorizeUrlGranted | AuthorizeUrlUnmatched;
 
 export interface AuthorizeSuccess {
   results: AuthorizeUrlResult[];
-  unmatched: UnmatchedUrl[];
   total_cost_eur: number;
   balance_remaining_eur: number;
+}
+
+// Append the HMAC token as a `?_lq=` query param. The publisher SDK strips
+// the entire query string during normalization (see @liquad/sdk/url-normalize),
+// so any pre-existing query parameters in the original URL are inert for HMAC
+// verification — they pass through to the publisher untouched.
+function buildCrawlUrl(originalUrl: string, token?: string): string {
+  if (!token) return originalUrl;
+  try {
+    const u = new URL(originalUrl);
+    u.searchParams.set("_lq", token);
+    return u.toString();
+  } catch {
+    return originalUrl;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -155,28 +181,26 @@ async function batchDebitAndGrant(
   supabase: SupabaseClient
 ): Promise<BatchDebitResult> {
   if (debits.length === 0) {
-    // Short-circuit: no URLs to grant, just return the current bot subscription balance
-    // for the bot subscription the API key points to. The bot subscription is resolved via the
-    // api_key (since migration 025 the bot subscription lives on its own entity).
+    // No URLs to grant — return the current subscription balance.
     const { data: apiKey } = await supabase
       .from("api_keys")
-      .select("bot_subscription_id")
+      .select("subscription_id")
       .eq("id", apiKeyId)
       .single();
 
-    if (!apiKey?.bot_subscription_id) {
+    if (!apiKey?.subscription_id) {
       return { success: true, new_balance: 0, grants: [] };
     }
 
-    const { data: botSubscription } = await supabase
-      .from("bot_subscriptions")
+    const { data: subscription } = await supabase
+      .from("subscriptions")
       .select("balance_eur")
-      .eq("id", apiKey.bot_subscription_id)
+      .eq("id", apiKey.subscription_id)
       .single();
 
     return {
       success: true,
-      new_balance: botSubscription?.balance_eur ?? 0,
+      new_balance: subscription?.balance_eur ?? 0,
       grants: [],
     };
   }
@@ -304,7 +328,7 @@ interface AccessibleCatalogInfo {
  *   4. Drop catalogs with empty intersection.
  *   5. Load CatalogRecords for the survivors with status=active filter,
  *      optional maxPriceEur, and optional scopeWorkspaceId (when
- *      scope_to_workspace=true on the bot_subscriptions row).
+ *      scope_to_workspace=true on the subscriptions row).
  *
  * Returns:
  *   - accessible: Map<catalog_id, { catalog, allowedIps }>
@@ -391,7 +415,9 @@ export async function authorize(
 ): Promise<ServiceResult<AuthorizeSuccess>> {
   // ── Pass 1: Resolve bot + normalize + verify indexed sources ──────────
 
-  // bot_id is bound to the API key and injected by the route — always present here.
+  // bot_id is required per call (subscriptions are bot-agnostic since
+  // migration 032). resolveConsumerBot validates the bot belongs to the
+  // caller's workspace via workspace_bots.
   if (!input.bot_id) {
     return err("bot_id_required", 422);
   }
@@ -402,128 +428,148 @@ export async function authorize(
   const consumerBot = resolved.data;
   const uaPattern = consumerBot.uaPattern;
 
-  const normalizedUrls: Array<{ normalizedUrl: string; domain: string }> = [];
+  // Each entry preserves the original URL (echoed back to the caller) alongside
+  // the normalized URL used for matching and HMAC signing. Entries stay in
+  // input order so the response `results[]` mirrors the request `urls[]`.
+  interface UrlEntry {
+    originalUrl: string;
+    normalizedUrl: string;
+    domain: string;
+  }
+
+  const entries: UrlEntry[] = [];
   for (const rawUrl of input.urls) {
     const normalizedUrl = normalizeUrl(rawUrl);
     if (!normalizedUrl) {
       return err("invalid_url", 422, { url: rawUrl });
     }
     const domain = new URL(normalizedUrl).hostname;
-    normalizedUrls.push({ normalizedUrl, domain });
+    entries.push({ originalUrl: rawUrl, normalizedUrl, domain });
   }
 
-  const uniqueDomains = [...new Set(normalizedUrls.map((u) => u.domain))];
+  const uniqueDomains = [...new Set(entries.map((e) => e.domain))];
   const domainToPublisher = await resolvePublisherDomains(uniqueDomains);
 
-  for (const domain of uniqueDomains) {
-    if (!domainToPublisher.has(domain)) {
-      return err("domain_not_found", 404, { domain });
+  // Per-entry outcome map (keyed by input index). Filled progressively; any
+  // entry without an outcome by Pass 3 is "granted" (unless dégradation kicks in).
+  const outcomes = new Map<number, Exclude<AuthorizeReason, "granted">>();
+  for (let i = 0; i < entries.length; i++) {
+    if (!domainToPublisher.has(entries[i].domain)) {
+      outcomes.set(i, "domain_not_registered");
     }
   }
 
-  // Find which URLs have an indexed source
-  const allNormalized = normalizedUrls.map((u) => u.normalizedUrl);
-  const foundSources = await findSourcesByUrls(allNormalized);
+  // Indices still eligible after domain check
+  const candidateIndices = entries
+    .map((_, i) => i)
+    .filter((i) => !outcomes.has(i));
+
+  // Find which candidate URLs have an indexed source
+  const candidateNormalized = candidateIndices.map((i) => entries[i].normalizedUrl);
+  const foundSources = candidateNormalized.length > 0
+    ? await findSourcesByUrls(candidateNormalized)
+    : [];
   const sourceUrlToId = new Map(foundSources.map((s) => [s.source_url, s.id]));
 
-  const indexed: typeof normalizedUrls = [];
-  const unmatched: UnmatchedUrl[] = [];
-
-  for (const entry of normalizedUrls) {
-    if (sourceUrlToId.has(entry.normalizedUrl)) {
-      indexed.push(entry);
-    } else {
-      unmatched.push({ url: entry.normalizedUrl, reason: "no_match" });
+  for (const i of candidateIndices) {
+    if (!sourceUrlToId.has(entries[i].normalizedUrl)) {
+      outcomes.set(i, "no_match");
     }
   }
 
-  // ── Pass 2: Find cheapest valid catalog per URL (ua_pattern match) ────
+  // ── Pass 2: Find cheapest valid catalog per indexed URL ────────────────
 
   const supabase = await createServerClient();
 
-  if (indexed.length === 0) {
-    const debitResult = await batchDebitAndGrant(apiKeyId, consumerWorkspaceId, botId, [], supabase);
-    return debitResult.success
-      ? ok({ results: [], unmatched, total_cost_eur: 0, balance_remaining_eur: debitResult.new_balance })
-      : err("insufficient_balance", 402, { balance_eur: debitResult.balance, required_eur: debitResult.required });
-  }
+  // Indices indexed (have a source) — eligible for catalog matching
+  const indexedIndices = candidateIndices.filter((i) => !outcomes.has(i));
 
-  const indexedSourceIds = indexed.map((e) => sourceUrlToId.get(e.normalizedUrl)!);
-  const sourceCatalogLinks = await getCatalogIdsBySourceIds(indexedSourceIds);
-
-  // indexed_source_id → catalog_ids
-  const sourceIdToCatalogIds = new Map<string, string[]>();
-  for (const link of sourceCatalogLinks) {
-    const ids = sourceIdToCatalogIds.get(link.indexed_source_id) ?? [];
-    ids.push(link.catalog_id);
-    sourceIdToCatalogIds.set(link.indexed_source_id, ids);
-  }
-
-  // Get all unique catalog_ids from source links
-  const allCatalogIds = [...new Set(sourceCatalogLinks.map((l) => l.catalog_id))];
-
-  // Reconcile catalogs against the consumer bot (UA equality + IP intersection
-  // + optional workspace scope). See filterAccessibleCatalogs for full logic.
-  const { accessible, uaCompatibleCatalogIds } = await filterAccessibleCatalogs(
-    allCatalogIds,
-    consumerBot,
-    {
-      scopeWorkspaceId: scopeToWorkspace ? consumerWorkspaceId : undefined,
-      maxPriceEur: input.max_price_eur,
-    }
-  );
-
-  // Pick cheapest usable catalog per URL (IP-compatible candidates only)
-  const matched: Array<{
-    normalizedUrl: string;
+  // Per-URL match info if a usable catalog was found
+  interface MatchInfo {
     publisherWorkspaceId: string;
     catalogId: string;
     priceEur: number;
     ttlMinutes: number;
     allowedIps: string[];
-  }> = [];
+  }
+  const matches = new Map<number, MatchInfo>();
 
-  for (const entry of indexed) {
-    const indexedSourceId = sourceUrlToId.get(entry.normalizedUrl)!;
-    const catalogIds = sourceIdToCatalogIds.get(indexedSourceId) ?? [];
+  if (indexedIndices.length > 0) {
+    const indexedSourceIds = indexedIndices.map((i) =>
+      sourceUrlToId.get(entries[i].normalizedUrl)!
+    );
+    const sourceCatalogLinks = await getCatalogIdsBySourceIds(indexedSourceIds);
 
-    let bestCatalog: AccessibleCatalogInfo | null = null;
-    for (const catId of catalogIds) {
-      const info = accessible.get(catId);
-      if (!info) continue;
-      if (!bestCatalog || info.catalog.price_eur < bestCatalog.catalog.price_eur) {
-        bestCatalog = info;
+    const sourceIdToCatalogIds = new Map<string, string[]>();
+    for (const link of sourceCatalogLinks) {
+      const ids = sourceIdToCatalogIds.get(link.indexed_source_id) ?? [];
+      ids.push(link.catalog_id);
+      sourceIdToCatalogIds.set(link.indexed_source_id, ids);
+    }
+
+    const allCatalogIds = [...new Set(sourceCatalogLinks.map((l) => l.catalog_id))];
+
+    // Reconcile catalogs against the consumer bot (UA equality + IP intersection
+    // + optional workspace scope). See filterAccessibleCatalogs for full logic.
+    const { accessible, uaCompatibleCatalogIds } = await filterAccessibleCatalogs(
+      allCatalogIds,
+      consumerBot,
+      {
+        scopeWorkspaceId: scopeToWorkspace ? consumerWorkspaceId : undefined,
+        maxPriceEur: input.max_price_eur,
       }
-    }
+    );
 
-    if (!bestCatalog) {
-      // Distinguish "no catalog at all" from "catalogs exist but none IP-compatible".
-      // Note: when scopeToWorkspace=true, a catalog filtered out by scope is reported
-      // as "no_catalog" — from the caller's perspective the catalog is invisible.
-      const hasUaCompatible = catalogIds.some((id) => uaCompatibleCatalogIds.has(id));
-      unmatched.push({
-        url: entry.normalizedUrl,
-        reason: hasUaCompatible ? "no_matching_ips" : "no_catalog",
+    for (const i of indexedIndices) {
+      const entry = entries[i];
+      const indexedSourceId = sourceUrlToId.get(entry.normalizedUrl)!;
+      const catalogIds = sourceIdToCatalogIds.get(indexedSourceId) ?? [];
+
+      let bestCatalog: AccessibleCatalogInfo | null = null;
+      for (const catId of catalogIds) {
+        const info = accessible.get(catId);
+        if (!info) continue;
+        if (!bestCatalog || info.catalog.price_eur < bestCatalog.catalog.price_eur) {
+          bestCatalog = info;
+        }
+      }
+
+      if (!bestCatalog) {
+        // Distinguish "no catalog at all" from "catalogs exist but none IP-compatible".
+        // Note: when scopeToWorkspace=true, a catalog filtered out by scope is reported
+        // as "no_catalog" — from the caller's perspective the catalog is invisible.
+        const hasUaCompatible = catalogIds.some((id) => uaCompatibleCatalogIds.has(id));
+        outcomes.set(i, hasUaCompatible ? "no_matching_ips" : "no_catalog");
+        continue;
+      }
+
+      matches.set(i, {
+        publisherWorkspaceId: domainToPublisher.get(entry.domain)!,
+        catalogId: bestCatalog.catalog.id,
+        priceEur: bestCatalog.catalog.price_eur,
+        ttlMinutes: bestCatalog.catalog.ttl_minutes ?? DEFAULT_TTL_MINUTES,
+        allowedIps: bestCatalog.allowedIps,
       });
-      continue;
     }
-
-    matched.push({
-      normalizedUrl: entry.normalizedUrl,
-      publisherWorkspaceId: domainToPublisher.get(entry.domain)!,
-      catalogId: bestCatalog.catalog.id,
-      priceEur: bestCatalog.catalog.price_eur,
-      ttlMinutes: bestCatalog.catalog.ttl_minutes ?? DEFAULT_TTL_MINUTES,
-      allowedIps: bestCatalog.allowedIps,
-    });
   }
 
   // ── Pass 3: Atomic batch debit + sign bot-bound tokens ────────────────
 
-  // Fetch HMAC secrets for involved publishers
-  const uniquePublisherIds = [...new Set(matched.map((m) => m.publisherWorkspaceId))];
-  const secretMap = new Map<string, string>();
+  // Deduplicate matches by normalized URL — multiple input entries pointing to
+  // the same normalized URL share a single grant (idempotent within TTL).
+  const uniqueMatchEntries = new Map<string, { firstIndex: number; info: MatchInfo }>();
+  for (const i of matches.keys()) {
+    const url = entries[i].normalizedUrl;
+    if (!uniqueMatchEntries.has(url)) {
+      uniqueMatchEntries.set(url, { firstIndex: i, info: matches.get(i)! });
+    }
+  }
 
+  const uniquePublisherIds = [...new Set(
+    Array.from(uniqueMatchEntries.values()).map((m) => m.info.publisherWorkspaceId)
+  )];
+
+  const secretMap = new Map<string, string>();
   await Promise.all(
     uniquePublisherIds.map(async (pubId) => {
       const secret = await getWorkspaceSecret(pubId);
@@ -531,30 +577,52 @@ export async function authorize(
     })
   );
 
-  const debitResult = await batchDebitAndGrant(
-    apiKeyId,
-    consumerWorkspaceId,
-    botId,
-    matched.map((m) => ({
-      publisher_workspace_id: m.publisherWorkspaceId,
-      catalog_id: m.catalogId,
-      bot_id: botId,
-      ua_pattern: uaPattern,
-      url: m.normalizedUrl,
-      price_eur: m.priceEur,
-      ttl_minutes: m.ttlMinutes,
-    })),
-    supabase
-  );
+  const debitInputs = Array.from(uniqueMatchEntries.entries()).map(([url, m]) => ({
+    publisher_workspace_id: m.info.publisherWorkspaceId,
+    catalog_id: m.info.catalogId,
+    bot_id: botId,
+    ua_pattern: uaPattern,
+    url,
+    price_eur: m.info.priceEur,
+    ttl_minutes: m.info.ttlMinutes,
+  }));
 
+  const debitResult = debitInputs.length > 0
+    ? await batchDebitAndGrant(apiKeyId, consumerWorkspaceId, botId, debitInputs, supabase)
+    : await batchDebitAndGrant(apiKeyId, consumerWorkspaceId, botId, [], supabase);
+
+  // ── Graceful degradation: insufficient balance ─────────────────────────
+  // Instead of failing the whole batch, return 200 with every URL falling back
+  // to crawl_url=originalUrl + reason="insufficient_balance". The publisher
+  // SDK will block tokenless requests and emit a denial event; URLs hosted on
+  // unregistered domains pass through the GPT untouched as before.
   if (!debitResult.success) {
-    return err("insufficient_balance", 402, {
-      balance_eur: debitResult.balance,
-      required_eur: debitResult.required,
+    const results: AuthorizeUrlResult[] = entries.map((entry, i) => {
+      const existing = outcomes.get(i);
+      // Domain unknown / no source / no catalog stay as-is — they were never
+      // going to get a token regardless of balance.
+      if (existing) {
+        return {
+          url: entry.originalUrl,
+          crawl_url: entry.originalUrl,
+          reason: existing,
+        };
+      }
+      return {
+        url: entry.originalUrl,
+        crawl_url: entry.originalUrl,
+        reason: "insufficient_balance",
+      };
+    });
+
+    return ok({
+      results,
+      total_cost_eur: 0,
+      balance_remaining_eur: debitResult.balance,
     });
   }
 
-  // Sign bot-bound HMAC tokens
+  // Sign bot-bound HMAC tokens (one key per publisher)
   const hmacKeyMap = new Map<string, CryptoKey>();
   await Promise.all(
     uniquePublisherIds.map(async (pubId) => {
@@ -565,41 +633,62 @@ export async function authorize(
 
   const grantByUrl = new Map(debitResult.grants.map((g) => [g.url, g]));
 
-  const results: AuthorizeUrlResult[] = await Promise.all(
-    matched.map(async (m) => {
-      const grant = grantByUrl.get(m.normalizedUrl)!;
-      const expiryUnix = Math.floor(
-        new Date(grant.expires_at).getTime() / 1000
-      );
-      const hmacKey = hmacKeyMap.get(m.publisherWorkspaceId)!;
-      const token = await signHmacToken(
-        hmacKey,
-        grant.grant_id,
-        uaPattern,
-        m.normalizedUrl,
-        expiryUnix
-      );
-
-      return {
-        url: m.normalizedUrl,
+  // Sign one token per unique normalized URL — duplicate input entries share it
+  interface SignedGrant {
+    token: string;
+    expires_at: string;
+    cached: boolean;
+  }
+  const signedByUrl = new Map<string, SignedGrant>();
+  await Promise.all(
+    Array.from(uniqueMatchEntries.entries()).map(async ([url, m]) => {
+      const grant = grantByUrl.get(url)!;
+      const expiryUnix = Math.floor(new Date(grant.expires_at).getTime() / 1000);
+      const hmacKey = hmacKeyMap.get(m.info.publisherWorkspaceId)!;
+      const token = await signHmacToken(hmacKey, grant.grant_id, uaPattern, url, expiryUnix);
+      signedByUrl.set(url, {
         token,
-        price_eur: m.priceEur,
-        catalog_id: m.catalogId,
         expires_at: grant.expires_at,
         cached: grant.cached,
-        allowed_ips: m.allowedIps,
-      };
+      });
     })
   );
 
-  const totalCost = results.reduce(
-    (sum, r) => sum + (r.cached ? 0 : r.price_eur),
-    0
-  );
+  // Build unified results in input order
+  const results: AuthorizeUrlResult[] = entries.map((entry, i) => {
+    const reason = outcomes.get(i);
+    if (reason) {
+      return {
+        url: entry.originalUrl,
+        crawl_url: entry.originalUrl,
+        reason,
+      };
+    }
+
+    const match = matches.get(i)!;
+    const signed = signedByUrl.get(entry.normalizedUrl)!;
+    return {
+      url: entry.originalUrl,
+      crawl_url: buildCrawlUrl(entry.originalUrl, signed.token),
+      reason: "granted",
+      token: signed.token,
+      price_eur: match.priceEur,
+      catalog_id: match.catalogId,
+      expires_at: signed.expires_at,
+      cached: signed.cached,
+      allowed_ips: match.allowedIps,
+    };
+  });
+
+  // Total cost: sum of non-cached grants, deduplicated by normalized URL
+  let totalCost = 0;
+  for (const [, m] of uniqueMatchEntries) {
+    const signed = signedByUrl.get(entries[m.firstIndex].normalizedUrl)!;
+    if (!signed.cached) totalCost += m.info.priceEur;
+  }
 
   return ok({
     results,
-    unmatched,
     total_cost_eur: totalCost,
     balance_remaining_eur: debitResult.new_balance,
   });

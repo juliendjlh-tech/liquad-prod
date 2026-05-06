@@ -1,9 +1,10 @@
 // ---------------------------------------------------------------------------
 // Bot query module
 //
-// Centralizes queries for workspace_bots and catalog_bots junction
-// tables. Replaces duplicate inline queries across bot, catalog,
-// sdk-rules, and rag-query services.
+// Centralizes queries for workspace_bots and catalog_bots junction tables.
+// Subscriptions are workspace-scoped (since migration 032), so bot rows no
+// longer carry an aggregated balance — see /dashboard/subscriptions for the
+// financial view.
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
@@ -20,13 +21,6 @@ export interface BotRecord {
   type: 'preset' | 'custom';
   description: string | null;
   created_at: string | null;
-  /**
-   * Aggregate of all bot subscription balances for this (workspace, bot).
-   * Optional: only populated by getWorkspaceBots(). A single bot can host
-   * multiple bot subscriptions (see migration 025).
-   */
-  balance_eur?: number;
-  bot_subscription_count?: number;
 }
 
 export interface CatalogBotRecord {
@@ -46,12 +40,7 @@ export interface CatalogBotRecord {
 // Queries
 // ---------------------------------------------------------------------------
 
-/**
- * Fetch a single bot by ID.
- */
-export async function getBotById(
-  botId: string
-): Promise<BotRecord | null> {
+export async function getBotById(botId: string): Promise<BotRecord | null> {
   const supabase = await createServerClient();
 
   const { data, error } = await supabase
@@ -86,8 +75,6 @@ export async function isBotActiveForWorkspace(
 
 /**
  * Fetch all bots active for a workspace via the workspace_bots junction.
- * balance_eur is the sum of every non-archived bot subscription the workspace holds on
- * that bot. bot_subscription_count is the number of bot subscriptions contributing to that sum.
  */
 export async function getWorkspaceBots(
   workspaceId: string
@@ -106,41 +93,12 @@ export async function getWorkspaceBots(
     throw new Error(`Failed to fetch workspace bots: ${error.message}`);
   }
 
-  const rows = data ?? [];
-  const botIds = rows.map((r) => r.bot_id);
-
-  const totals = new Map<string, { balance: number; count: number }>();
-  if (botIds.length > 0) {
-    const { data: botSubscriptions } = await supabase
-      .from("bot_subscriptions")
-      .select("bot_id, balance_eur")
-      .eq("workspace_id", workspaceId)
-      .is("archived_at", null)
-      .in("bot_id", botIds);
-
-    for (const w of botSubscriptions ?? []) {
-      const prev = totals.get(w.bot_id) ?? { balance: 0, count: 0 };
-      prev.balance += Number(w.balance_eur);
-      prev.count += 1;
-      totals.set(w.bot_id, prev);
-    }
-  }
-
-  return rows.map((row) => {
-    const t = totals.get(row.bot_id) ?? { balance: 0, count: 0 };
-    return {
-      ...row.bots,
-      balance_eur: t.balance,
-      bot_subscription_count: t.count,
-    };
-  });
+  return (data ?? []).map((row) => row.bots);
 }
 
 /**
  * Fetch all catalog_bots links for a set of catalog IDs,
  * joining bot details in a single query.
- *
- * Returns one row per catalog–bot link with the full bot record.
  */
 export async function getCatalogBots(
   catalogIds: string[]

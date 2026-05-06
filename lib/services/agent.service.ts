@@ -226,10 +226,6 @@ export interface BotRow {
   type: 'preset' | 'custom';
   description?: string | null;
   created_at: string | null;
-  /** Sum of bot subscription balances for this workspace/bot (populated by getWorkspaceBots). */
-  balance_eur?: number;
-  /** Number of non-archived bot subscriptions on this workspace/bot. */
-  bot_subscription_count?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +417,7 @@ export async function removeBotFromWorkspace(
   }
 
   if (bot && (bot as { type: string }).type === "custom") {
-    // Deleting the bots row cascades to workspace_bots, bot_subscriptions, api_keys
+    // Deleting the bots row cascades to workspace_bots.
     const { error } = await supabase
       .from("bots")
       .delete()

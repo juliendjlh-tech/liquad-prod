@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const modes = [
-  { label: "License", href: "/dashboard" },
+  { label: "Publisher", href: "/dashboard/publisher" },
   { label: "Access", href: "/dashboard/access" },
 ] as const;
 
@@ -20,7 +20,7 @@ export default function ModeNav() {
           <span className="text-base font-semibold text-gray-900">Liquad</span>
         </div>
 
-        {/*<div className="flex rounded-lg border border-gray-200 overflow-hidden">
+        <div className="flex rounded-lg border border-gray-200 overflow-hidden">
           {modes.map((mode) => {
             const active =
               mode.href === "/dashboard/access" ? isAccess : !isAccess;
@@ -39,7 +39,6 @@ export default function ModeNav() {
             );
           })}
         </div>
-        */}
 
         <div className="w-20" />
       </div>

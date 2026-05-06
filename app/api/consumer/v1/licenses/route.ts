@@ -6,34 +6,40 @@ import { transactionSchema } from "@/lib/validations/authorize.schema";
 /**
  * POST /api/consumer/v1/licenses
  *
- * Pre-authorize access to paid content. Returns HMAC-signed tokens
- * that the publisher SDK verifies locally (no callback needed).
+ * Pre-authorize access to paid content. Returns one entry per input URL with
+ * a ready-to-fetch `crawl_url` — the caller can blindly fetch it without
+ * recombining URL + token.
  *
  * Authentication: API key via Authorization: Bearer <key>
  *
  * REQUEST BODY:
  * - urls: string[] (required) — URLs of the content to access (max 100)
- * - bot_id: string (optional) — UUID of the bot that will use the tokens.
- *           If provided, must match the bot bound to the API key.
+ * - bot_id: string (optional) — UUID of the bot the consumer is acting as.
+ *           Required unless the API key was issued with a default_bot_id, in
+ *           which case the body bot_id overrides the default if both are set.
  * - max_price_eur: number (optional) — price ceiling per URL
  *
  * Token validity (TTL) is controlled by the publisher via catalog.ttl_minutes.
  *
  * RESPONSES:
- * - 200: { results: [...], unmatched: [...], total_cost_eur, balance_remaining_eur }
- *        Each result includes `allowed_ips` — the intersection of the caller's
- *        declared IPs with the publisher bot's declared IPs. The gateway only
- *        accepts scrapes from these IPs; any other IP will be rejected even with
- *        a valid token.
- *        Unmatched reasons:
- *          - "no_match": URL is not indexed by any publisher
- *          - "no_catalog": URL indexed, no active catalog matches ua_pattern/price
- *          - "no_matching_ips": catalog(s) match ua_pattern but none share any IP
- *            with the caller's declared IPs — no usable token could be issued
- * - 401: Invalid API key
- * - 402: Insufficient balance
- * - 404: Domain not found
- * - 422: Validation error
+ * - 200: { results: [...], total_cost_eur, balance_remaining_eur }
+ *        results[].crawl_url is always present and always fetchable:
+ *          - granted               → original URL with `?_lq=<token>` appended
+ *          - any unmatched reason  → original URL unchanged (no token)
+ *        Granted entries also include `token`, `price_eur`, `catalog_id`,
+ *        `expires_at`, `cached`, `allowed_ips` — the IP intersection the
+ *        gateway will accept.
+ *        Per-URL `reason`:
+ *          - "granted":          token issued, debited (or cached within TTL)
+ *          - "no_match":         URL not indexed by any publisher
+ *          - "no_catalog":       indexed but no active catalog covers the bot
+ *          - "no_matching_ips":  UA-compatible catalog exists but no IP overlap
+ *          - "domain_not_registered": the host is not operated by any publisher
+ *          - "insufficient_balance": balance too low — graceful degradation,
+ *            every result falls back to crawl_url=URL with no token
+ * - 401: Invalid API key (strict — never degraded)
+ * - 422: Validation error / bot_id_required / bot_missing_ips / invalid_url
+ * - 404: bot_not_found
  * - 500: Internal server error
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
@@ -66,25 +72,14 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       );
     }
 
-    // The bot identity is bound to the API key. If the body also provides
-    // bot_id, it must match — otherwise reject.
-    if (parsed.data.bot_id && parsed.data.bot_id !== authResult.botId) {
-      return NextResponse.json(
-        {
-          error: "bot_mismatch",
-          message: "Key is bound to a specific bot; body bot_id must match or be omitted",
-        },
-        { status: 422 }
-      );
-    }
+    // bot_id resolution: body wins, otherwise fallback to the key's default.
+    // authorize() validates the resolved bot_id against workspace_bots.
+    const resolvedBotId = parsed.data.bot_id ?? authResult.defaultBotId ?? undefined;
 
     const result = await authorize(
       authResult.workspaceId,
       authResult.apiKeyId,
-      {
-        ...parsed.data,
-        bot_id: authResult.botId,
-      },
+      { ...parsed.data, bot_id: resolvedBotId },
       authResult.scopeToWorkspace
     );
 
