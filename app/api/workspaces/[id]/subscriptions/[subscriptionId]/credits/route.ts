@@ -59,6 +59,15 @@ export async function POST(
           { status: 422 }
         );
       }
+      if (err.message === "ACCESS_TOPUP_DISABLED") {
+        return NextResponse.json(
+          {
+            error:
+              "Access-mode subscriptions are topped up by the platform admin only.",
+          },
+          { status: 403 }
+        );
+      }
       if (err.message === "INVALID_AMOUNT") {
         return NextResponse.json({ error: "Invalid amount" }, { status: 422 });
       }

@@ -345,7 +345,7 @@ export default function SubscriptionsView({ mode }: SubscriptionsViewProps) {
     <div>
       {toast && (
         <div
-          className={`fixed top-4 right-4 z-50 rounded-lg px-4 py-3 text-sm font-medium shadow-lg ${
+          className={`fixed top-4 right-4 z-[60] rounded-lg px-4 py-3 text-sm font-medium shadow-lg ${
             toast.type === "success"
               ? "bg-green-100 text-green-800"
               : "bg-red-100 text-red-800"
@@ -579,7 +579,9 @@ export default function SubscriptionsView({ mode }: SubscriptionsViewProps) {
               >
                 <h3 className="text-sm font-medium text-gray-900 mb-2">Top up</h3>
                 <p className="text-xs text-gray-500 mb-3">
-                  Admin-driven credit. Requires at least one active key on this subscription.
+                  {isPublisher
+                    ? "Admin-driven credit. Requires at least one active key on this subscription."
+                    : "Paid top-up coming soon. During MVP, balance is managed by the platform admin."}
                 </p>
                 <div className="grid grid-cols-[120px_1fr_auto] gap-2">
                   <input
@@ -590,7 +592,7 @@ export default function SubscriptionsView({ mode }: SubscriptionsViewProps) {
                     onChange={(e) => setTopUpAmount(e.target.value)}
                     placeholder="€ amount"
                     className="rounded-md border border-gray-300 px-3 py-2 text-sm"
-                    required
+                    disabled={!isPublisher}
                   />
                   <input
                     type="text"
@@ -598,8 +600,18 @@ export default function SubscriptionsView({ mode }: SubscriptionsViewProps) {
                     onChange={(e) => setTopUpDescription(e.target.value)}
                     placeholder="Description (optional)"
                     className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                    disabled={!isPublisher}
                   />
-                  <Button type="submit" loading={toppingUp} disabled={active.active_keys === 0}>
+                  <Button
+                    type="submit"
+                    loading={toppingUp}
+                    disabled={!isPublisher || active.active_keys === 0}
+                    title={
+                      !isPublisher
+                        ? "Top-up coming soon — managed by platform admin during MVP"
+                        : undefined
+                    }
+                  >
                     Credit
                   </Button>
                 </div>

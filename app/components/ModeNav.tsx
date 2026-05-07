@@ -17,7 +17,7 @@ export default function ModeNav() {
       <div className="flex items-center justify-between px-6 py-3">
         <div className="flex items-center gap-2">
           <div className="h-7 w-7 rounded-lg bg-blue-600" />
-          <span className="text-base font-semibold text-gray-900">Liquad</span>
+          <Link href="/" className="text-base font-semibold text-gray-900 hover:opacity-80 transition-opacity">Liquad</Link>
         </div>
 
         <div className="flex rounded-lg border border-gray-200 overflow-hidden">

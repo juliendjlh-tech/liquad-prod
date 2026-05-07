@@ -1,21 +1,8 @@
 import Link from "next/link";
-import { headers } from "next/headers";
 import { createServerClient } from "@/lib/db/supabase-server";
 import Button from "@/app/components/ui/Button";
 
 export default async function Navbar() {
-  const headersList = await headers();
-  const pathname = headersList.get("x-pathname") ?? "";
-
-  // Hide Navbar on dashboard, onboarding, and login pages (app vs. website separation)
-  {/*if (
-    pathname.startsWith("/dashboard") ||
-    pathname.startsWith("/onboarding") ||
-    pathname.startsWith("/login")
-  ) {
-    return null;
-  }*/}
-
   const supabase = await createServerClient();
   const {
     data: { user },

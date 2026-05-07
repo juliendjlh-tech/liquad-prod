@@ -267,13 +267,17 @@ export async function creditSubscriptionAsAdmin(
 
   const { data: subscription } = await supabase
     .from("subscriptions")
-    .select("id")
+    .select("id, scope_to_workspace")
     .eq("id", subscriptionId)
     .eq("workspace_id", workspaceId)
     .is("archived_at", null)
     .maybeSingle();
 
   if (!subscription) throw new Error("NOT_FOUND");
+  // Access-mode subscriptions (scope_to_workspace=false) are credited by the
+  // platform admin only — Stripe-driven top-up will replace this path. No
+  // path through this route, regardless of workspace role.
+  if (!subscription.scope_to_workspace) throw new Error("ACCESS_TOPUP_DISABLED");
 
   const { data: anchorKey } = await supabase
     .from("api_keys")

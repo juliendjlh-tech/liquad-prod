@@ -15,8 +15,8 @@ const publisherLinks = [
   { label: "Overview", href: "/dashboard/publisher" },
   { label: "Domains", href: "/dashboard/publisher/domains" },
   { label: "Bots", href: "/dashboard/publisher/bots" },
-  { label: "Subscriptions", href: "/dashboard/publisher/subscriptions" },
   { label: "Catalogs", href: "/dashboard/publisher/catalogs" },
+  { label: "Subscriptions", href: "/dashboard/publisher/subscriptions" },
   { label: "Integration", href: "/dashboard/publisher/integration" },
   { label: "Settings", href: "/dashboard/publisher/settings" },
 ];
@@ -24,7 +24,7 @@ const publisherLinks = [
 const accessLinks = [
   { label: "Overview", href: "/dashboard/access" },
   { label: "Subscriptions", href: "/dashboard/access/subscriptions" },
-  { label: "Search Configs", href: "/dashboard/access/search" },
+  //{ label: "Search Configs", href: "/dashboard/access/search" },
   //{ label: "Integration", href: "/dashboard/access/integration" },
   //{ label: "Marketplace", href: "/dashboard/access/marketplace" },
   //{ label: "Settings", href: "/dashboard/access/settings" },
