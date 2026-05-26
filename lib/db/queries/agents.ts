@@ -15,6 +15,7 @@ import { createServerClient } from "@/lib/db/supabase-server";
 
 export interface BotRecord {
   id: string;
+  public_id: string;
   name: string;
   ua_pattern: string;
   declared_ips: string[];
@@ -28,6 +29,7 @@ export interface CatalogBotRecord {
   bot_id: string;
   bot: {
     id: string;
+    public_id: string;
     name: string;
     ua_pattern: string;
     declared_ips: string[];
@@ -45,7 +47,7 @@ export async function getBotById(botId: string): Promise<BotRecord | null> {
 
   const { data, error } = await supabase
     .from("bots")
-    .select("id, name, ua_pattern, declared_ips, type, description, created_at")
+    .select("id, public_id, name, ua_pattern, declared_ips, type, description, created_at")
     .eq("id", botId)
     .single();
 
@@ -83,7 +85,7 @@ export async function getWorkspaceBots(
 
   const { data, error } = await supabase
     .from("workspace_bots")
-    .select("bot_id, bots(id, name, ua_pattern, declared_ips, type, description, created_at)")
+    .select("bot_id, bots(id, public_id, name, ua_pattern, declared_ips, type, description, created_at)")
     .eq("workspace_id", workspaceId) as unknown as {
       data: Array<{ bot_id: string; bots: BotRecord }> | null;
       error: { message: string } | null;
@@ -109,18 +111,19 @@ export async function getCatalogBots(
 
   const { data, error } = await supabase
     .from("catalog_bots")
-    .select("catalog_id, bot_id, bots(id, name, ua_pattern, declared_ips, type, description)")
-    .in("catalog_id", catalogIds);
+    .select("catalog_id, bot_id, bots(id, public_id, name, ua_pattern, declared_ips, type, description)")
+    .in("catalog_id", catalogIds) as unknown as {
+      data: Array<{ catalog_id: string; bot_id: string; bots: CatalogBotRecord["bot"] }> | null;
+      error: { message: string } | null;
+    };
 
   if (error) {
     throw new Error(`Failed to fetch catalog bots: ${error.message}`);
   }
 
-  return (data ?? []).map(
-    (row: { catalog_id: string; bot_id: string; bots: CatalogBotRecord["bot"] }) => ({
-      catalog_id: row.catalog_id,
-      bot_id: row.bot_id,
-      bot: row.bots,
-    })
-  );
+  return (data ?? []).map((row) => ({
+    catalog_id: row.catalog_id,
+    bot_id: row.bot_id,
+    bot: row.bots,
+  }));
 }

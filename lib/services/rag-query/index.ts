@@ -41,7 +41,7 @@ export type { QueryResult, QueryResultItem, QuerySuccess, QueryDryRun, QueryErro
 /**
  * Execute a RAG semantic search query.
  *
- * This is the main entry point for POST /api/consumer/v1/query.
+ * This is the main entry point for POST /api/public/v1/consumer/query.
  * Internally, it runs an 11-step pipeline where each step either
  * advances the context or short-circuits with a typed result.
  *

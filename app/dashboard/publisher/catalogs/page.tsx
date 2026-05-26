@@ -10,6 +10,7 @@ import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
 
 interface CatalogItem {
   id: string;
+  public_id: string;
   name: string;
   description: string | null;
   status: "active" | "inactive";
@@ -44,9 +45,7 @@ export default function CatalogsPage() {
   const fetchCatalogs = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/catalogs", {
-        headers: { "x-workspace-id": workspaceId },
-      });
+      const res = await fetch(`/api/internal/workspaces/${workspaceId}/catalogs`);
       if (res.ok) setCatalogs(await res.json());
     } finally {
       setLoading(false);
@@ -61,14 +60,14 @@ export default function CatalogsPage() {
     setTogglingId(catalog.id);
     try {
       const newStatus = catalog.status === "active" ? "inactive" : "active";
-      const res = await fetch(`/api/catalogs/${catalog.id}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
-        body: JSON.stringify({ status: newStatus }),
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/catalogs/${catalog.id}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: newStatus }),
+        }
+      );
 
       if (res.ok) {
         const json = await res.json();
@@ -83,10 +82,10 @@ export default function CatalogsPage() {
   };
 
   const executeDelete = async (catalog: CatalogItem) => {
-    const res = await fetch(`/api/catalogs/${catalog.id}`, {
-      method: "DELETE",
-      headers: { "x-workspace-id": workspaceId },
-    });
+    const res = await fetch(
+      `/api/internal/workspaces/${workspaceId}/catalogs/${catalog.id}`,
+      { method: "DELETE" }
+    );
 
     if (res.ok) {
       showToast("Catalog deleted", "success");
@@ -111,9 +110,20 @@ export default function CatalogsPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Catalogs</h1>
-        <Button href="/dashboard/catalogs/new">Create Catalog</Button>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Catalogs</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          A catalog groups pages you want to expose under the same rules:
+          which AI crawlers can read them, and how much each access costs.
+          Toggle marketplace availability to show or hide a catalog on the
+          network without losing its setup.
+        </p>
+      </div>
+
+      <div className="mb-6">
+        <div className="flex gap-2 justify-end items-center">
+          <Button href="/dashboard/catalogs/new">Create Catalog</Button>
+        </div>
       </div>
 
       {loading ? (
@@ -144,7 +154,9 @@ export default function CatalogsPage() {
                         : "bg-gray-100 text-gray-600"
                     }`}
                   >
-                    {catalog.status}
+                    {catalog.status === "active"
+                      ? "Available on marketplace"
+                      : "Hidden from marketplace"}
                   </span>
                 </div>
                 <div className="mt-1 flex gap-4 text-xs text-gray-500">
@@ -164,7 +176,7 @@ export default function CatalogsPage() {
                   checked={catalog.status === "active"}
                   onChange={() => toggleStatus(catalog)}
                   loading={togglingId === catalog.id}
-                  label={`Toggle ${catalog.name} ${catalog.status === "active" ? "off" : "on"}`}
+                  label={`${catalog.status === "active" ? "Hide" : "Publish"} ${catalog.name} ${catalog.status === "active" ? "from" : "on"} marketplace`}
                 />
                 <div className="opacity-0 group-hover:opacity-100 transition-opacity">
                   <DropdownMenu

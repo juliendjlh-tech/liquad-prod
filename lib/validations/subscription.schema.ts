@@ -1,12 +1,13 @@
 import { z } from "zod";
 
 /**
- * Body schema for POST /api/workspaces/:id/subscriptions —
- * create a new workspace-scoped subscription. The `mode` decides
- * scope_to_workspace deterministically and is immutable thereafter.
+ * Body schema for POST /api/internal/workspaces/:id/subscriptions.
+ *
+ * Since migration 041, subscriptions are pure wallets. No mode, no scope, no
+ * catalog allowlist, no price cap. Catalogue scope is driven by the API key's
+ * network, not the subscription.
  */
 export const createSubscriptionSchema = z.object({
-  mode: z.enum(["publisher", "access"]),
   external_user_id: z.string().min(1).max(200).optional(),
   label: z.string().min(1).max(100).optional(),
 });
@@ -14,8 +15,22 @@ export const createSubscriptionSchema = z.object({
 export type CreateSubscriptionInput = z.infer<typeof createSubscriptionSchema>;
 
 /**
- * Body schema for POST /api/workspaces/:id/subscriptions/:subscriptionId/credits —
- * admin-driven top-up (MVP).
+ * Body schema for PATCH /api/internal/workspaces/:id/subscriptions/:subscriptionId.
+ */
+export const updateSubscriptionSchema = z
+  .object({
+    label: z.string().min(1).max(100).nullable().optional(),
+    external_user_id: z.string().min(1).max(200).nullable().optional(),
+  })
+  .refine(
+    (v) => v.label !== undefined || v.external_user_id !== undefined,
+    { message: "At least one field is required" }
+  );
+
+export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;
+
+/**
+ * Body schema for POST /api/internal/workspaces/:id/subscriptions/:subscriptionId/credits.
  */
 export const creditSubscriptionSchema = z.object({
   amount_eur: z.number().positive().max(100000),

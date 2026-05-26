@@ -33,7 +33,7 @@ export function createEventBuffer(config: EventBufferConfig) {
     // Drain buffer atomically
     const batch = buffer.splice(0);
 
-    const promise = fetch(`${config.apiBaseUrl}/api/sdk/events`, {
+    const promise = fetch(`${config.apiBaseUrl}/api/public/v1/sdk/events`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${config.apiKey}`,

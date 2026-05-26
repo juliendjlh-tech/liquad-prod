@@ -150,10 +150,20 @@ export const updateCatalogSchema = z.object({
 export type UpdateCatalogInput = z.infer<typeof updateCatalogSchema>;
 
 /**
- * Schema for POST /api/catalogs/preview request body.
+ * Schema for POST /api/internal/workspaces/:workspaceId/catalogs/preview request body.
+ *
+ * Either pass `filter_rules` for an ad-hoc preview (creation flow) or
+ * `catalog_id` (the catalog's public_id) to use a saved catalog's rules
+ * (edit flow). At least one is required; passing both rejects the request.
  */
-export const previewFilterRulesSchema = z.object({
-  filter_rules: filterRulesSchema,
-});
+export const previewFilterRulesSchema = z
+  .object({
+    filter_rules: filterRulesSchema.optional(),
+    catalog_id: z.string().optional(),
+  })
+  .refine(
+    (data) => (data.filter_rules !== undefined) !== (data.catalog_id !== undefined),
+    { message: "Provide exactly one of filter_rules or catalog_id" }
+  );
 
 export type PreviewFilterRulesInput = z.infer<typeof previewFilterRulesSchema>;

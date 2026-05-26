@@ -37,20 +37,18 @@ interface WorkspaceInfo {
  *
  * Displays and manages workspace settings:
  * - Workspace info (name, creation date)
- * - Credits balance
- * - API key management (regenerate)
  * - Domain list
  * - Member management (invite, remove, change role)
+ *
+ * SDK keys are managed per-gateway on /dashboard/publisher/gateways.
  */
 export default function SettingsPage() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [domains, setDomains] = useState<Domain[]>([]);
-  const [apiKeyRevealed, setApiKeyRevealed] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
   const [loading, setLoading] = useState(true);
-  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const [removeMemberTarget, setRemoveMemberTarget] = useState<Member | null>(null);
   const [toast, setToast] = useState<{
     message: string;
@@ -68,8 +66,8 @@ export default function SettingsPage() {
     setLoading(true);
     try {
       const [wsRes, membersRes] = await Promise.all([
-        fetch(`/api/workspaces/${workspaceId}`),
-        fetch(`/api/workspaces/${workspaceId}/members`),
+        fetch(`/api/internal/workspaces/${workspaceId}`),
+        fetch(`/api/internal/workspaces/${workspaceId}/members`),
       ]);
 
       if (wsRes.ok) {
@@ -88,37 +86,12 @@ export default function SettingsPage() {
   }, [fetchData]);
 
   // ---------------------------------------------------------------------------
-  // API Key
-  // ---------------------------------------------------------------------------
-
-  const executeRegenerate = async () => {
-    setShowRegenConfirm(false);
-    const res = await fetch(`/api/workspaces/${workspaceId}/regenerate-key`, {
-      method: "POST",
-    });
-
-    if (res.ok) {
-      const json = await res.json();
-      setApiKeyRevealed(json.api_key);
-      showToast("API key regenerated", "success");
-    } else {
-      const errJson = await res.json().catch(() => ({}));
-      showToast((errJson as { error?: string }).error ?? "Failed to regenerate key", "error");
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
-    void navigator.clipboard.writeText(text);
-    showToast("Copied to clipboard", "success");
-  };
-
-  // ---------------------------------------------------------------------------
   // Members
   // ---------------------------------------------------------------------------
 
   const inviteMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    const res = await fetch(`/api/workspaces/${workspaceId}/members`, {
+    const res = await fetch(`/api/internal/workspaces/${workspaceId}/members`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
@@ -136,7 +109,7 @@ export default function SettingsPage() {
 
   const executeRemoveMember = async (userId: string) => {
     const res = await fetch(
-      `/api/workspaces/${workspaceId}/members/${userId}`,
+      `/api/internal/workspaces/${workspaceId}/members/${userId}`,
       { method: "DELETE" }
     );
 
@@ -152,7 +125,7 @@ export default function SettingsPage() {
 
   const changeRole = async (userId: string, newRole: "admin" | "member") => {
     const res = await fetch(
-      `/api/workspaces/${workspaceId}/members/${userId}`,
+      `/api/internal/workspaces/${workspaceId}/members/${userId}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -191,7 +164,20 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Settings</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          Your workspace essentials: name, registered domains, and the
+          teammates who can manage it with you. SDK keys live on the{" "}
+          <a
+            href="/dashboard/publisher/gateways"
+            className="text-blue-600 hover:text-blue-800 underline"
+          >
+            Gateways
+          </a>{" "}
+          page.
+        </p>
+      </div>
 
       {/* Workspace Info */}
       <section className="rounded-lg border border-gray-200 bg-white p-6">
@@ -207,40 +193,6 @@ export default function SettingsPage() {
               : "-"}
           </p>
         </div>
-      </section>
-
-      {/* API Key */}
-      <section className="rounded-lg border border-gray-200 bg-white p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">API Key</h2>
-        {apiKeyRevealed ? (
-          <div>
-            <div className="flex items-center gap-2 bg-gray-50 rounded-md p-3 font-mono text-sm">
-              <span className="flex-1 break-all">{apiKeyRevealed}</span>
-              <button
-                onClick={() => copyToClipboard(apiKeyRevealed)}
-                className="text-blue-600 hover:text-blue-800 text-sm whitespace-nowrap"
-              >
-                Copy
-              </button>
-            </div>
-            <p className="mt-2 text-xs text-yellow-700 bg-yellow-50 rounded px-2 py-1">
-              Save this key now. It won&apos;t be shown again.
-            </p>
-          </div>
-        ) : (
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-600 font-mono">
-              API Key: ••••••••
-            </span>
-            <Button
-              variant="secondary"
-              size="sm"
-              onClick={() => setShowRegenConfirm(true)}
-            >
-              Regenerate Key
-            </Button>
-          </div>
-        )}
       </section>
 
       {/* Domains */}
@@ -344,16 +296,6 @@ export default function SettingsPage() {
           <Button type="submit">Invite</Button>
         </form>
       </section>
-
-      <ConfirmDialog
-        open={showRegenConfirm}
-        title="Regenerate API key?"
-        description="The current key will stop working immediately. Any integrations using it will break until updated with the new key."
-        confirmLabel="Regenerate"
-        variant="danger"
-        onConfirm={executeRegenerate}
-        onCancel={() => setShowRegenConfirm(false)}
-      />
 
       <ConfirmDialog
         open={!!removeMemberTarget}

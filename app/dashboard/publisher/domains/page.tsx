@@ -7,6 +7,7 @@ import Button from "@/app/components/ui/Button";
 
 interface DomainItem {
   id: string;
+  public_id: string;
   domain: string;
   status: string;
   content_count: number;
@@ -24,9 +25,12 @@ export default function DomainsPage() {
   const fetchDomains = useCallback(async () => {
     setDomainsLoading(true);
     try {
-      const params = new URLSearchParams({ workspace_id: workspaceId });
+      const params = new URLSearchParams();
       if (domainSearch) params.set("search", domainSearch);
-      const res = await fetch(`/api/domains?${params}`);
+      const qs = params.toString();
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/domains${qs ? `?${qs}` : ""}`
+      );
       if (res.ok) setDomains(await res.json());
     } finally {
       setDomainsLoading(false);
@@ -53,10 +57,17 @@ export default function DomainsPage() {
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Domains</h1>
-        <div className="flex items-center gap-4">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Domains</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          The websites you place under Liquad&apos;s protection. Add a domain
+          from its sitemap to start tracking and licensing AI access to its
+          pages.
+        </p>
+      </div>
+
+      <div className="mb-6">
+        <div className="flex gap-2 justify-end items-center">
           <span className="text-sm text-gray-500">
             {domains.length} domain(s) &middot; {totalContents} content(s)
           </span>

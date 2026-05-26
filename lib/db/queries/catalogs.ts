@@ -20,6 +20,7 @@ const PAGE_SIZE = 1000;
 
 export interface CatalogRecord {
   id: string;
+  public_id: string;
   name: string;
   description: string | null;
   filter_rules: unknown;
@@ -57,7 +58,7 @@ export async function getCatalogs(
 
   let query = supabase
     .from("catalogs")
-    .select("id, name, description, filter_rules, price_eur, ttl_minutes, status, workspace_id, rag_enabled, rag_source_count, created_at")
+    .select("id, public_id, name, description, filter_rules, price_eur, ttl_minutes, status, workspace_id, rag_enabled, rag_source_count, created_at")
     .order("created_at", { ascending: true });
 
   if (catalogIds.length > 0) {

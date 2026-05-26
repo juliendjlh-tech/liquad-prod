@@ -13,6 +13,7 @@ import { matchContentAgainstRules } from "@/lib/validations/catalog.schema";
 import { syncCatalogSources } from "@/lib/services/pipeline.service";
 import { getDomainMap } from "@/lib/db/queries/domains";
 import { canonicalizeHostname } from "@/lib/utils/hostname";
+import { generatePublicId } from "@/lib/ids";
 import { getAllSourceUrls, getAllSourcesCustom } from "@/lib/db/queries/sources";
 import { getWorkspaceBots, getCatalogBots } from "@/lib/db/queries/agents";
 import { getCatalogs as queryCatalogs } from "@/lib/db/queries/catalogs";
@@ -23,6 +24,7 @@ import { getCatalogs as queryCatalogs } from "@/lib/db/queries/catalogs";
 
 export interface CatalogListItem {
   id: string;
+  public_id: string;
   name: string;
   description: string | null;
   filter_rules: FilterRules;
@@ -37,6 +39,7 @@ export interface CatalogListItem {
 
 export interface CatalogDetail {
   id: string;
+  public_id: string;
   name: string;
   description: string | null;
   filter_rules: FilterRules;
@@ -47,6 +50,7 @@ export interface CatalogDetail {
   created_at: string;
   bots: Array<{
     id: string;
+    public_id: string;
     name: string;
     ua_pattern: string;
   }>;
@@ -119,6 +123,7 @@ export async function createCatalog(
   const { data: catalog, error: catalogError } = await supabase
     .from("catalogs")
     .insert({
+      public_id: generatePublicId("cat"),
       workspace_id: workspaceId,
       name: data.name,
       description: data.description ?? null,
@@ -126,7 +131,7 @@ export async function createCatalog(
       price_eur: data.price_eur,
       status: "inactive",
     })
-    .select("id, name, description, filter_rules, price_eur, status, created_at")
+    .select("id, public_id, name, description, filter_rules, price_eur, status, created_at")
     .single();
 
   if (catalogError || !catalog) {
@@ -180,6 +185,7 @@ export async function getCatalogs(
 
     return {
       id: catalog.id,
+      public_id: catalog.public_id,
       name: catalog.name,
       description: catalog.description,
       filter_rules: filterRules,
@@ -209,12 +215,14 @@ export async function getCatalogById(
   const links = await getCatalogBots([catalogId]);
   const bots = links.map((l) => ({
     id: l.bot.id,
+    public_id: l.bot.public_id,
     name: l.bot.name,
     ua_pattern: l.bot.ua_pattern,
   }));
 
   return {
     id: catalog.id,
+    public_id: catalog.public_id,
     name: catalog.name,
     description: catalog.description,
     filter_rules: catalog.filter_rules as unknown as FilterRules,

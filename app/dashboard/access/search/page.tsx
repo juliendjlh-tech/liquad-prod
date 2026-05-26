@@ -89,9 +89,9 @@ export default function SearchConfigsTab() {
   const fetchConfigs = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/search-configs", {
-        headers: { "x-workspace-id": workspaceId },
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/search-configs`
+      );
       if (res.ok) {
         const data = await res.json();
         setConfigs(data.items ?? []);
@@ -208,17 +208,13 @@ export default function SearchConfigsTab() {
     setSaving(true);
     try {
       const isEdit = view === "edit" && editingConfig;
-      const url = isEdit
-        ? `/api/search-configs/${editingConfig.id}`
-        : "/api/search-configs";
+      const base = `/api/internal/workspaces/${workspaceId}/search-configs`;
+      const url = isEdit ? `${base}/${editingConfig.id}` : base;
       const method = isEdit ? "PATCH" : "POST";
 
       const res = await fetch(url, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
 
@@ -244,10 +240,10 @@ export default function SearchConfigsTab() {
     if (!deletingId) return;
     setDeleting(true);
     try {
-      const res = await fetch(`/api/search-configs/${deletingId}`, {
-        method: "DELETE",
-        headers: { "x-workspace-id": workspaceId },
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/search-configs/${deletingId}`,
+        { method: "DELETE" }
+      );
       if (res.ok) {
         showToast("Search config deleted", "success");
         await fetchConfigs();

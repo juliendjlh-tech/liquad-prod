@@ -1,20 +1,13 @@
 import { z } from "zod";
 
 /**
- * Schema for POST /api/consumer/v1/licenses request body.
+ * Schema for POST /api/public/v1/consumer/licenses request body.
  *
- * - urls: Array of content URLs to pre-authorize (batch).
- * - bot_id: Optional at the schema level. The route enforces presence after
- *   falling back to api_keys.default_bot_id. If neither the body nor the key
- *   carry one, the service returns 422 `bot_id_required`.
- * - max_price_eur: Optional price ceiling per URL.
- *
- * TTL is controlled by the publisher (catalog.ttl_minutes), not the consumer.
+ * Since migration 041 the API key carries `bot_id` (resolved server-side from
+ * auth.service.authenticateConsumerKey). The request body only carries URLs.
  */
 export const transactionSchema = z.object({
   urls: z.array(z.string().url()).min(1).max(100),
-  bot_id: z.string().uuid().optional(),
-  max_price_eur: z.number().min(0).max(100).optional(),
 });
 
 export type TransactionInput = z.infer<typeof transactionSchema>;

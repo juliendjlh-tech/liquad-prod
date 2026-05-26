@@ -479,7 +479,7 @@ export async function startScrapePipeline(importJobId: string): Promise<void> {
     await supabase
       .from("indexing_jobs")
       .update({
-        scrape_status: "scraped",
+        status: "scraped",
         updated_at: new Date().toISOString(),
       })
       .eq("id", importJobId);
@@ -489,9 +489,8 @@ export async function startScrapePipeline(importJobId: string): Promise<void> {
   await supabase
     .from("indexing_jobs")
     .update({
-      scrape_status: "pending",
-      scrape_processed_pages: 0,
-      scrape_error_message: null,
+      status: "pending",
+      error_message: null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", importJobId);
@@ -514,10 +513,10 @@ export async function processScrapeMicroBatch(importJobId: string): Promise<void
 
   if (!job) return;
 
-  if (job.scrape_status !== "scraping") {
+  if (job.status !== "scraping") {
     await supabase
       .from("indexing_jobs")
-      .update({ scrape_status: "scraping", updated_at: new Date().toISOString() })
+      .update({ status: "scraping", updated_at: new Date().toISOString() })
       .eq("id", importJobId);
   }
 
@@ -657,8 +656,8 @@ async function finalizeScrapePipeline(
     await supabase
       .from("indexing_jobs")
       .update({
-        scrape_status: "error",
-        scrape_error_message: `${failedCount}/${totalPages} pages failed to scrape (${Math.round(errorRate * 100)}% error rate)`,
+        status: "error",
+        error_message: `${failedCount}/${totalPages} pages failed to scrape (${Math.round(errorRate * 100)}% error rate)`,
         updated_at: new Date().toISOString(),
       })
       .eq("id", importJobId);
@@ -670,8 +669,8 @@ async function finalizeScrapePipeline(
     await supabase
       .from("indexing_jobs")
       .update({
-        scrape_status: "scraped",
-        scrape_error_message: warningMessage,
+        status: "scraped",
+        error_message: warningMessage,
         updated_at: new Date().toISOString(),
       })
       .eq("id", importJobId);
@@ -713,7 +712,7 @@ async function triggerScrapePipeline(importJobId: string): Promise<void> {
     ? `https://${process.env.VERCEL_URL}`
     : "http://localhost:3000";
 
-  await fetch(`${baseUrl}/api/internal/scrape-pipeline`, {
+  await fetch(`${baseUrl}/api/internal/jobs/scrape-pipeline`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

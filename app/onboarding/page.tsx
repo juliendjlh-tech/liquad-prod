@@ -16,7 +16,7 @@ export default function OnboardingPage() {
     setError(null);
 
     try {
-      const res = await fetch("/api/workspaces", {
+      const res = await fetch("/api/internal/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),

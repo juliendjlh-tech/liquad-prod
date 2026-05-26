@@ -57,10 +57,10 @@ export default function DashboardOverviewPage() {
     try {
       const [metricsRes, revenueRes] = await Promise.all([
         fetch(
-          `/api/dashboard/metrics?workspace_id=${workspaceId}&period=${period}`
+          `/api/internal/workspaces/${workspaceId}/dashboard/metrics?period=${period}`
         ),
         fetch(
-          `/api/workspaces/${workspaceId}/revenue?period=${period}d`
+          `/api/internal/workspaces/${workspaceId}/revenue?period=${period}d`
         ),
       ]);
       if (metricsRes.ok) {
@@ -112,9 +112,17 @@ export default function DashboardOverviewPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Overview</h1>
-        <div className="flex items-center gap-3">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Overview</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          The real-time signal of AI activity on your content: who&apos;s
+          visiting, what they&apos;re reading, and how much it earns. Adjust
+          the time range on the right to refresh the figures below.
+        </p>
+      </div>
+
+      <div className="mb-6">
+        <div className="flex gap-2 justify-end items-center">
           {lastUpdated && (
             <span className="text-xs text-gray-400">
               Last updated: {lastUpdated.toLocaleTimeString()}
@@ -265,7 +273,7 @@ export default function DashboardOverviewPage() {
                 No bot activity detected yet
               </p>
               <a
-                href="/dashboard/integration"
+                href="/dashboard/publisher/integration"
                 className="text-sm text-blue-600 hover:text-blue-800"
               >
                 Set up SDK integration

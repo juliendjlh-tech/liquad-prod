@@ -13,6 +13,8 @@ import type { Json } from "@/lib/db/types";
 import type { FilterRules } from "@/lib/validations/catalog.schema";
 import { evaluatePathRule, type PathRule } from "@/lib/validations/catalog.schema";
 import { canonicalizeHostname } from "@/lib/utils/hostname";
+import { generatePublicId } from "@/lib/ids";
+import { normalizeUrl } from "@liquad/sdk/url-normalize";
 
 // ---------------------------------------------------------------------------
 // Types — Domains
@@ -20,6 +22,7 @@ import { canonicalizeHostname } from "@/lib/utils/hostname";
 
 export interface DomainWithCount {
   id: string;
+  public_id: string;
   domain: string;
   content_count: number;
   created_at: string | null;
@@ -122,7 +125,7 @@ export async function ensureDomainExists(
   const { error } = await supabase
     .from("domains")
     .upsert(
-      { workspace_id: workspaceId, domain: host },
+      { public_id: generatePublicId("dom"), workspace_id: workspaceId, domain: host },
       { onConflict: "workspace_id,domain", ignoreDuplicates: true }
     );
 
@@ -160,7 +163,7 @@ export async function getDomainsWithContentCount(
 
   let query = supabase
     .from("domains")
-    .select("id, domain, created_at")
+    .select("id, public_id, domain, created_at")
     .eq("workspace_id", workspaceId)
     .order("domain", { ascending: true });
 
@@ -186,6 +189,7 @@ export async function getDomainsWithContentCount(
 
   return domains.map((d) => ({
     id: d.id,
+    public_id: d.public_id,
     domain: d.domain,
     content_count: countMap.get(d.id) ?? 0,
     created_at: d.created_at,
@@ -540,7 +544,27 @@ export async function importFromSitemap(
     return { imported: 0, upserted: 0, filteredUrls };
   }
 
-  const uniqueDomains = [...new Set(filtered.map((e) => extractDomain(e.loc)))];
+  // Normalize URLs once upfront — used for both domain extraction and storage.
+  // normalizeUrl() strips query strings, fragments, and trailing slashes, so the
+  // value stored matches what authorize() will lookup via findSourcesByUrls.
+  // Entries whose URL fails to parse are skipped here (defensive — sitemap parsing
+  // upstream should have already filtered most invalid URLs).
+  interface NormalizedEntry {
+    normalizedUrl: string;
+    lastmod: string | null;
+  }
+  const normalized: NormalizedEntry[] = [];
+  for (const entry of filtered) {
+    const normalizedUrl = normalizeUrl(entry.loc);
+    if (!normalizedUrl) continue;
+    normalized.push({ normalizedUrl, lastmod: entry.lastmod });
+  }
+
+  if (normalized.length === 0) {
+    return { imported: 0, upserted: 0, filteredUrls };
+  }
+
+  const uniqueDomains = [...new Set(normalized.map((e) => extractDomain(e.normalizedUrl)))];
   const domainIdPairs = await Promise.all(
     uniqueDomains.map(async (domain) => {
       const id = await ensureDomainExists(workspaceId, domain);
@@ -550,10 +574,10 @@ export async function importFromSitemap(
   const domainMap = new Map(domainIdPairs);
 
   const BATCH_SIZE = 1000;
-  const allRecords = filtered.map((entry) => ({
+  const allRecords = normalized.map((entry) => ({
     workspace_id: workspaceId,
-    source_url: entry.loc,
-    domain_id: domainMap.get(extractDomain(entry.loc))!,
+    source_url: entry.normalizedUrl,
+    domain_id: domainMap.get(extractDomain(entry.normalizedUrl))!,
     lastmod: entry.lastmod,
   }));
 

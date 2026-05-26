@@ -4,6 +4,7 @@ import type {
   CreateSearchConfigInput,
   UpdateSearchConfigInput,
 } from "@/lib/validations/search-config.schema";
+import { generatePublicId } from "@/lib/ids";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -16,7 +17,7 @@ export interface SearchConfigItem {
   path_filters: Json;
   max_price_eur: number | null;
   total_budget_eur: number | null;
-  max_results: number;
+  max_results: number | null;
   catalog_ids: string[];
   created_at: string;
   updated_at: string;
@@ -43,6 +44,7 @@ export async function createSearchConfig(
   const { data: config, error } = await supabase
     .from("search_configs")
     .insert({
+      public_id: generatePublicId("sc"),
       workspace_id: workspaceId,
       name: data.name,
       path_filters: data.path_filters as unknown as Json,

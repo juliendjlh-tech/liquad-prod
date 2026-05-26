@@ -10,12 +10,14 @@ import type { DomainRule } from "@/lib/validations/catalog.schema";
 
 interface BotOption {
   id: string;
+  public_id: string;
   name: string;
   ua_pattern: string;
 }
 
 interface DomainWithCount {
   id: string;
+  public_id: string;
   domain: string;
   content_count: number;
 }
@@ -75,10 +77,8 @@ export default function NewCatalogPage() {
   useEffect(() => {
     void (async () => {
       const [botsRes, domainsRes] = await Promise.all([
-        fetch("/api/bots", {
-          headers: { "x-workspace-id": workspaceId },
-        }),
-        fetch(`/api/domains?workspace_id=${workspaceId}`),
+        fetch(`/api/internal/workspaces/${workspaceId}/bots`),
+        fetch(`/api/internal/workspaces/${workspaceId}/domains`),
       ]);
       if (botsRes.ok) {
         const data = (await botsRes.json()) as BotOption[];
@@ -100,13 +100,10 @@ export default function NewCatalogPage() {
       setPreviewLoading(true);
       try {
         const res = await fetch(
-          `/api/catalogs/preview?page=${page}&limit=20`,
+          `/api/internal/workspaces/${workspaceId}/catalogs/preview?page=${page}&limit=20`,
           {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-workspace-id": workspaceId,
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               filter_rules: { domain_rules: domainRules },
             }),
@@ -158,12 +155,9 @@ export default function NewCatalogPage() {
     setSubmitting(true);
 
     try {
-      const res = await fetch("/api/catalogs", {
+      const res = await fetch(`/api/internal/workspaces/${workspaceId}/catalogs`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name,
           description: description || undefined,
@@ -199,7 +193,13 @@ export default function NewCatalogPage() {
         </div>
       )}
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Create Catalog</h1>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Create a catalog</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          Pick the pages to include, choose which AI crawlers from your
+          Watchlist are allowed, and set a price per access.
+        </p>
+      </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Name */}

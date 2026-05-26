@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { publicId } from "@/lib/validations/ids";
 
 /**
  * Schema for a single SDK event.
@@ -33,7 +34,7 @@ export const sdkEventSchema = z.object({
   request_url: z.url(),
   user_agent_name: z.string().nullable().optional(),
   user_agent_raw: z.string().nullable().optional(),
-  matched_catalog_id: z.string().uuid().nullable().optional(),
+  matched_catalog_id: publicId("cat").nullable().optional(),
 
   /**
    * The SDK's access decision for this request.
@@ -59,7 +60,7 @@ export const sdkEventSchema = z.object({
   ]),
 
   price_applied: z.number().min(0).nullable().optional(),
-  consumer_workspace_id: z.string().uuid().nullable().optional(),
+  consumer_workspace_id: publicId("wks").nullable().optional(),
   timestamp: z.string().datetime(),
 
   // ---------------------------------------------------------------------------
@@ -102,11 +103,11 @@ export const sdkEventSchema = z.object({
 export type SdkEventInput = z.infer<typeof sdkEventSchema>;
 
 /**
- * Schema for POST /api/sdk/events batch request body.
+ * Schema for POST /api/public/v1/sdk/events batch request body.
  * - events: Array of SDK events, max 1000 per batch.
  *
  * Used by:
- * - `app/api/sdk/events/route.ts` — POST handler
+ * - `app/api/public/v1/sdk/events/route.ts` — POST handler
  */
 export const sdkEventBatchSchema = z.object({
   events: z

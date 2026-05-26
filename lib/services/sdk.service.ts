@@ -13,6 +13,7 @@ import { getCatalogs } from "@/lib/db/queries/catalogs";
 import type { MatchableBot, MatchableCatalog } from "@liquad/sdk/matcher";
 import type { SdkEventInput } from "@/lib/validations/sdk-event.schema";
 import { sdkEventSchema } from "@/lib/validations/sdk-event.schema";
+import { generatePublicId } from "@/lib/ids";
 import { canonicalHostnameFromUrl } from "@/lib/utils/hostname";
 
 // ---------------------------------------------------------------------------
@@ -64,15 +65,29 @@ export interface IngestResult {
 /**
  * Fetch and assemble the data needed for the SDK gateway:
  * bots with their catalog_ids, and free catalogs with resolved filter_rules.
+ *
+ * Since migration 038, catalog exposure is gated by the gateway's
+ * `catalog_ids` allowlist:
+ *   - Empty allowlist → no catalogs and no bots returned (the gateway lets
+ *     traffic through but issues no rules).
+ *   - Non-empty → fetch the intersection (gateway.catalog_ids ∩ workspace's
+ *     free catalogs). Only bots linked to at least one surviving catalog are
+ *     returned.
  */
 async function getPublisherMatchData(
-  workspaceId: string
+  workspaceId: string,
+  gatewayCatalogIds: string[]
 ): Promise<{ hmacSecret: string; bots: MatchableBot[]; catalogs: MatchableCatalog[] }> {
+  if (gatewayCatalogIds.length === 0) {
+    const hmacSecret = await getWorkspaceSecret(workspaceId);
+    return { hmacSecret, bots: [], catalogs: [] };
+  }
+
   const [hmacSecret, bots, rawCatalogs, domainIdToHostname] =
     await Promise.all([
       getWorkspaceSecret(workspaceId),
       getWorkspaceBots(workspaceId),
-      getCatalogs([], { workspaceId, status: "active", maxPriceEur: 0 }),
+      getCatalogs(gatewayCatalogIds, { workspaceId, status: "active", maxPriceEur: 0 }),
       getDomainMap(workspaceId),
     ]);
 
@@ -128,28 +143,34 @@ async function getPublisherMatchData(
     };
   });
 
-  // Build MatchableBot[]
-  const matchableBots: MatchableBot[] = bots.map((a) => ({
-    id: a.id,
-    name: a.name,
-    ua_pattern: a.ua_pattern,
-    declared_ips: (a.declared_ips as string[]) ?? [],
-    catalog_ids: botToCatalogIds.get(a.id) ?? [],
-  }));
+  // Only return bots linked to at least one surviving (intersected) catalog.
+  const matchableBots: MatchableBot[] = bots
+    .map((a) => ({
+      id: a.id,
+      name: a.name,
+      ua_pattern: a.ua_pattern,
+      declared_ips: (a.declared_ips as string[]) ?? [],
+      catalog_ids: botToCatalogIds.get(a.id) ?? [],
+    }))
+    .filter((b) => b.catalog_ids.length > 0);
 
   return { hmacSecret, bots: matchableBots, catalogs };
 }
 
 /**
- * Build the gateway rules payload for a workspace.
- * Called by the deployed SDK via GET /api/sdk/rules.
+ * Build the gateway rules payload for a gateway.
+ * Called by the deployed SDK via GET /api/public/v1/sdk/rules.
+ *
+ * @param gatewayCatalogIds Catalog allowlist sourced from the authenticated
+ *   gateway's `catalog_ids`. Empty array means "no catalogs exposed".
  */
 export async function getGatewayRules(
-  workspaceId: string
+  workspaceId: string,
+  gatewayCatalogIds: string[]
 ): Promise<GatewayRules> {
   const [verifiedDomains, publisherData] = await Promise.all([
     getWorkspaceDomains(workspaceId),
-    getPublisherMatchData(workspaceId),
+    getPublisherMatchData(workspaceId, gatewayCatalogIds),
   ]);
 
   return {
@@ -167,7 +188,7 @@ export async function getGatewayRules(
 
 /**
  * Ingest a batch of SDK events for a workspace.
- * Called by the deployed SDK via POST /api/sdk/events.
+ * Called by the deployed SDK via POST /api/public/v1/sdk/events.
  */
 export async function ingestEvents(
   workspaceId: string,
@@ -277,6 +298,7 @@ async function upsertDomainAsVerified(
   }
 
   const { error } = await supabase.from("domains").insert({
+    public_id: generatePublicId("dom"),
     workspace_id: workspaceId,
     domain: host,
     status: "verified",

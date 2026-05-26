@@ -42,9 +42,9 @@ export default function QueryHistoryTab() {
         limit: "20",
         days: days.toString(),
       });
-      const res = await fetch(`/api/dashboard/rag-queries?${params}`, {
-        headers: { "x-workspace-id": workspaceId },
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/dashboard/rag-queries?${params}`
+      );
       if (res.ok) setLogs(await res.json());
     } finally {
       setLoading(false);

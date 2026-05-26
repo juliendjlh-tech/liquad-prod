@@ -1,47 +1,102 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
 
-const routeLabels: Record<string, string> = {
+const publisherLabels: Record<string, string> = {
+  publisher: "Overview",
   domains: "Domains",
-  "user-agents": "AI Bots",
+  bots: "Watchlist",
   catalogs: "Catalogs",
+  subscriptions: "Subscriptions",
   integration: "Integration",
   settings: "Settings",
   new: "Create",
   create: "Create",
   edit: "Edit",
+  import: "Index contents",
+};
+
+const accessLabels: Record<string, string> = {
   access: "Access",
+  subscriptions: "Subscriptions",
   marketplace: "Marketplace",
+  integration: "Integration",
+  settings: "Settings",
+  new: "Create",
+  create: "Create",
+  edit: "Edit",
 };
 
 export default function Breadcrumb() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const segments = pathname.split("/").filter(Boolean);
+  // segments[0]="dashboard", segments[1]=section, segments[2]=level1, segments[3+]=level2+
 
-  // Only show breadcrumb when there's depth (sub-pages or query-driven drill-down)
-  // segments[0] = "dashboard", segments[1] = section, segments[2+] = sub-pages
+  const isPublisher = pathname.startsWith("/dashboard/publisher");
+  const routeLabels = isPublisher ? publisherLabels : accessLabels;
+
   const section = segments[1];
   if (!section) return null;
 
-  const crumbs: { label: string; href: string }[] = [];
+  if (isPublisher) {
+    // Only show breadcrumb on level 2+ pages (4+ segments)
+    // Level 1 pages (/publisher, /publisher/domains, etc.) get no breadcrumb
+    if (segments.length <= 3) return null;
 
-  // Build crumbs from segments after "dashboard" > section
-  for (let i = 2; i < segments.length; i++) {
-    const segment = segments[i];
-    const href = "/" + segments.slice(0, i + 1).join("/");
-    const label = routeLabels[segment] ?? segment;
+    const level1Segment = segments[2];
+    const rootLabel = routeLabels[level1Segment] ?? level1Segment;
+    const rootHref = "/" + segments.slice(0, 3).join("/");
 
-    // Skip dynamic [id] segments (UUIDs)
-    if (segment.match(/^[0-9a-f-]{36}$/i)) continue;
+    const crumbs: { label: string; href: string }[] = [];
+    for (let i = 3; i < segments.length; i++) {
+      const segment = segments[i];
+      if (segment.match(/^[0-9a-f-]{36}$/i)) continue;
+      crumbs.push({
+        label: routeLabels[segment] ?? segment,
+        href: "/" + segments.slice(0, i + 1).join("/"),
+      });
+    }
 
-    crumbs.push({ label, href });
+    return (
+      <nav aria-label="Breadcrumb" className="mb-4">
+        <ol className="flex items-center gap-1.5 text-sm text-gray-500">
+          <li>
+            <Link href={rootHref} className="hover:text-gray-700 transition-colors">
+              {rootLabel}
+            </Link>
+          </li>
+          {crumbs.map((crumb, i) => {
+            const isLast = i === crumbs.length - 1;
+            return (
+              <li key={crumb.href} className="flex items-center gap-1.5">
+                <ChevronIcon />
+                {isLast ? (
+                  <span className="font-medium text-gray-900">{crumb.label}</span>
+                ) : (
+                  <Link href={crumb.href} className="hover:text-gray-700 transition-colors">
+                    {crumb.label}
+                  </Link>
+                )}
+              </li>
+            );
+          })}
+        </ol>
+      </nav>
+    );
   }
 
-  // Show breadcrumb if we have crumbs OR if there are sub-segments (e.g. UUID detail pages)
-  // This ensures /domains/[uuid] still shows the "Domains" section link for navigation
+  // Access pages: existing logic unchanged
+  const crumbs: { label: string; href: string }[] = [];
+  for (let i = 2; i < segments.length; i++) {
+    const segment = segments[i];
+    if (segment.match(/^[0-9a-f-]{36}$/i)) continue;
+    crumbs.push({
+      label: routeLabels[segment] ?? segment,
+      href: "/" + segments.slice(0, i + 1).join("/"),
+    });
+  }
+
   const hasDepth = segments.length > 2;
   if (crumbs.length === 0 && !hasDepth) return null;
 
@@ -52,10 +107,7 @@ export default function Breadcrumb() {
     <nav aria-label="Breadcrumb" className="mb-4">
       <ol className="flex items-center gap-1.5 text-sm text-gray-500">
         <li>
-          <Link
-            href={sectionHref}
-            className="hover:text-gray-700 transition-colors"
-          >
+          <Link href={sectionHref} className="hover:text-gray-700 transition-colors">
             {sectionLabel}
           </Link>
         </li>
@@ -65,14 +117,9 @@ export default function Breadcrumb() {
             <li key={crumb.href} className="flex items-center gap-1.5">
               <ChevronIcon />
               {isLast ? (
-                <span className="font-medium text-gray-900">
-                  {crumb.label}
-                </span>
+                <span className="font-medium text-gray-900">{crumb.label}</span>
               ) : (
-                <Link
-                  href={crumb.href}
-                  className="hover:text-gray-700 transition-colors"
-                >
+                <Link href={crumb.href} className="hover:text-gray-700 transition-colors">
                   {crumb.label}
                 </Link>
               )}

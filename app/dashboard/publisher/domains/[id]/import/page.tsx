@@ -71,9 +71,9 @@ export default function ImportDomainPage() {
   // ── Fetch domain info ──────────────────────────────────────────────
   useEffect(() => {
     void (async () => {
-      const res = await fetch(`/api/domains/${domainId}`, {
-        headers: { "x-workspace-id": workspaceId },
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/domains/${domainId}`
+      );
       if (res.ok) {
         const data = await res.json();
         setDomainInfo({
@@ -99,14 +99,14 @@ export default function ImportDomainPage() {
           body.path_rules = validRules;
           body.path_logic = logic;
         }
-        const res = await fetch("/api/contents/index/preview", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-workspace-id": workspaceId,
-          },
-          body: JSON.stringify(body),
-        });
+        const res = await fetch(
+          `/api/internal/workspaces/${workspaceId}/contents/index/preview`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          }
+        );
         if (res.ok) {
           setPreview(await res.json());
         } else {
@@ -173,9 +173,9 @@ export default function ImportDomainPage() {
       stopPolling();
       pollRef.current = setInterval(async () => {
         try {
-          const res = await fetch(`/api/contents/index/${jobId}`, {
-            headers: { "x-workspace-id": workspaceId },
-          });
+          const res = await fetch(
+            `/api/internal/workspaces/${workspaceId}/contents/index/${jobId}`
+          );
           if (!res.ok) return;
           const job: ImportJob = await res.json();
           setImportJob(job);
@@ -218,14 +218,14 @@ export default function ImportDomainPage() {
       }
       body.max_pages = maxPages;
 
-      const res = await fetch("/api/contents/index", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
-        body: JSON.stringify(body),
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/contents/index`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
       const json = await res.json();
 
       if (res.ok || res.status === 202) {
@@ -284,8 +284,14 @@ export default function ImportDomainPage() {
         </div>
       )}
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-1">Index Contents</h1>
-      <p className="text-sm text-gray-500 mb-6">{domainInfo.domain}</p>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Index contents</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          Pick which pages of <span className="font-medium text-gray-700">{domainInfo.domain}</span> to import.
+          Filter by URL pattern and cap the number of pages added in this batch.
+          Only indexed pages can be included in a catalog.
+        </p>
+      </div>
 
       <div className="space-y-6">
         {/* Sitemap info (readonly) */}

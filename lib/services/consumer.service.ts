@@ -5,16 +5,20 @@
 // Handles content authorization (pre-purchase of signed tokens) and
 // discovery of accessible indexed sources.
 //
-// Design:
+// Design (post-network refactor, migrations 040-042):
 //   - Indexed source-based matching: only indexed URLs can be purchased
 //   - ua_pattern reconciliation: consumer bot matched to publisher catalogs
 //     via ua_pattern (not strict bot_id), so preset and operator bots unify
 //   - Bot-bound tokens: ua_pattern encoded in HMAC signature, gateway verifies
 //   - Publisher-controlled TTL: catalog.ttl_minutes, not consumer-provided
 //   - declared_ips required: bots without IP ranges cannot participate
-//   - Per-subscription scope: subscriptions.scope_to_workspace=true
-//     (default) restricts visible catalogs to the workspace owning the
-//     subscription. Network access is an explicit per-subscription opt-in.
+//   - Network-driven access: the API key's network defines the catalogue set
+//     (network_catalogs.status='accepted'). No more subscription-level
+//     allowlist, max_price, or workspace scope — all removed in migration 041.
+//   - Bot identity is on the API key (api_keys.bot_id), not in the request
+//     body. workspace_bots is no longer queried at runtime.
+//   - Revenue split (85/7/8) computed in TS (lib/constants/revenue.ts) and
+//     passed pre-computed to the RPC.
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
@@ -30,9 +34,10 @@ import {
 import {
   getBotById,
   getCatalogBots,
-  isBotActiveForWorkspace,
   type BotRecord,
 } from "@/lib/db/queries/agents";
+import { getNetworkAcceptedCatalogIds } from "@/lib/db/queries/networks";
+import { computeRevenueSplit } from "@/lib/constants/revenue";
 import { normalizeUrl } from "@liquad/sdk/url-normalize";
 import { ok, err, type ServiceResult } from "@/lib/utils/service-result";
 import { canonicalizeHostname } from "@/lib/utils/hostname";
@@ -144,11 +149,14 @@ async function signHmacToken(
 interface BatchDebitInput {
   publisher_workspace_id: string;
   catalog_id: string;
-  bot_id: string;
-  ua_pattern: string;
   url: string;
   price_eur: number;
   ttl_minutes: number;
+  // Pre-computed revenue split (TS is the source of truth for ratios — the RPC
+  // stores these amounts as-is into the 4 credit_transactions rows per grant).
+  amount_content_owner: number;
+  amount_sub_manager: number;
+  amount_platform_fee: number;
 }
 
 interface BatchGrantResult {
@@ -175,8 +183,6 @@ type BatchDebitResult = BatchDebitSuccess | BatchDebitFailure;
 
 async function batchDebitAndGrant(
   apiKeyId: string,
-  consumerWorkspaceId: string,
-  botId: string,
   debits: BatchDebitInput[],
   supabase: SupabaseClient
 ): Promise<BatchDebitResult> {
@@ -205,6 +211,9 @@ async function batchDebitAndGrant(
     };
   }
 
+  // bot_id + ua_pattern are no longer passed: the RPC resolves them from
+  // api_keys.bot_id JOIN bots. Amounts are pre-computed in TS to keep the
+  // revenue ratios single-sourced.
   const { data: rpcData, error: rpcError } = await supabase.rpc(
     "authorize_and_debit_batch",
     {
@@ -212,11 +221,12 @@ async function batchDebitAndGrant(
       p_debits: debits.map((d) => ({
         publisher_workspace_id: d.publisher_workspace_id,
         catalog_id: d.catalog_id,
-        bot_id: d.bot_id,
-        ua_pattern: d.ua_pattern,
         url: d.url,
         price_eur: d.price_eur,
         ttl_minutes: d.ttl_minutes,
+        amount_content_owner: d.amount_content_owner,
+        amount_sub_manager: d.amount_sub_manager,
+        amount_platform_fee: d.amount_platform_fee,
       })),
     }
   );
@@ -260,9 +270,6 @@ async function batchDebitAndGrant(
     new_balance: result.new_balance ?? 0,
     grants: result.grants,
   };
-  // botId is part of the function signature for symmetry with caller intent;
-  // currently unused inside this helper.
-  void botId;
 }
 
 // ---------------------------------------------------------------------------
@@ -276,23 +283,22 @@ interface ResolvedBot {
 }
 
 /**
- * Resolve and validate a consumer bot for the given workspace:
- *   - bot exists
- *   - bot is active for the workspace (workspace_bots row present)
+ * Resolve and validate a consumer bot. The bot is already bound to the API key
+ * at creation time (api_keys.bot_id) and was validated against the network's
+ * derived set (trigger validate_api_key_bot_in_network). Runtime checks here
+ * are limited to:
+ *   - bot exists in the global registry
  *   - bot has at least one declared IP
+ *
+ * The workspace_bots junction is no longer queried at runtime — its sole role
+ * is curation when populating catalog_bots.
  */
 async function resolveConsumerBot(
-  botId: string,
-  workspaceId: string
+  botId: string
 ): Promise<ServiceResult<ResolvedBot>> {
   const bot = await getBotById(botId);
   if (!bot) {
     return err("bot_not_found", 404, { bot_id: botId });
-  }
-
-  const isActive = await isBotActiveForWorkspace(bot.id, workspaceId);
-  if (!isActive) {
-    return err("bot_not_in_workspace", 403, { bot_id: botId });
   }
 
   if (!bot.declared_ips || bot.declared_ips.length === 0) {
@@ -319,16 +325,18 @@ interface AccessibleCatalogInfo {
  * given consumer bot, and the IP intersection per catalog.
  *
  * Logic:
- *   1. Load catalog_bots for the candidate catalog_ids.
- *   2. Keep links whose bot.ua_pattern equals the consumer's uaPattern.
- *   3. Compute IP intersection between consumer's declared_ips and the
- *      publisher bot's declared_ips. Accumulate (UNION) across multiple
- *      UA-matching publisher bots on the same catalog — fixes the prior
- *      "last-wins" overwrite (bug 2.3).
- *   4. Drop catalogs with empty intersection.
- *   5. Load CatalogRecords for the survivors with status=active filter,
- *      optional maxPriceEur, and optional scopeWorkspaceId (when
- *      scope_to_workspace=true on the subscriptions row).
+ *   1. Restrict candidates to the network's accepted catalogues (allowlist
+ *      derived from network_catalogs(network_id, status='accepted')). Empty
+ *      allowlist → empty result (an API key references exactly one network).
+ *   2. Load catalog_bots for the surviving candidates.
+ *   3. Keep links whose bot.ua_pattern equals the consumer's uaPattern.
+ *   4. Compute IP intersection between consumer's declared_ips and the
+ *      publisher bot's declared_ips. UNION across multiple UA-matching
+ *      publisher bots on the same catalog.
+ *   5. Drop catalogs with empty IP intersection.
+ *   6. Load CatalogRecords for the survivors, restricted to status='active'
+ *      (marketplace visibility). A catalogue listed in a network but no
+ *      longer 'active' is invisible to the consumer.
  *
  * Returns:
  *   - accessible: Map<catalog_id, { catalog, allowedIps }>
@@ -340,18 +348,27 @@ async function filterAccessibleCatalogs(
   candidateCatalogIds: string[],
   consumerBot: ResolvedBot,
   options: {
-    scopeWorkspaceId?: string;
-    maxPriceEur?: number;
+    /**
+     * Network-derived catalogue allowlist (catalogues whose membership is
+     * 'accepted'). Required: an API key is always tied to one network.
+     */
+    networkAcceptedCatalogIds: string[];
   }
 ): Promise<{
   accessible: Map<string, AccessibleCatalogInfo>;
   uaCompatibleCatalogIds: Set<string>;
 }> {
-  if (candidateCatalogIds.length === 0) {
+  if (candidateCatalogIds.length === 0 || options.networkAcceptedCatalogIds.length === 0) {
     return { accessible: new Map(), uaCompatibleCatalogIds: new Set() };
   }
 
-  const catalogBotLinks = await getCatalogBots(candidateCatalogIds);
+  const allowed = new Set(options.networkAcceptedCatalogIds);
+  const prunedCandidates = candidateCatalogIds.filter((id) => allowed.has(id));
+  if (prunedCandidates.length === 0) {
+    return { accessible: new Map(), uaCompatibleCatalogIds: new Set() };
+  }
+
+  const catalogBotLinks = await getCatalogBots(prunedCandidates);
   const uaCompatibleCatalogIds = new Set<string>();
   const catalogIdToAllowedIps = new Map<string, Set<string>>();
 
@@ -375,11 +392,10 @@ async function filterAccessibleCatalogs(
     return { accessible: new Map(), uaCompatibleCatalogIds };
   }
 
-  const catalogs = await getCatalogs(ipCompatibleIds, {
-    status: "active",
-    maxPriceEur: options.maxPriceEur,
-    workspaceId: options.scopeWorkspaceId,
-  });
+  // Marketplace visibility: only catalogues currently 'active' are returned.
+  // A catalogue accepted in the network but switched to 'inactive' by its
+  // owner is silently filtered out — caller sees `no_catalog` for that URL.
+  const catalogs = await getCatalogs(ipCompatibleIds, { status: "active" });
 
   const accessible = new Map<string, AccessibleCatalogInfo>();
   for (const catalog of catalogs) {
@@ -403,30 +419,30 @@ async function filterAccessibleCatalogs(
  *   Pass 2: Find cheapest valid catalog per URL (ua_pattern reconciliation)
  *   Pass 3: Batch debit + sign bot-bound HMAC tokens
  *
- * @param scopeToWorkspace - When true, only catalogs owned by
- *   `consumerWorkspaceId` are returned. Sourced from
- *   workspace_bots(scope_to_workspace) by the route handler.
+ * networkId and botId are sourced from the API key by the route handler:
+ *   - networkId → the allowed catalogue set (network_catalogs accepted)
+ *   - botId     → the bot identity claimed by the key (immutable)
+ *
+ * No more bot_id in the request body since migration 041. No more
+ * scope_to_workspace / max_price_eur / subscription.catalog_ids since they
+ * were dropped along with the legacy subscription scope model.
  */
 export async function authorize(
   consumerWorkspaceId: string,
   apiKeyId: string,
+  networkId: string,
+  botId: string,
   input: TransactionInput,
-  scopeToWorkspace: boolean = false
 ): Promise<ServiceResult<AuthorizeSuccess>> {
   // ── Pass 1: Resolve bot + normalize + verify indexed sources ──────────
 
-  // bot_id is required per call (subscriptions are bot-agnostic since
-  // migration 032). resolveConsumerBot validates the bot belongs to the
-  // caller's workspace via workspace_bots.
-  if (!input.bot_id) {
-    return err("bot_id_required", 422);
-  }
-  const botId = input.bot_id;
-
-  const resolved = await resolveConsumerBot(botId, consumerWorkspaceId);
+  const resolved = await resolveConsumerBot(botId);
   if (!resolved.ok) return resolved;
   const consumerBot = resolved.data;
   const uaPattern = consumerBot.uaPattern;
+
+  // Resolve the network's accepted catalogues once for the whole batch.
+  const networkAcceptedCatalogIds = await getNetworkAcceptedCatalogIds(networkId);
 
   // Each entry preserves the original URL (echoed back to the caller) alongside
   // the normalized URL used for matching and HMAC signing. Entries stay in
@@ -509,15 +525,13 @@ export async function authorize(
 
     const allCatalogIds = [...new Set(sourceCatalogLinks.map((l) => l.catalog_id))];
 
-    // Reconcile catalogs against the consumer bot (UA equality + IP intersection
-    // + optional workspace scope). See filterAccessibleCatalogs for full logic.
+    // Reconcile catalogs against the consumer bot (UA equality + IP intersection)
+    // restricted to the network's accepted catalogue set.
+    // See filterAccessibleCatalogs for full logic.
     const { accessible, uaCompatibleCatalogIds } = await filterAccessibleCatalogs(
       allCatalogIds,
       consumerBot,
-      {
-        scopeWorkspaceId: scopeToWorkspace ? consumerWorkspaceId : undefined,
-        maxPriceEur: input.max_price_eur,
-      }
+      { networkAcceptedCatalogIds }
     );
 
     for (const i of indexedIndices) {
@@ -536,8 +550,8 @@ export async function authorize(
 
       if (!bestCatalog) {
         // Distinguish "no catalog at all" from "catalogs exist but none IP-compatible".
-        // Note: when scopeToWorkspace=true, a catalog filtered out by scope is reported
-        // as "no_catalog" — from the caller's perspective the catalog is invisible.
+        // A catalogue not in the network's accepted set is reported as "no_catalog"
+        // — from the caller's perspective the catalogue is invisible.
         const hasUaCompatible = catalogIds.some((id) => uaCompatibleCatalogIds.has(id));
         outcomes.set(i, hasUaCompatible ? "no_matching_ips" : "no_catalog");
         continue;
@@ -577,19 +591,23 @@ export async function authorize(
     })
   );
 
-  const debitInputs = Array.from(uniqueMatchEntries.entries()).map(([url, m]) => ({
-    publisher_workspace_id: m.info.publisherWorkspaceId,
-    catalog_id: m.info.catalogId,
-    bot_id: botId,
-    ua_pattern: uaPattern,
-    url,
-    price_eur: m.info.priceEur,
-    ttl_minutes: m.info.ttlMinutes,
-  }));
+  const debitInputs: BatchDebitInput[] = Array.from(uniqueMatchEntries.entries()).map(([url, m]) => {
+    const split = computeRevenueSplit(m.info.priceEur);
+    return {
+      publisher_workspace_id: m.info.publisherWorkspaceId,
+      catalog_id: m.info.catalogId,
+      url,
+      price_eur: m.info.priceEur,
+      ttl_minutes: m.info.ttlMinutes,
+      amount_content_owner: split.content_owner,
+      amount_sub_manager: split.sub_manager,
+      amount_platform_fee: split.platform_fee,
+    };
+  });
 
-  const debitResult = debitInputs.length > 0
-    ? await batchDebitAndGrant(apiKeyId, consumerWorkspaceId, botId, debitInputs, supabase)
-    : await batchDebitAndGrant(apiKeyId, consumerWorkspaceId, botId, [], supabase);
+  const debitResult = await batchDebitAndGrant(apiKeyId, debitInputs, supabase);
+  // consumerWorkspaceId kept in scope for response construction below.
+  void consumerWorkspaceId;
 
   // ── Graceful degradation: insufficient balance ─────────────────────────
   // Instead of failing the whole batch, return 200 with every URL falling back
@@ -695,7 +713,7 @@ export async function authorize(
 }
 
 // ---------------------------------------------------------------------------
-// Discovery endpoints — back /api/consumer/v1/sources and /catalogs
+// Discovery endpoints — back /api/public/v1/consumer/sources and /catalogs
 // ---------------------------------------------------------------------------
 
 const SOURCES_DEFAULT_LIMIT = 1000;
@@ -746,34 +764,40 @@ export interface ListAccessibleSourcesOptions {
  * List indexed sources accessible to the consumer's bot.
  *
  * Algorithm:
- *   1. Resolve consumer bot (must exist, be active for workspace, have IPs).
- *   2. Find all bots in DB sharing the consumer's ua_pattern.
- *   3. catalog_bots links → candidate catalog_ids (cross-workspace).
- *   4. filterAccessibleCatalogs: UA equality, IP intersection, workspace scope, status=active.
- *   5. Optional ?catalog_id= filter intersected with the accessible set.
- *   6. Optional ?domain= resolved to domain_id (or short-circuit empty if unknown).
- *   7. catalog_sources → indexed_source_ids for accessible catalogs.
- *   8. Single keyset query on indexed_sources: WHERE id IN (...) AND id > $cursor
- *      AND domain_id = ? AND path LIKE prefix% ORDER BY id ASC LIMIT N+1.
- *   9. Per source, pick the cheapest accessible catalog as best_catalog.
+ *   1. Resolve consumer bot (must exist, have IPs).
+ *   2. Resolve the network's accepted catalogue set once.
+ *   3. Find all bots in DB sharing the consumer's ua_pattern.
+ *   4. catalog_bots links → candidate catalog_ids (cross-workspace).
+ *   5. filterAccessibleCatalogs: UA equality, IP intersection, network membership.
+ *   6. Optional ?catalog_id= filter intersected with the accessible set.
+ *   7. Optional ?domain= resolved to domain_id (or short-circuit empty if unknown).
+ *   8. catalog_sources → indexed_source_ids for accessible catalogs.
+ *   9. Single keyset query on indexed_sources.
+ *  10. Per source, pick the cheapest accessible catalog as best_catalog.
  *
- * Cursor pagination: keyset on `indexed_sources.id` (UUIDv4, stable). No HMAC
- * signing — forging a cursor at most jumps to an arbitrary id within the
- * caller's accessible set (no auth/scope bypass possible).
+ * Cursor pagination: keyset on `indexed_sources.id` (UUIDv4, stable).
  *
- * @param scopeToWorkspace - When true, only catalogs owned by `workspaceId`
- *   are considered (publisher-managed key, Mode B).
+ * @param workspaceId - Consumer workspace owning the API key (debited).
+ * @param networkId   - Network bound to the API key (defines the catalogue set).
+ * @param botId       - Bot identity bound to the API key.
  */
 export async function listAccessibleSources(
   workspaceId: string,
+  networkId: string,
   botId: string,
-  scopeToWorkspace: boolean,
-  options: ListAccessibleSourcesOptions = {}
+  options: ListAccessibleSourcesOptions = {},
 ): Promise<ServiceResult<ListAccessibleSourcesSuccess>> {
   // ── 1. Resolve consumer bot ───────────────────────────────────────────
-  const resolved = await resolveConsumerBot(botId, workspaceId);
+  const resolved = await resolveConsumerBot(botId);
   if (!resolved.ok) return resolved;
   const consumerBot = resolved.data;
+  void workspaceId; // currently unused at runtime; kept for symmetry with /licenses.
+
+  // Resolve the network's accepted catalogues once for the whole query.
+  const networkAcceptedCatalogIds = await getNetworkAcceptedCatalogIds(networkId);
+  if (networkAcceptedCatalogIds.length === 0) {
+    return ok({ sources: [], next_cursor: null });
+  }
 
   const limit = Math.min(
     Math.max(options.limit ?? SOURCES_DEFAULT_LIMIT, 1),
@@ -816,9 +840,7 @@ export async function listAccessibleSources(
   const { accessible } = await filterAccessibleCatalogs(
     candidateCatalogIds,
     consumerBot,
-    {
-      scopeWorkspaceId: scopeToWorkspace ? workspaceId : undefined,
-    }
+    { networkAcceptedCatalogIds }
   );
 
   if (accessible.size === 0) {
@@ -939,7 +961,7 @@ export async function listAccessibleSources(
 }
 
 // ---------------------------------------------------------------------------
-// listAccessibleCatalogs — discovery endpoint backing /api/consumer/v1/catalogs
+// listAccessibleCatalogs — discovery endpoint backing /api/public/v1/consumer/catalogs
 // ---------------------------------------------------------------------------
 
 interface AccessibleCatalog {
@@ -962,30 +984,31 @@ export interface ListAccessibleCatalogsSuccess {
  * List all catalogs accessible to the consumer's bot.
  *
  * Same matching logic as `listAccessibleSources` (UA equality + IP intersection
- * + optional workspace scope + status=active), but returns the catalog metadata
- * directly without expanding to sources. Useful for:
- *   - Onboarding: "what can I buy?"
- *   - Pricing comparison
- *   - Pre-filtering /sources calls via ?catalog_id=
+ * + network membership + status=active), but returns the catalog metadata
+ * directly without expanding to sources.
  *
- * Volume is small (catalogs « sources), so no pagination — all accessible
- * catalogs are returned in a single response.
+ * Volume is small (catalogs « sources), so no pagination.
  *
- * source_count: total indexed sources linked to the catalog (not de-duplicated
- * across catalogs). Approximate signal of catalog size.
- *
- * @param scopeToWorkspace - When true, only catalogs owned by `workspaceId`
- *   are considered (publisher-managed key, Mode B).
+ * @param workspaceId - Consumer workspace owning the API key.
+ * @param networkId   - Network bound to the API key.
+ * @param botId       - Bot identity bound to the API key.
  */
 export async function listAccessibleCatalogs(
   workspaceId: string,
+  networkId: string,
   botId: string,
-  scopeToWorkspace: boolean
 ): Promise<ServiceResult<ListAccessibleCatalogsSuccess>> {
   // ── 1. Resolve consumer bot ───────────────────────────────────────────
-  const resolved = await resolveConsumerBot(botId, workspaceId);
+  const resolved = await resolveConsumerBot(botId);
   if (!resolved.ok) return resolved;
   const consumerBot = resolved.data;
+  void workspaceId;
+
+  // Resolve the network's accepted catalogues once.
+  const networkAcceptedCatalogIds = await getNetworkAcceptedCatalogIds(networkId);
+  if (networkAcceptedCatalogIds.length === 0) {
+    return ok({ catalogs: [] });
+  }
 
   const supabase = await createServerClient();
 
@@ -1022,9 +1045,7 @@ export async function listAccessibleCatalogs(
   const { accessible } = await filterAccessibleCatalogs(
     candidateCatalogIds,
     consumerBot,
-    {
-      scopeWorkspaceId: scopeToWorkspace ? workspaceId : undefined,
-    }
+    { networkAcceptedCatalogIds }
   );
 
   if (accessible.size === 0) {

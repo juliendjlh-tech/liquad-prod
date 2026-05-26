@@ -10,6 +10,7 @@
 import { randomBytes, scrypt, timingSafeEqual } from "crypto";
 import { promisify } from "util";
 import { createServerClient } from "@/lib/db/supabase-server";
+import { generatePublicId } from "@/lib/ids";
 
 const scryptAsync = promisify(scrypt);
 
@@ -65,73 +66,23 @@ export async function verifyApiKey(
 }
 
 // ---------------------------------------------------------------------------
-// API Key — Rotation
-// ---------------------------------------------------------------------------
-
-/**
- * Regenerate the API key for a workspace. Owner only.
- * The old key is IMMEDIATELY invalidated.
- */
-export async function regenerateApiKey(
-  workspaceId: string,
-  userId: string
-): Promise<string> {
-  const supabase = await createServerClient();
-
-  const { data: membership, error: memberError } = await supabase
-    .from("workspace_members")
-    .select("role")
-    .eq("workspace_id", workspaceId)
-    .eq("user_id", userId)
-    .single();
-
-  if (memberError || !membership) {
-    throw new Error("NOT_MEMBER");
-  }
-
-  if (membership.role !== "owner") {
-    throw new Error("FORBIDDEN");
-  }
-
-  const newApiKey = generateApiKey();
-  const newHash = await hashApiKey(newApiKey);
-
-  const { error: updateError } = await supabase
-    .from("workspaces")
-    .update({
-      api_key_hash: newHash,
-      api_key_prefix: newApiKey.slice(0, 11),
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", workspaceId);
-
-  if (updateError) {
-    throw new Error(`UPDATE_FAILED: ${updateError.message}`);
-  }
-
-  return newApiKey;
-}
-
-// ---------------------------------------------------------------------------
 // Workspace CRUD
 // ---------------------------------------------------------------------------
 
 /**
  * Create a new workspace with the authenticated user as owner.
- * Returns the workspace WITH the plaintext API key (shown once).
+ * SDK keys are no longer attached to workspaces — create a gateway separately
+ * to expose catalogs via the publisher SDK (see lib/services/gateway.service.ts).
  */
 export async function createWorkspace(
   userId: string,
   name: string
-): Promise<{ id: string; name: string; api_key: string; created_at: string }> {
+): Promise<{ id: string; name: string; created_at: string }> {
   const supabase = await createServerClient();
-
-  const apiKey = generateApiKey();
-  const apiKeyHash = await hashApiKey(apiKey);
 
   const { data: workspace, error: wsError } = await supabase
     .from("workspaces")
-    .insert({ name, api_key_hash: apiKeyHash, api_key_prefix: apiKey.slice(0, 11) })
+    .insert({ public_id: generatePublicId("wks"), name })
     .select("id, name, created_at")
     .single();
 
@@ -155,7 +106,6 @@ export async function createWorkspace(
   return {
     id: workspace.id,
     name: workspace.name,
-    api_key: apiKey,
     created_at: workspace.created_at!,
   };
 }

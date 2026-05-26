@@ -49,9 +49,9 @@ export default function DomainDetailPage() {
 
   // Fetch domain info (name + scrape status)
   const fetchDomainInfo = useCallback(async () => {
-    const res = await fetch(`/api/domains/${domainId}`, {
-      headers: { "x-workspace-id": workspaceId },
-    });
+    const res = await fetch(
+      `/api/internal/workspaces/${workspaceId}/domains/${domainId}`
+    );
     if (res.ok) {
       const data = await res.json();
       setDomainName(data.domain);
@@ -92,12 +92,13 @@ export default function DomainDetailPage() {
     setContentsLoading(true);
     try {
       const params = new URLSearchParams({
-        workspace_id: workspaceId,
         domain_id: domainId,
         page: contentsPage.toString(),
         limit: "50",
       });
-      const res = await fetch(`/api/contents?${params}`);
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/contents?${params}`
+      );
       if (res.ok) {
         const data = await res.json();
         setContents(data);
@@ -113,10 +114,10 @@ export default function DomainDetailPage() {
 
   // ── Delete content ─────────────────────────────────────────────────
   const executeDeleteContent = async (id: string) => {
-    const res = await fetch(`/api/contents/${id}`, {
-      method: "DELETE",
-      headers: { "x-workspace-id": workspaceId },
-    });
+    const res = await fetch(
+      `/api/internal/workspaces/${workspaceId}/contents/${id}`,
+      { method: "DELETE" }
+    );
     if (res.ok) {
       showToast("Content deleted", "success");
       void fetchContents();
@@ -130,9 +131,9 @@ export default function DomainDetailPage() {
   const handleDeleteDomainClick = async () => {
     // Fetch impact before showing confirmation
     try {
-      const res = await fetch(`/api/domains/${domainId}`, {
-        headers: { "x-workspace-id": workspaceId },
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/domains/${domainId}`
+      );
       if (res.ok) {
         setDeleteImpact(await res.json());
         setShowDeleteDomain(true);
@@ -147,10 +148,10 @@ export default function DomainDetailPage() {
   const executeDeleteDomain = async () => {
     setDeletingDomain(true);
     try {
-      const res = await fetch(`/api/domains/${domainId}`, {
-        method: "DELETE",
-        headers: { "x-workspace-id": workspaceId },
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/domains/${domainId}`,
+        { method: "DELETE" }
+      );
       if (res.ok) {
         showToast("Domain deleted", "success");
         setTimeout(() => router.push("/dashboard/domains"), 1000);
@@ -182,14 +183,14 @@ export default function DomainDetailPage() {
   const handleReindex = async () => {
     setReindexing(true);
     try {
-      const res = await fetch("/api/contents/index", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
-        body: JSON.stringify({ domain_id: domainId, reindex: true }),
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/contents/index`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ domain_id: domainId, reindex: true }),
+        }
+      );
       if (res.ok) {
         showToast("Re-indexing started", "success");
         // Refresh domain info to show the new status
@@ -241,12 +242,19 @@ export default function DomainDetailPage() {
         onCancel={() => setShowDeleteDomain(false)}
       />
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">
           {domainName ?? "Domain"}
         </h1>
-        <div className="flex items-center gap-4">
+        <p className="text-sm text-gray-500 max-w-2xl">
+          All the pages Liquad has discovered on this domain. Add more from
+          the sitemap, or remove the ones you don&apos;t want exposed to AI
+          crawlers.
+        </p>
+      </div>
+
+      <div className="mb-6">
+        <div className="flex gap-2 justify-end items-center">
           {contents && (
             <span className="text-sm text-gray-500">
               {contents.total} content(s)

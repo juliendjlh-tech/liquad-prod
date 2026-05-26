@@ -144,7 +144,7 @@ const VALUE_PROPS = {
 const API_PREVIEW = {
   eyebrow: "Developer experience",
   headline: "Clean API. Predictable responses.",
-  request: `POST /api/consumer/v1/licenses
+  request: `POST /api/public/v1/consumer/licenses
 Authorization: Bearer YOUR_API_KEY
 Content-Type: application/json
 

@@ -1,12 +1,13 @@
 import { z } from "zod";
 import { pathRuleSchema } from "@/lib/validations/catalog.schema";
+import { publicId } from "@/lib/validations/ids";
 
 // ---------------------------------------------------------------------------
 // RAG Query Schema
 // ---------------------------------------------------------------------------
 
 /**
- * Schema for POST /api/sdk/query request body.
+ * Schema for POST /api/public/v1/consumer/query request body.
  *
  * The consumer can either reference a saved SearchConfig (by ID) or pass
  * parameters inline. Inline parameters override SearchConfig values.
@@ -17,15 +18,15 @@ export const querySchema = z
     // The natural language query to search for
     query: z.string().min(1, "query is required").max(2000),
 
-    // UUID of the bot performing the query — used for authorization,
+    // public_id of the bot performing the query — used for authorization,
     // cache lookup, grant creation, and token signing
-    bot_id: z.string().uuid(),
+    bot_id: publicId("bot"),
 
     // Reference a saved SearchConfig (optional)
-    search_config_id: z.string().uuid().optional(),
+    search_config_id: publicId("sc").optional(),
 
     // Inline parameters (optional — override SearchConfig if both provided)
-    catalog_ids: z.array(z.string().uuid()).optional(),
+    catalog_ids: z.array(publicId("cat")).optional(),
 
     // Path filters to narrow down results (same format as catalog filter_rules)
     path_filters: z

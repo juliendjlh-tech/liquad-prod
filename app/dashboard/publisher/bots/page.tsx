@@ -12,6 +12,7 @@ import ConfirmDialog from "@/app/components/ui/ConfirmDialog";
 
 interface Bot {
   id: string;
+  public_id: string;
   name: string;
   ua_pattern: string;
   declared_ips: string[];
@@ -76,9 +77,7 @@ export default function BotsPage() {
   const fetchBots = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/bots", {
-        headers: { "x-workspace-id": workspaceId },
-      });
+      const res = await fetch(`/api/internal/workspaces/${workspaceId}/bots`);
       if (res.ok) setBots(await res.json());
     } finally {
       setLoading(false);
@@ -86,9 +85,9 @@ export default function BotsPage() {
   }, [workspaceId]);
 
   const fetchPresets = useCallback(async () => {
-    const res = await fetch("/api/bots/presets");
+    const res = await fetch(`/api/internal/workspaces/${workspaceId}/bots/presets`);
     if (res.ok) setPresets(await res.json());
-  }, []);
+  }, [workspaceId]);
 
   useEffect(() => {
     void fetchBots();
@@ -100,12 +99,9 @@ export default function BotsPage() {
   // ---------------------------------------------------------------------------
 
   const addPresetBot = async (preset: Preset) => {
-    const res = await fetch("/api/bots", {
+    const res = await fetch(`/api/internal/workspaces/${workspaceId}/bots`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-workspace-id": workspaceId,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "subscribe_preset",
         name: preset.name,
@@ -150,12 +146,9 @@ export default function BotsPage() {
       .map((s) => s.trim())
       .filter(Boolean);
 
-    const res = await fetch("/api/bots", {
+    const res = await fetch(`/api/internal/workspaces/${workspaceId}/bots`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-workspace-id": workspaceId,
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "create_custom",
         name: customName,
@@ -180,10 +173,10 @@ export default function BotsPage() {
   };
 
   const removeBot = async (bot: Bot) => {
-    const res = await fetch(`/api/bots/${bot.id}`, {
-      method: "DELETE",
-      headers: { "x-workspace-id": workspaceId },
-    });
+    const res = await fetch(
+      `/api/internal/workspaces/${workspaceId}/bots/${bot.id}`,
+      { method: "DELETE" }
+    );
 
     if (res.ok) {
       const json = await res.json();
@@ -210,7 +203,7 @@ export default function BotsPage() {
     setEditIps("");
   };
 
-  const saveEdit = async (botId: string) => {
+  const saveEdit = async (botPublicId: string) => {
     const parsedIps = editIps
       .split("\n")
       .map((ip) => ip.trim())
@@ -225,14 +218,14 @@ export default function BotsPage() {
       body.declared_ips = parsedIps;
     }
 
-    const res = await fetch(`/api/bots/${botId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        "x-workspace-id": workspaceId,
-      },
-      body: JSON.stringify(body),
-    });
+    const res = await fetch(
+      `/api/internal/workspaces/${workspaceId}/bots/${botPublicId}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }
+    );
 
     if (res.ok) {
       showToast("Bot updated", "success");
@@ -285,9 +278,12 @@ export default function BotsPage() {
       )}
 
       <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">AI Bots</h1>
-        <p className="text-sm text-gray-500">
-          Bots are workspace-level identities (UA pattern + declared IPs). Billing lives in <a className="underline" href="/dashboard/subscriptions">Subscriptions</a> — a subscription can be used with any bot at call time.
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Bots Watchlist</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          The AI crawlers you want to monitor and block by default, unless
+          you grant them explicit access through a catalog. Start from our
+          library of known crawlers (GPTBot, ClaudeBot, Perplexity…) or add
+          your own.
         </p>
       </div>
 

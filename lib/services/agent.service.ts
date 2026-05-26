@@ -1,5 +1,6 @@
 import { createServerClient } from "@/lib/db/supabase-server";
 import { getWorkspaceBots as queryWorkspaceBots } from "@/lib/db/queries/agents";
+import { generatePublicId } from "@/lib/ids";
 
 // ---------------------------------------------------------------------------
 // AI Bot Presets
@@ -232,7 +233,7 @@ export interface BotRow {
 // CRUD Functions
 // ---------------------------------------------------------------------------
 
-const BOT_SELECT_COLUMNS = "id, name, ua_pattern, declared_ips, type, description, created_at";
+const BOT_SELECT_COLUMNS = "id, public_id, name, ua_pattern, declared_ips, type, description, created_at";
 
 /**
  * List all bots active for a workspace (via workspace_bots junction).
@@ -340,6 +341,7 @@ export async function createCustomBot(
   const { data: created, error } = await supabase
     .from("bots")
     .insert({
+      public_id: generatePublicId("bot"),
       name: data.name,
       ua_pattern: data.ua_pattern,
       description: data.description ?? null,

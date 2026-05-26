@@ -99,9 +99,9 @@ export default function EditCatalogPage({
   const fetchCatalog = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`/api/catalogs/${catalogId}`, {
-        headers: { "x-workspace-id": workspaceId },
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/catalogs/${catalogId}`
+      );
       if (res.ok) {
         const data = (await res.json()) as CatalogDetail;
         setName(data.name);
@@ -121,10 +121,8 @@ export default function EditCatalogPage({
     void fetchCatalog();
     void (async () => {
       const [botsRes, domainsRes] = await Promise.all([
-        fetch("/api/bots", {
-          headers: { "x-workspace-id": workspaceId },
-        }),
-        fetch(`/api/domains?workspace_id=${workspaceId}`),
+        fetch(`/api/internal/workspaces/${workspaceId}/bots`),
+        fetch(`/api/internal/workspaces/${workspaceId}/domains`),
       ]);
       if (botsRes.ok) {
         const data = (await botsRes.json()) as BotOption[];
@@ -146,13 +144,10 @@ export default function EditCatalogPage({
       setPreviewLoading(true);
       try {
         const res = await fetch(
-          `/api/catalogs/preview?page=${page}&limit=20`,
+          `/api/internal/workspaces/${workspaceId}/catalogs/preview?page=${page}&limit=20`,
           {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "x-workspace-id": workspaceId,
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               filter_rules: { domain_rules: domainRules },
             }),
@@ -194,14 +189,14 @@ export default function EditCatalogPage({
   const handleRagToggle = async (enabled: boolean) => {
     setRagToggling(true);
     try {
-      const res = await fetch(`/api/catalogs/${catalogId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
-        body: JSON.stringify({ rag_enabled: enabled }),
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/catalogs/${catalogId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rag_enabled: enabled }),
+        }
+      );
 
       if (res.ok) {
         setRagEnabled(enabled);
@@ -231,20 +226,20 @@ export default function EditCatalogPage({
     const price = parseFloat(priceEur);
 
     try {
-      const res = await fetch(`/api/catalogs/${catalogId}`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
-        body: JSON.stringify({
-          name,
-          description: description || undefined,
-          filter_rules: { domain_rules: domainRules },
-          bot_ids: selectedBots,
-          price_eur: Math.round(price * 100) / 100,
-        }),
-      });
+      const res = await fetch(
+        `/api/internal/workspaces/${workspaceId}/catalogs/${catalogId}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name,
+            description: description || undefined,
+            filter_rules: { domain_rules: domainRules },
+            bot_ids: selectedBots,
+            price_eur: Math.round(price * 100) / 100,
+          }),
+        }
+      );
 
       if (res.ok) {
         showToast("Catalog updated", "success");
@@ -276,7 +271,13 @@ export default function EditCatalogPage({
         </div>
       )}
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Edit Catalog</h1>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Edit catalog</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          Update which pages are covered, which AI crawlers have access, and
+          the price charged per access.
+        </p>
+      </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>

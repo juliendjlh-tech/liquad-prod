@@ -37,7 +37,7 @@ const MIN_REFRESH_INTERVAL = 10_000; // 10s minimum
  */
 async function fetchRules(config: LiquadConfig): Promise<CachedRules> {
   const baseUrl = config.apiBaseUrl ?? "https://liquad.app";
-  const url = `${baseUrl}/api/sdk/rules`;
+  const url = `${baseUrl}/api/public/v1/sdk/rules`;
 
   const resp = await fetch(url, {
     headers: {

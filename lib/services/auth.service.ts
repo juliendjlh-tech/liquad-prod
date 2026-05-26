@@ -2,7 +2,7 @@
 // Auth service
 //
 // ADR-006: scopes split.
-//   - authenticateSdkKey      → publisher SDK flow, uses workspaces.api_key_hash
+//   - authenticateSdkKey      → publisher SDK flow, uses gateways.api_key_hash
 //   - authenticateConsumerKey → consumer flow, uses api_keys (bot-bound)
 // ---------------------------------------------------------------------------
 
@@ -37,17 +37,30 @@ export function extractApiKey(
 }
 
 // ---------------------------------------------------------------------------
-// SDK publisher auth — workspaces.api_key_hash
+// SDK publisher auth — gateways.api_key_hash (since migration 038)
 // ---------------------------------------------------------------------------
+
+export interface SdkKeyAuth {
+  /** Workspace owning the gateway. Used for HMAC secret, bots, domains. */
+  workspaceId: string;
+  /** Gateway id. Surfaced in event logs and rule responses. */
+  gatewayId: string;
+  /**
+   * Catalog allowlist stored on the gateway (internal UUIDs). Empty array
+   * means "no catalogs exposed" — the SDK receives an empty rules payload.
+   */
+  catalogIds: string[];
+}
 
 /**
  * Authenticate a publisher SDK request.
- * One key per workspace, workspace-scoped (no bot identity).
- * Used by /api/sdk/* routes.
+ * One key per gateway. A workspace can have N gateways, each with its own
+ * catalog allowlist.
+ * Used by /api/public/v1/sdk/* routes.
  */
 export async function authenticateSdkKey(
   authHeader: string | null
-): Promise<{ workspaceId: string } | { error: string }> {
+): Promise<SdkKeyAuth | { error: string }> {
   const extracted = extractApiKey(authHeader);
   if ("error" in extracted) {
     return extracted;
@@ -56,18 +69,24 @@ export async function authenticateSdkKey(
   const supabase = await createServerClient();
   const prefix = extracted.key.slice(0, 11);
 
-  const { data: workspace } = await supabase
-    .from("workspaces")
-    .select("id, api_key_hash")
+  const { data: gateway } = await supabase
+    .from("gateways")
+    .select("id, workspace_id, api_key_hash, catalog_ids")
     .eq("api_key_prefix", prefix)
     .single();
 
-  if (!workspace?.api_key_hash) {
+  if (!gateway?.api_key_hash) {
     return { error: "Invalid API key" };
   }
 
-  const isValid = await verifyApiKey(extracted.key, workspace.api_key_hash);
-  return isValid ? { workspaceId: workspace.id } : { error: "Invalid API key" };
+  const isValid = await verifyApiKey(extracted.key, gateway.api_key_hash);
+  if (!isValid) return { error: "Invalid API key" };
+
+  return {
+    workspaceId: gateway.workspace_id,
+    gatewayId: gateway.id,
+    catalogIds: gateway.catalog_ids ?? [],
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -81,23 +100,23 @@ export interface ConsumerKeyAuth {
   /** Subscription the key authorises spending from. */
   subscriptionId: string;
   /**
-   * true → only catalogs owned by `workspaceId` are visible (end-user mode).
-   * false → opt-in network access (client mode).
-   * Sourced from subscriptions.scope_to_workspace.
+   * Network referenced by this key. The accepted catalogues of this network
+   * define the access scope at /licenses time.
    */
-  scopeToWorkspace: boolean;
+  networkId: string;
   /**
-   * Optional default bot used as fallback by /licenses when the body omits
-   * bot_id. Validated at key creation; NULL if the key was issued without
-   * one (caller must pass bot_id at every call).
+   * Bot identity claimed by this key. Resolved against the global `bots` table
+   * (UA + IPs). Validated at key creation against the network's derived bot
+   * set (catalog_bots ∩ network_catalogs accepted).
    */
-  defaultBotId: string | null;
+  botId: string;
 }
 
 /**
  * Authenticate a consumer request.
- * Used by /api/consumer/v1/* and the RAG pipeline.
- * Keys are workspace+subscription scoped; bot identity is supplied per call.
+ * Used by /api/public/v1/consumer/* and the RAG pipeline.
+ * Keys carry an immutable triple (subscription, network, bot) — body no longer
+ * needs to provide bot_id.
  */
 export async function authenticateConsumerKey(
   authHeader: string | null
@@ -113,7 +132,7 @@ export async function authenticateConsumerKey(
   const { data: row } = await supabase
     .from("api_keys")
     .select(
-      "id, workspace_id, subscription_id, default_bot_id, api_key_hash, subscriptions!inner(scope_to_workspace)"
+      "id, workspace_id, subscription_id, network_id, bot_id, api_key_hash"
     )
     .eq("api_key_prefix", prefix)
     .is("revoked_at", null)
@@ -121,9 +140,9 @@ export async function authenticateConsumerKey(
       id: string;
       workspace_id: string;
       subscription_id: string;
-      default_bot_id: string | null;
+      network_id: string;
+      bot_id: string;
       api_key_hash: string;
-      subscriptions: { scope_to_workspace: boolean };
     }>();
 
   if (!row?.api_key_hash) {
@@ -144,7 +163,7 @@ export async function authenticateConsumerKey(
     workspaceId: row.workspace_id,
     apiKeyId: row.id,
     subscriptionId: row.subscription_id,
-    scopeToWorkspace: row.subscriptions.scope_to_workspace,
-    defaultBotId: row.default_bot_id,
+    networkId: row.network_id,
+    botId: row.bot_id,
   };
 }

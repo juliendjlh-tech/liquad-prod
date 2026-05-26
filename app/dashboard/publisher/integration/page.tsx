@@ -92,11 +92,11 @@ function Prerequisites() {
             &#10003;
           </span>
           <div>
-            <strong className="text-gray-900">Your Liquad API key</strong> — Find it in your{" "}
-            <Link href="/dashboard/settings" className="text-blue-600 hover:text-blue-800 underline">
-              Settings page
+            <strong className="text-gray-900">A gateway API key</strong> — Create one (and pick which catalogs it exposes) on the{" "}
+            <Link href="/dashboard/publisher/gateways" className="text-blue-600 hover:text-blue-800 underline">
+              Gateways page
             </Link>
-            . It starts with{" "}
+            . The key is shown once and starts with{" "}
             <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono">lq_</code>.
             Copy it and keep it handy.
           </div>
@@ -721,12 +721,43 @@ export default function IntegrationPage() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">Integration Guide</h1>
-      <p className="text-sm text-gray-500 mb-6">
-        Follow this step-by-step guide to deploy the Liquad SDK and protect your content from
-        unauthorized AI bot access. No prior experience with SDKs is required — each step is
-        explained in detail.
-      </p>
+      <nav aria-label="Breadcrumb" className="mb-4">
+        <ol className="flex items-center gap-1.5 text-sm text-gray-500">
+          <li>
+            <Link
+              href="/dashboard/publisher/gateways"
+              className="hover:text-gray-700 transition-colors"
+            >
+              Gateways
+            </Link>
+          </li>
+          <li className="flex items-center gap-1.5">
+            <svg
+              className="h-3.5 w-3.5 text-gray-400"
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              aria-hidden
+            >
+              <path
+                fillRule="evenodd"
+                d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <span className="font-medium text-gray-900">Integration</span>
+          </li>
+        </ol>
+      </nav>
+
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Integration</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          Install Liquad on your website in a few steps. Once in place, AI
+          crawlers go through Liquad before reaching your pages — humans are
+          never impacted. No prior SDK experience required: each step is
+          spelled out.
+        </p>
+      </div>
 
       {/* Prerequisites */}
       <div className="mb-8">
@@ -797,12 +828,12 @@ export default function IntegrationPage() {
                   <td className="py-2 pr-4 font-mono text-xs">apiKey</td>
                   <td className="py-2 pr-4 text-gray-500 text-xs">required</td>
                   <td className="py-2 text-gray-600 text-xs">
-                    Your workspace API key. Starts with{" "}
-                    <code className="bg-gray-100 px-1 rounded">lq_</code>. Find it in{" "}
-                    <Link href="/dashboard/settings" className="text-blue-600 hover:text-blue-800 underline">
-                      Settings
+                    A gateway API key. Starts with{" "}
+                    <code className="bg-gray-100 px-1 rounded">lq_</code>. Create it on the{" "}
+                    <Link href="/dashboard/publisher/gateways" className="text-blue-600 hover:text-blue-800 underline">
+                      Gateways
                     </Link>
-                    .
+                    {" "}page.
                   </td>
                 </tr>
                 <tr>

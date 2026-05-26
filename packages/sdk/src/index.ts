@@ -273,7 +273,7 @@ export function createLiquadHandler(
         blocked: true,
         response: jsonResponse(403, {
           error:         "grant_required",
-          authorize_url: `${apiBaseUrl}/api/sdk/transaction`,
+          authorize_url: `${apiBaseUrl}/api/public/v1/sdk/transaction`,
           content_url:   normalizedUrl,
         }),
       };

@@ -19,12 +19,9 @@ export default function CreateDomainPage() {
     setLoading(true);
 
     try {
-      const res = await fetch("/api/domains", {
+      const res = await fetch(`/api/internal/workspaces/${workspaceId}/domains`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-workspace-id": workspaceId,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: sitemapUrl }),
       });
 
@@ -48,7 +45,13 @@ export default function CreateDomainPage() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Add Domain</h1>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">Add a domain</h1>
+        <p className="text-sm text-gray-500 max-w-2xl">
+          Paste your sitemap URL — Liquad uses it to discover the pages of
+          your website that you want to protect from AI crawlers.
+        </p>
+      </div>
 
       <div className="space-y-6">
         <div>

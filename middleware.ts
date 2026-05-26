@@ -15,13 +15,14 @@ import type { Database } from "@/lib/db/types";
  *
  * 2. **Route protection**: Blocks unauthenticated access to protected routes:
  *    - `/dashboard/*` → Redirects to `/login` (user-facing pages)
- *    - `/api/*` (except `/api/auth/*` and `/api/sdk/*`) → Returns 401 JSON
+ *    - `/api/*` (except `/api/auth/*`, `/api/public/*` and `/api/internal/jobs/*`) → Returns 401 JSON
  *
  * UNPROTECTED ROUTES (passthrough, no auth check):
  *    - `/` (landing page)
  *    - `/login` (must be accessible to log in)
  *    - `/api/auth/*` (signup/login/logout — no session needed)
- *    - `/api/sdk/*` (SDK endpoints use API key auth, not session cookies)
+ *    - `/api/public/*` (consumer + SDK endpoints use API key auth, not session cookies)
+ *    - `/api/internal/jobs/*` (service-to-service, shared secret auth)
  *    - Static assets (`_next/*`, `favicon.ico`, etc.) are excluded via config.matcher
  *
  * WHY the middleware uses the ANON key (not the service role key):
@@ -104,18 +105,20 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  // --- SDK routes bypass: /api/sdk/* uses API key auth, not session ---
-  // These routes are protected by API key validation in their own handlers
-  // (see US-006-001). The middleware must NOT block them.
-  if (pathname.startsWith("/api/sdk")) {
+  // --- Public API bypass: /api/public/* uses API key auth, not session ---
+  // Covers /api/public/v1/consumer/* (consumer keys) and /api/public/v1/sdk/*
+  // (gateway/SDK keys). These routes are protected by API key validation in
+  // their own handlers (see auth.service). The middleware must NOT block them.
+  if (pathname.startsWith("/api/public")) {
     return response;
   }
 
-  // --- Internal routes bypass: /api/internal/* uses shared secret auth ---
-  // These routes are used for internal service-to-service communication
-  // (e.g. the scraping pipeline self-invocation). They authenticate via
-  // a shared secret, not session cookies.
-  if (pathname.startsWith("/api/internal")) {
+  // --- Jobs bypass: /api/internal/jobs/* uses shared secret auth ---
+  // Service-to-service routes (e.g. the scraping pipeline self-invocation).
+  // They authenticate via a shared secret, not session cookies. Everything
+  // else under /api/internal/* requires a session and falls through to the
+  // session check below.
+  if (pathname.startsWith("/api/internal/jobs")) {
     return response;
   }
 
@@ -127,7 +130,8 @@ export async function middleware(request: NextRequest) {
   }
 
   // --- API protection: return 401 JSON for unauthenticated API requests ---
-  // This covers all /api/* routes except /api/sdk/* (handled above).
+  // This covers all /api/* routes except /api/public/* and
+  // /api/internal/jobs/* (handled above).
   if (!user && pathname.startsWith("/api")) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -148,7 +152,7 @@ export async function middleware(request: NextRequest) {
  *
  * Matched:
  * - /dashboard/* — Protected pages (require session)
- * - /api/* — Protected API routes (require session, except /api/sdk/*)
+ * - /api/* — Protected API routes (require session, except /api/public/* and /api/internal/jobs/*)
  *
  * NOT matched (excluded by omission):
  * - / — Landing page (public)

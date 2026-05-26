@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       access_grants: {
         Row: {
+          api_key_id: string
           bot_id: string | null
           catalog_id: string
           consumer_workspace_id: string
@@ -28,6 +29,7 @@ export type Database = {
           url: string
         }
         Insert: {
+          api_key_id: string
           bot_id?: string | null
           catalog_id: string
           consumer_workspace_id: string
@@ -40,6 +42,7 @@ export type Database = {
           url: string
         }
         Update: {
+          api_key_id?: string
           bot_id?: string | null
           catalog_id?: string
           consumer_workspace_id?: string
@@ -52,6 +55,20 @@ export type Database = {
           url?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "access_grants_agent_id_fkey"
+            columns: ["bot_id"]
+            isOneToOne: false
+            referencedRelation: "bots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "access_grants_api_key_id_fkey"
+            columns: ["api_key_id"]
+            isOneToOne: false
+            referencedRelation: "api_keys"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "access_grants_catalog_id_fkey"
             columns: ["catalog_id"]
@@ -75,32 +92,139 @@ export type Database = {
           },
         ]
       }
-      catalog_bots: {
+      api_keys: {
         Row: {
-          catalog_id: string
+          api_key_hash: string
+          api_key_prefix: string
           bot_id: string
+          created_at: string | null
+          id: string
+          label: string | null
+          last_used_at: string | null
+          network_id: string
+          public_id: string
+          revoked_at: string | null
+          subscription_id: string
+          workspace_id: string
         }
         Insert: {
-          catalog_id: string
+          api_key_hash: string
+          api_key_prefix: string
           bot_id: string
+          created_at?: string | null
+          id?: string
+          label?: string | null
+          last_used_at?: string | null
+          network_id: string
+          public_id: string
+          revoked_at?: string | null
+          subscription_id: string
+          workspace_id: string
         }
         Update: {
-          catalog_id?: string
+          api_key_hash?: string
+          api_key_prefix?: string
           bot_id?: string
+          created_at?: string | null
+          id?: string
+          label?: string | null
+          last_used_at?: string | null
+          network_id?: string
+          public_id?: string
+          revoked_at?: string | null
+          subscription_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "catalog_bots_catalog_id_fkey"
-            columns: ["catalog_id"]
-            isOneToOne: false
-            referencedRelation: "catalogs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "catalog_bots_bot_id_fkey"
+            foreignKeyName: "api_keys_bot_id_fkey"
             columns: ["bot_id"]
             isOneToOne: false
             referencedRelation: "bots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "api_keys_network_id_fkey"
+            columns: ["network_id"]
+            isOneToOne: false
+            referencedRelation: "networks"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "api_keys_wallet_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "subscriptions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "api_keys_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      bots: {
+        Row: {
+          created_at: string | null
+          declared_ips: string[]
+          description: string | null
+          id: string
+          name: string
+          public_id: string
+          type: string
+          ua_pattern: string
+        }
+        Insert: {
+          created_at?: string | null
+          declared_ips?: string[]
+          description?: string | null
+          id?: string
+          name: string
+          public_id: string
+          type?: string
+          ua_pattern: string
+        }
+        Update: {
+          created_at?: string | null
+          declared_ips?: string[]
+          description?: string | null
+          id?: string
+          name?: string
+          public_id?: string
+          type?: string
+          ua_pattern?: string
+        }
+        Relationships: []
+      }
+      catalog_bots: {
+        Row: {
+          bot_id: string
+          catalog_id: string
+        }
+        Insert: {
+          bot_id: string
+          catalog_id: string
+        }
+        Update: {
+          bot_id?: string
+          catalog_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "catalog_agents_agent_id_fkey"
+            columns: ["bot_id"]
+            isOneToOne: false
+            referencedRelation: "bots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "catalog_agents_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "catalogs"
             referencedColumns: ["id"]
           },
         ]
@@ -127,7 +251,7 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "catalog_sources_indexed_source_id_fkey"
+            foreignKeyName: "catalog_sources_source_id_fkey"
             columns: ["indexed_source_id"]
             isOneToOne: false
             referencedRelation: "indexed_sources"
@@ -143,8 +267,9 @@ export type Database = {
           id: string
           name: string
           price_eur: number
-          rag_enabled: boolean
-          rag_source_count: number
+          public_id: string
+          rag_enabled: boolean | null
+          rag_source_count: number | null
           status: string
           ttl_minutes: number | null
           workspace_id: string
@@ -156,8 +281,9 @@ export type Database = {
           id?: string
           name: string
           price_eur?: number
-          rag_enabled?: boolean
-          rag_source_count?: number
+          public_id: string
+          rag_enabled?: boolean | null
+          rag_source_count?: number | null
           status?: string
           ttl_minutes?: number | null
           workspace_id: string
@@ -169,8 +295,9 @@ export type Database = {
           id?: string
           name?: string
           price_eur?: number
-          rag_enabled?: boolean
-          rag_source_count?: number
+          public_id?: string
+          rag_enabled?: boolean | null
+          rag_source_count?: number | null
           status?: string
           ttl_minutes?: number | null
           workspace_id?: string
@@ -185,156 +312,40 @@ export type Database = {
           },
         ]
       }
-      indexing_jobs: {
-        Row: {
-          id: string
-          workspace_id: string
-          domain_id: string | null
-          sitemap_url: string
-          reindex: boolean
-          urls_to_index: string[]
-          status: string
-          result: Json | null
-          error_message: string | null
-          path_rules: Json | null
-          max_pages: number | null
-          scrape_status: string
-          scrape_processed_pages: number
-          scrape_error_message: string | null
-          created_at: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          domain_id?: string | null
-          sitemap_url: string
-          reindex?: boolean
-          urls_to_index?: string[]
-          status?: string
-          result?: Json | null
-          error_message?: string | null
-          path_rules?: Json | null
-          max_pages?: number | null
-          scrape_status?: string
-          scrape_processed_pages?: number
-          scrape_error_message?: string | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          id?: string
-          workspace_id?: string
-          domain_id?: string | null
-          sitemap_url?: string
-          reindex?: boolean
-          urls_to_index?: string[]
-          status?: string
-          result?: Json | null
-          error_message?: string | null
-          path_rules?: Json | null
-          max_pages?: number | null
-          scrape_status?: string
-          scrape_processed_pages?: number
-          scrape_error_message?: string | null
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "indexing_jobs_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      indexed_sources: {
-        Row: {
-          id: string
-          workspace_id: string
-          source_url: string
-          title: string | null
-          lastmod: string | null
-          domain_id: string
-          /**
-           * URL path extracted from source_url (e.g. "/blog/my-post").
-           * Generated column (STORED), readonly. Indexed via
-           * idx_sources_ws_domain_path on (workspace_id, domain_id, path).
-           */
-          path: string | null
-          created_at: string | null
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          source_url: string
-          title?: string | null
-          lastmod?: string | null
-          domain_id: string
-          created_at?: string | null
-        }
-        Update: {
-          id?: string
-          workspace_id?: string
-          source_url?: string
-          title?: string | null
-          lastmod?: string | null
-          domain_id?: string
-          created_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "indexed_sources_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "fk_indexed_sources_domain"
-            columns: ["domain_id"]
-            isOneToOne: false
-            referencedRelation: "domains"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       chunks: {
         Row: {
-          id: string
-          indexed_source_id: string
-          indexing_job_id: string | null
           chunk_index: number | null
           chunk_text: string | null
-          heading_context: string | null
-          token_count: number | null
+          created_at: string | null
           embedding: string | null
+          heading_context: string | null
+          id: string
+          indexed_source_id: string
+          token_count: number | null
         }
         Insert: {
+          chunk_index?: number | null
+          chunk_text?: string | null
+          created_at?: string | null
+          embedding?: string | null
+          heading_context?: string | null
           id?: string
           indexed_source_id: string
-          indexing_job_id?: string | null
-          chunk_index?: number | null
-          chunk_text?: string | null
-          heading_context?: string | null
           token_count?: number | null
-          embedding?: string | null
         }
         Update: {
-          id?: string
-          indexed_source_id?: string
-          indexing_job_id?: string | null
           chunk_index?: number | null
           chunk_text?: string | null
-          heading_context?: string | null
-          token_count?: number | null
+          created_at?: string | null
           embedding?: string | null
+          heading_context?: string | null
+          id?: string
+          indexed_source_id?: string
+          token_count?: number | null
         }
         Relationships: [
           {
-            foreignKeyName: "fk_chunks_indexed_source"
+            foreignKeyName: "fk_chunks_source"
             columns: ["indexed_source_id"]
             isOneToOne: false
             referencedRelation: "indexed_sources"
@@ -344,9 +355,9 @@ export type Database = {
       }
       credit_transactions: {
         Row: {
-          bot_id: string | null
           amount_eur: number
           api_key_id: string | null
+          bot_id: string | null
           catalog_id: string | null
           consumer_workspace_id: string
           content_url: string | null
@@ -356,13 +367,14 @@ export type Database = {
           grant_id: string | null
           id: string
           publisher_workspace_id: string | null
-          type: string
+          recipient_workspace_id: string | null
+          role: Database["public"]["Enums"]["credit_transaction_role"]
           subscription_id: string | null
         }
         Insert: {
-          bot_id?: string | null
           amount_eur: number
           api_key_id?: string | null
+          bot_id?: string | null
           catalog_id?: string | null
           consumer_workspace_id: string
           content_url?: string | null
@@ -372,13 +384,14 @@ export type Database = {
           grant_id?: string | null
           id?: string
           publisher_workspace_id?: string | null
-          type: string
+          recipient_workspace_id?: string | null
+          role: Database["public"]["Enums"]["credit_transaction_role"]
           subscription_id?: string | null
         }
         Update: {
-          bot_id?: string | null
           amount_eur?: number
           api_key_id?: string | null
+          bot_id?: string | null
           catalog_id?: string | null
           consumer_workspace_id?: string
           content_url?: string | null
@@ -388,12 +401,13 @@ export type Database = {
           grant_id?: string | null
           id?: string
           publisher_workspace_id?: string | null
-          type?: string
+          recipient_workspace_id?: string | null
+          role?: Database["public"]["Enums"]["credit_transaction_role"]
           subscription_id?: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "credit_transactions_bot_id_fkey"
+            foreignKeyName: "credit_transactions_agent_id_fkey"
             columns: ["bot_id"]
             isOneToOne: false
             referencedRelation: "bots"
@@ -428,7 +442,14 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "credit_transactions_subscription_id_fkey"
+            foreignKeyName: "credit_transactions_recipient_workspace_id_fkey"
+            columns: ["recipient_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_transactions_wallet_id_fkey"
             columns: ["subscription_id"]
             isOneToOne: false
             referencedRelation: "subscriptions"
@@ -442,6 +463,7 @@ export type Database = {
           domain: string
           id: string
           last_event_at: string | null
+          public_id: string
           sitemap_url: string | null
           status: string
           verified_at: string | null
@@ -452,6 +474,7 @@ export type Database = {
           domain: string
           id?: string
           last_event_at?: string | null
+          public_id: string
           sitemap_url?: string | null
           status?: string
           verified_at?: string | null
@@ -462,6 +485,7 @@ export type Database = {
           domain?: string
           id?: string
           last_event_at?: string | null
+          public_id?: string
           sitemap_url?: string | null
           status?: string
           verified_at?: string | null
@@ -473,6 +497,280 @@ export type Database = {
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      gateways: {
+        Row: {
+          api_key_hash: string
+          api_key_prefix: string
+          catalog_ids: string[]
+          created_at: string
+          id: string
+          label: string | null
+          public_id: string
+          workspace_id: string
+        }
+        Insert: {
+          api_key_hash: string
+          api_key_prefix: string
+          catalog_ids?: string[]
+          created_at?: string
+          id?: string
+          label?: string | null
+          public_id: string
+          workspace_id: string
+        }
+        Update: {
+          api_key_hash?: string
+          api_key_prefix?: string
+          catalog_ids?: string[]
+          created_at?: string
+          id?: string
+          label?: string | null
+          public_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "gateways_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      indexed_sources: {
+        Row: {
+          created_at: string | null
+          domain_id: string
+          id: string
+          lastmod: string | null
+          path: string | null
+          source_url: string
+          title: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          domain_id: string
+          id?: string
+          lastmod?: string | null
+          path?: string | null
+          source_url: string
+          title?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          domain_id?: string
+          id?: string
+          lastmod?: string | null
+          path?: string | null
+          source_url?: string
+          title?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sources_domain_id_fkey"
+            columns: ["domain_id"]
+            isOneToOne: false
+            referencedRelation: "domains"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sources_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      indexing_jobs: {
+        Row: {
+          created_at: string | null
+          domain_id: string | null
+          error_message: string | null
+          id: string
+          max_pages: number | null
+          path_rules: Json | null
+          result: Json | null
+          sitemap_url: string
+          status: string
+          updated_at: string | null
+          urls_to_index: string[]
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          domain_id?: string | null
+          error_message?: string | null
+          id?: string
+          max_pages?: number | null
+          path_rules?: Json | null
+          result?: Json | null
+          sitemap_url: string
+          status?: string
+          updated_at?: string | null
+          urls_to_index?: string[]
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          domain_id?: string | null
+          error_message?: string | null
+          id?: string
+          max_pages?: number | null
+          path_rules?: Json | null
+          result?: Json | null
+          sitemap_url?: string
+          status?: string
+          updated_at?: string | null
+          urls_to_index?: string[]
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_jobs_domain_id_fkey"
+            columns: ["domain_id"]
+            isOneToOne: false
+            referencedRelation: "domains"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_jobs_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      network_catalogs: {
+        Row: {
+          catalog_id: string
+          invited_at: string
+          invited_by: string | null
+          network_id: string
+          responded_at: string | null
+          status: Database["public"]["Enums"]["network_catalog_status"]
+        }
+        Insert: {
+          catalog_id: string
+          invited_at?: string
+          invited_by?: string | null
+          network_id: string
+          responded_at?: string | null
+          status?: Database["public"]["Enums"]["network_catalog_status"]
+        }
+        Update: {
+          catalog_id?: string
+          invited_at?: string
+          invited_by?: string | null
+          network_id?: string
+          responded_at?: string | null
+          status?: Database["public"]["Enums"]["network_catalog_status"]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "network_catalogs_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "catalogs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "network_catalogs_network_id_fkey"
+            columns: ["network_id"]
+            isOneToOne: false
+            referencedRelation: "networks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      networks: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          name: string
+          public_id: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name: string
+          public_id: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          public_id?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "networks_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      rag_query_logs: {
+        Row: {
+          consumer_workspace_id: string
+          created_at: string | null
+          id: string
+          query_text: string
+          results: Json | null
+          search_config_id: string | null
+          total_cost_eur: number
+        }
+        Insert: {
+          consumer_workspace_id: string
+          created_at?: string | null
+          id?: string
+          query_text: string
+          results?: Json | null
+          search_config_id?: string | null
+          total_cost_eur?: number
+        }
+        Update: {
+          consumer_workspace_id?: string
+          created_at?: string | null
+          id?: string
+          query_text?: string
+          results?: Json | null
+          search_config_id?: string | null
+          total_cost_eur?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rag_query_logs_consumer_workspace_id_fkey"
+            columns: ["consumer_workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rag_query_logs_search_config_id_fkey"
+            columns: ["search_config_id"]
+            isOneToOne: false
+            referencedRelation: "search_configs"
             referencedColumns: ["id"]
           },
         ]
@@ -553,130 +851,117 @@ export type Database = {
           },
         ]
       }
-      bots: {
+      search_config_catalogs: {
         Row: {
-          id: string
-          name: string
-          ua_pattern: string
-          declared_ips: string[]
-          description: string | null
-          type: 'preset' | 'custom'
-          created_at: string | null
+          catalog_id: string
+          search_config_id: string
         }
         Insert: {
-          id?: string
-          name: string
-          ua_pattern: string
-          declared_ips?: string[]
-          description?: string | null
-          type?: 'preset' | 'custom'
-          created_at?: string | null
+          catalog_id: string
+          search_config_id: string
         }
         Update: {
-          id?: string
-          name?: string
-          ua_pattern?: string
-          declared_ips?: string[]
-          description?: string | null
-          created_at?: string | null
-        }
-        Relationships: []
-      }
-      api_keys: {
-        Row: {
-          id: string
-          workspace_id: string
-          subscription_id: string
-          default_bot_id: string | null
-          api_key_hash: string
-          api_key_prefix: string
-          label: string | null
-          revoked_at: string | null
-          last_used_at: string | null
-          created_at: string | null
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          subscription_id: string
-          default_bot_id?: string | null
-          api_key_hash: string
-          api_key_prefix: string
-          label?: string | null
-          revoked_at?: string | null
-          last_used_at?: string | null
-          created_at?: string | null
-        }
-        Update: {
-          id?: string
-          workspace_id?: string
-          subscription_id?: string
-          default_bot_id?: string | null
-          api_key_hash?: string
-          api_key_prefix?: string
-          label?: string | null
-          revoked_at?: string | null
-          last_used_at?: string | null
-          created_at?: string | null
+          catalog_id?: string
+          search_config_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "api_keys_workspace_id_fkey"
+            foreignKeyName: "search_config_catalogs_catalog_id_fkey"
+            columns: ["catalog_id"]
+            isOneToOne: false
+            referencedRelation: "catalogs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "search_config_catalogs_search_config_id_fkey"
+            columns: ["search_config_id"]
+            isOneToOne: false
+            referencedRelation: "search_configs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      search_configs: {
+        Row: {
+          created_at: string | null
+          id: string
+          max_price_eur: number | null
+          max_results: number | null
+          name: string
+          path_filters: Json | null
+          public_id: string
+          total_budget_eur: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          max_price_eur?: number | null
+          max_results?: number | null
+          name: string
+          path_filters?: Json | null
+          public_id: string
+          total_budget_eur?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          max_price_eur?: number | null
+          max_results?: number | null
+          name?: string
+          path_filters?: Json | null
+          public_id?: string
+          total_budget_eur?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "search_configs_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "api_keys_subscription_id_fkey"
-            columns: ["subscription_id"]
-            isOneToOne: false
-            referencedRelation: "subscriptions"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "api_keys_default_bot_id_fkey"
-            columns: ["default_bot_id"]
-            isOneToOne: false
-            referencedRelation: "bots"
             referencedColumns: ["id"]
           },
         ]
       }
       subscriptions: {
         Row: {
-          id: string
-          workspace_id: string
-          external_user_id: string | null
-          label: string | null
-          balance_eur: number
-          scope_to_workspace: boolean
-          created_at: string | null
           archived_at: string | null
+          balance_eur: number
+          created_at: string | null
+          external_user_id: string | null
+          id: string
+          label: string | null
+          public_id: string
+          workspace_id: string
         }
         Insert: {
-          id?: string
-          workspace_id: string
-          external_user_id?: string | null
-          label?: string | null
-          balance_eur?: number
-          scope_to_workspace?: boolean
-          created_at?: string | null
           archived_at?: string | null
+          balance_eur?: number
+          created_at?: string | null
+          external_user_id?: string | null
+          id?: string
+          label?: string | null
+          public_id: string
+          workspace_id: string
         }
         Update: {
-          id?: string
-          workspace_id?: string
-          external_user_id?: string | null
-          label?: string | null
-          balance_eur?: number
-          scope_to_workspace?: boolean
-          created_at?: string | null
           archived_at?: string | null
+          balance_eur?: number
+          created_at?: string | null
+          external_user_id?: string | null
+          id?: string
+          label?: string | null
+          public_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "subscriptions_workspace_id_fkey"
+            foreignKeyName: "wallets_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"
@@ -686,30 +971,30 @@ export type Database = {
       }
       workspace_bots: {
         Row: {
-          workspace_id: string
           bot_id: string
+          workspace_id: string
         }
         Insert: {
-          workspace_id: string
           bot_id: string
+          workspace_id: string
         }
         Update: {
-          workspace_id?: string
           bot_id?: string
+          workspace_id?: string
         }
         Relationships: [
           {
-            foreignKeyName: "workspace_bots_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "workspace_bots_bot_id_fkey"
+            foreignKeyName: "workspace_agents_agent_id_fkey"
             columns: ["bot_id"]
             isOneToOne: false
             referencedRelation: "bots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workspace_agents_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -749,157 +1034,35 @@ export type Database = {
           },
         ]
       }
-      rag_query_logs: {
-        Row: {
-          id: string
-          consumer_workspace_id: string
-          query_text: string
-          search_config_id: string | null
-          total_cost_eur: number
-          results: Json | null
-          created_at: string | null
-        }
-        Insert: {
-          id?: string
-          consumer_workspace_id: string
-          query_text: string
-          search_config_id?: string | null
-          total_cost_eur?: number
-          results?: Json | null
-          created_at?: string | null
-        }
-        Update: {
-          id?: string
-          consumer_workspace_id?: string
-          query_text?: string
-          search_config_id?: string | null
-          total_cost_eur?: number
-          results?: Json | null
-          created_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "rag_query_logs_consumer_workspace_id_fkey"
-            columns: ["consumer_workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "rag_query_logs_search_config_id_fkey"
-            columns: ["search_config_id"]
-            isOneToOne: false
-            referencedRelation: "search_configs"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      search_configs: {
-        Row: {
-          id: string
-          workspace_id: string
-          name: string
-          path_filters: Json
-          max_price_eur: number | null
-          total_budget_eur: number | null
-          max_results: number
-          created_at: string | null
-          updated_at: string | null
-        }
-        Insert: {
-          id?: string
-          workspace_id: string
-          name: string
-          path_filters?: Json
-          max_price_eur?: number | null
-          total_budget_eur?: number | null
-          max_results?: number
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Update: {
-          id?: string
-          workspace_id?: string
-          name?: string
-          path_filters?: Json
-          max_price_eur?: number | null
-          total_budget_eur?: number | null
-          max_results?: number
-          created_at?: string | null
-          updated_at?: string | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "search_configs_workspace_id_fkey"
-            columns: ["workspace_id"]
-            isOneToOne: false
-            referencedRelation: "workspaces"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      search_config_catalogs: {
-        Row: {
-          search_config_id: string
-          catalog_id: string
-        }
-        Insert: {
-          search_config_id: string
-          catalog_id: string
-        }
-        Update: {
-          search_config_id?: string
-          catalog_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "search_config_catalogs_search_config_id_fkey"
-            columns: ["search_config_id"]
-            isOneToOne: false
-            referencedRelation: "search_configs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "search_config_catalogs_catalog_id_fkey"
-            columns: ["catalog_id"]
-            isOneToOne: false
-            referencedRelation: "catalogs"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       workspaces: {
         Row: {
-          api_key_hash: string | null
-          api_key_prefix: string | null
           created_at: string | null
           id: string
           is_publisher: boolean
           jwt_signing_secret: string
           max_pages: number
           name: string
+          public_id: string
           updated_at: string | null
         }
         Insert: {
-          api_key_hash?: string | null
-          api_key_prefix?: string | null
           created_at?: string | null
           id?: string
           is_publisher?: boolean
           jwt_signing_secret?: string
           max_pages?: number
           name: string
+          public_id: string
           updated_at?: string | null
         }
         Update: {
-          api_key_hash?: string | null
-          api_key_prefix?: string | null
           created_at?: string | null
           id?: string
           is_publisher?: boolean
           jwt_signing_secret?: string
           max_pages?: number
           name?: string
+          public_id?: string
           updated_at?: string | null
         }
         Relationships: []
@@ -909,54 +1072,66 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      get_domain_content_counts: {
-        Args: {
-          p_workspace_id: string
-        }
-        Returns: {
-          domain_id: string
-          content_count: number
-        }[]
-      }
       authorize_and_debit_batch: {
+        Args: { p_api_key_id: string; p_debits: Json }
+        Returns: Json
+      }
+      check_cache_and_debit: {
         Args: {
-          p_api_key_id: string
-          p_debits: Json
+          p_catalog_id: string
+          p_consumer_id: string
+          p_price_eur: number
+          p_publisher_id: string
+          p_ttl_minutes?: number
+          p_url: string
         }
         Returns: Json
       }
       credit_subscription: {
         Args: {
-          p_api_key_id: string
           p_amount_eur: number
-          p_external_ref?: string | null
-          p_description?: string | null
+          p_api_key_id: string
+          p_description?: string
+          p_external_ref?: string
         }
         Returns: Json
       }
+      get_domain_content_counts: {
+        Args: { p_workspace_id: string }
+        Returns: {
+          content_count: number
+          domain_id: string
+        }[]
+      }
       vector_search: {
         Args: {
-          p_query_embedding: string
           p_catalog_ids: string[]
           p_limit?: number
+          p_query_embedding: string
         }
         Returns: {
-          chunk_id: string
-          indexed_source_id: string
-          source_url: string
-          chunk_text: string
-          heading_context: string
-          token_count: number
-          distance: number
-          price_eur: number
           catalog_id: string
           catalog_name: string
+          chunk_id: string
+          chunk_text: string
+          distance: number
+          heading_context: string
+          indexed_source_id: string
+          price_eur: number
           publisher_workspace_id: string
+          source_url: string
+          token_count: number
         }[]
       }
     }
     Enums: {
-      [_ in never]: never
+      credit_transaction_role:
+        | "debit"
+        | "content_owner"
+        | "sub_manager"
+        | "platform_fee"
+        | "credit"
+      network_catalog_status: "pending" | "accepted" | "revoked"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1083,6 +1258,15 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      credit_transaction_role: [
+        "debit",
+        "content_owner",
+        "sub_manager",
+        "platform_fee",
+        "credit",
+      ],
+      network_catalog_status: ["pending", "accepted", "revoked"],
+    },
   },
 } as const
