@@ -100,23 +100,23 @@ export interface ConsumerKeyAuth {
   /** Subscription the key authorises spending from. */
   subscriptionId: string;
   /**
-   * Network referenced by this key. The accepted catalogues of this network
-   * define the access scope at /licenses time.
+   * Access settings referenced by this key. Its catalogues define the access
+   * scope at /licenses time; its max_price_eur caps publisher price hikes.
    */
-  networkId: string;
+  accessSettingsId: string;
   /**
-   * Bot identity claimed by this key. Resolved against the global `bots` table
-   * (UA + IPs). Validated at key creation against the network's derived bot
-   * set (catalog_bots ∩ network_catalogs accepted).
+   * Bot identity claimed by this key (denormalized from access_settings.bot_id
+   * for hot-path queries). Trigger
+   * `trg_api_keys_validate_bot_matches_access_settings` enforces equality.
    */
   botId: string;
 }
 
 /**
  * Authenticate a consumer request.
- * Used by /api/public/v1/consumer/* and the RAG pipeline.
- * Keys carry an immutable triple (subscription, network, bot) — body no longer
- * needs to provide bot_id.
+ * Used by /api/public/v1/consumer/*.
+ * Keys carry a (subscription, access_settings) pair; bot is derived from
+ * access_settings.
  */
 export async function authenticateConsumerKey(
   authHeader: string | null
@@ -132,7 +132,7 @@ export async function authenticateConsumerKey(
   const { data: row } = await supabase
     .from("api_keys")
     .select(
-      "id, workspace_id, subscription_id, network_id, bot_id, api_key_hash"
+      "id, workspace_id, subscription_id, access_settings_id, bot_id, api_key_hash"
     )
     .eq("api_key_prefix", prefix)
     .is("revoked_at", null)
@@ -140,7 +140,7 @@ export async function authenticateConsumerKey(
       id: string;
       workspace_id: string;
       subscription_id: string;
-      network_id: string;
+      access_settings_id: string;
       bot_id: string;
       api_key_hash: string;
     }>();
@@ -163,7 +163,7 @@ export async function authenticateConsumerKey(
     workspaceId: row.workspace_id,
     apiKeyId: row.id,
     subscriptionId: row.subscription_id,
-    networkId: row.network_id,
+    accessSettingsId: row.access_settings_id,
     botId: row.bot_id,
   };
 }

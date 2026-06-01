@@ -93,7 +93,7 @@ function Prerequisites() {
           </span>
           <div>
             <strong className="text-gray-900">A gateway API key</strong> — Create one (and pick which catalogs it exposes) on the{" "}
-            <Link href="/dashboard/publisher/gateways" className="text-blue-600 hover:text-blue-800 underline">
+            <Link href="/dashboard/publisher/protect/gateway" className="text-blue-600 hover:text-blue-800 underline">
               Gateways page
             </Link>
             . The key is shown once and starts with{" "}
@@ -223,7 +223,7 @@ app.use(toExpressMiddleware(handler));`}
               Replace{" "}
               <code className="bg-gray-100 px-1 rounded font-mono">lq_your_api_key_here</code>{" "}
               with your actual API key from your{" "}
-              <Link href="/dashboard/settings" className="text-blue-600 hover:text-blue-800 underline">
+              <Link href="/dashboard/publisher/settings" className="text-blue-600 hover:text-blue-800 underline">
                 Settings
               </Link>
               .
@@ -394,7 +394,7 @@ export default {
             <CodeBlock>{`npx wrangler secret put LIQUAD_API_KEY`}</CodeBlock>
             <p className="text-xs text-gray-500 mt-2">
               When prompted, paste your API key (from your{" "}
-              <Link href="/dashboard/settings" className="text-blue-600 hover:text-blue-800 underline">
+              <Link href="/dashboard/publisher/settings" className="text-blue-600 hover:text-blue-800 underline">
                 Settings
               </Link>
               ) and press Enter. The key is stored securely by Cloudflare and never visible in your code.
@@ -622,7 +622,7 @@ export const config = {
               </li>
               <li>
                 In the <strong>Value</strong> field, paste your API key (from your{" "}
-                <Link href="/dashboard/settings" className="text-blue-600 hover:text-blue-800 underline">
+                <Link href="/dashboard/publisher/settings" className="text-blue-600 hover:text-blue-800 underline">
                   Settings
                 </Link>
                 )
@@ -725,7 +725,7 @@ export default function IntegrationPage() {
         <ol className="flex items-center gap-1.5 text-sm text-gray-500">
           <li>
             <Link
-              href="/dashboard/publisher/gateways"
+              href="/dashboard/publisher/protect/gateway"
               className="hover:text-gray-700 transition-colors"
             >
               Gateways
@@ -830,7 +830,7 @@ export default function IntegrationPage() {
                   <td className="py-2 text-gray-600 text-xs">
                     A gateway API key. Starts with{" "}
                     <code className="bg-gray-100 px-1 rounded">lq_</code>. Create it on the{" "}
-                    <Link href="/dashboard/publisher/gateways" className="text-blue-600 hover:text-blue-800 underline">
+                    <Link href="/dashboard/publisher/protect/gateway" className="text-blue-600 hover:text-blue-800 underline">
                       Gateways
                     </Link>
                     {" "}page.

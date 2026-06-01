@@ -6,7 +6,7 @@ import { requireWorkspaceMembership } from "@/lib/services/workspace-resolver";
 /**
  * GET /api/internal/workspaces/:workspaceId/api-keys
  * List non-revoked consumer API keys for a workspace (any member).
- * Optional ?subscription_id= / ?network_id= filters.
+ * Optional ?subscription_id= / ?access_settings_id= filters.
  */
 export async function GET(
   request: NextRequest,
@@ -20,10 +20,13 @@ export async function GET(
 
     const subscriptionId =
       request.nextUrl.searchParams.get("subscription_id") ?? undefined;
-    const networkId =
-      request.nextUrl.searchParams.get("network_id") ?? undefined;
+    const accessSettingsId =
+      request.nextUrl.searchParams.get("access_settings_id") ?? undefined;
 
-    const keys = await listApiKeys(workspaceId, userId, { subscriptionId, networkId });
+    const keys = await listApiKeys(workspaceId, userId, {
+      subscriptionId,
+      accessSettingsId,
+    });
     return NextResponse.json(keys, { status: 200 });
   } catch (err) {
     return mapError(err);
@@ -33,7 +36,7 @@ export async function GET(
 /**
  * POST /api/internal/workspaces/:workspaceId/api-keys
  * Create a new consumer API key (owner/admin only).
- * Body: { subscription_id, network_id, bot_id, label? }
+ * Body: { subscription_id, access_settings_id, label? }
  * Returns the plaintext key ONCE.
  */
 export async function POST(
@@ -59,8 +62,7 @@ export async function POST(
     const result = await createApiKey(workspaceId, userId, {
       label: parsed.data.label,
       subscriptionId: parsed.data.subscription_id,
-      networkId: parsed.data.network_id,
-      botId: parsed.data.bot_id,
+      accessSettingsId: parsed.data.access_settings_id,
     });
 
     return NextResponse.json(result, { status: 201 });
@@ -80,17 +82,10 @@ function mapError(err: unknown): NextResponse {
     if (err.message === "SUBSCRIPTION_NOT_FOUND") {
       return NextResponse.json({ error: "subscription_not_found" }, { status: 404 });
     }
-    if (err.message === "NETWORK_NOT_FOUND") {
-      return NextResponse.json({ error: "network_not_found" }, { status: 404 });
-    }
-    if (err.message === "BOT_NOT_DERIVED_FROM_NETWORK") {
+    if (err.message === "ACCESS_SETTINGS_NOT_FOUND") {
       return NextResponse.json(
-        {
-          error: "bot_not_derived_from_network",
-          message:
-            "The chosen bot is not referenced by any accepted catalogue in this network.",
-        },
-        { status: 422 }
+        { error: "access_settings_not_found" },
+        { status: 404 }
       );
     }
   }

@@ -5,31 +5,16 @@ import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import Button from "@/app/components/ui/Button";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
+import {
+  getActiveSection,
+  type L2Item,
+} from "@/app/components/navigation/publisherNav";
 
 interface SidebarProps {
   workspace: { id: string; name: string };
   userEmail: string;
   mode: "publisher" | "access";
 }
-
-const publisherLinks = [
-  { label: "Domains", href: "/dashboard/publisher/domains" },
-  { label: "Bots Watchlist", href: "/dashboard/publisher/bots" },
-  { label: "Catalogs", href: "/dashboard/publisher/catalogs" },
-  { label: "Gateways", href: "/dashboard/publisher/gateways" },
-  { label: "Overview", href: "/dashboard/publisher" },
-  { label: "Networks", href: "/dashboard/publisher/networks" },
-  { label: "Subscriptions", href: "/dashboard/publisher/subscriptions" },
-];
-
-const accessLinks = [
-  { label: "Overview", href: "/dashboard/access" },
-  { label: "Subscriptions", href: "/dashboard/access/subscriptions" },
-  //{ label: "Search Configs", href: "/dashboard/access/search" },
-  //{ label: "Integration", href: "/dashboard/access/integration" },
-  //{ label: "Marketplace", href: "/dashboard/access/marketplace" },
-  //{ label: "Settings", href: "/dashboard/access/settings" },
-];
 
 export default function Sidebar({ workspace, userEmail, mode }: SidebarProps) {
   const pathname = usePathname();
@@ -49,13 +34,10 @@ export default function Sidebar({ workspace, userEmail, mode }: SidebarProps) {
     setSwitching(false);
   };
 
-  const navLinks = mode === "access" ? accessLinks : publisherLinks;
+  const activeSection = mode === "publisher" ? getActiveSection(pathname) : null;
+  const navLinks: L2Item[] = activeSection?.children ?? [];
 
-  const isActive = (href: string) => {
-    if (href === "/dashboard/publisher") return pathname === "/dashboard/publisher";
-    if (href === "/dashboard/access") return pathname === "/dashboard/access";
-    return pathname.startsWith(href);
-  };
+  const isActive = (href: string) => pathname.startsWith(href);
 
   const handleLogout = async () => {
     setLoggingOut(true);
@@ -105,6 +87,11 @@ export default function Sidebar({ workspace, userEmail, mode }: SidebarProps) {
       </div>
 
       <nav className="flex-1 p-4 space-y-1">
+        {activeSection && (
+          <div className="px-3 pb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            {activeSection.label}
+          </div>
+        )}
         {navLinks.map((link) => (
           <Link
             key={link.href}

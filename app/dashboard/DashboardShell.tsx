@@ -1,8 +1,8 @@
 "use client";
 
-import { usePathname } from "next/navigation";
 import Sidebar from "@/app/components/Sidebar";
 import ModeNav from "@/app/components/ModeNav";
+import PublisherL1Tabs from "@/app/components/PublisherL1Tabs";
 import Breadcrumb from "@/app/components/ui/Breadcrumb";
 import { useWorkspace } from "@/app/dashboard/workspace-context";
 
@@ -17,15 +17,14 @@ export default function DashboardShell({
   userEmail,
   children,
 }: DashboardShellProps) {
-  const pathname = usePathname();
   const { is_publisher } = useWorkspace();
-  const mode = pathname.startsWith("/dashboard/access") ? "access" : "publisher";
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
-      {is_publisher && <ModeNav />}
+      <ModeNav />
+      {is_publisher && <PublisherL1Tabs />}
       <div className="flex flex-1">
-        <Sidebar workspace={workspace} userEmail={userEmail} mode={mode} />
+        <Sidebar workspace={workspace} userEmail={userEmail} mode="publisher" />
         <main className="flex-1 p-6 md:p-8 overflow-auto">
           <Breadcrumb />
           {children}

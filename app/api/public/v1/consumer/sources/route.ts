@@ -120,7 +120,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const result = await listAccessibleSources(
       authResult.workspaceId,
-      authResult.networkId,
+      authResult.accessSettingsId,
       authResult.botId,
       {
         cursor: cursorParam,

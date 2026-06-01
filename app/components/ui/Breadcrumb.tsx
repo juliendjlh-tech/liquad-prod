@@ -4,28 +4,26 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const publisherLabels: Record<string, string> = {
-  publisher: "Overview",
+  publisher: "Publisher",
+  licence: "Licence",
+  protect: "Protect",
+  distribute: "Distribute",
   domains: "Domains",
   bots: "Watchlist",
   catalogs: "Catalogs",
+  gateway: "Gateway",
+  overview: "Overview",
   subscriptions: "Subscriptions",
-  integration: "Integration",
-  settings: "Settings",
+  "access-settings": "Integrations",
   new: "Create",
   create: "Create",
   edit: "Edit",
   import: "Index contents",
 };
 
+// /access is now a single focused subscription view — no deeper routes.
 const accessLabels: Record<string, string> = {
   access: "Access",
-  subscriptions: "Subscriptions",
-  marketplace: "Marketplace",
-  integration: "Integration",
-  settings: "Settings",
-  new: "Create",
-  create: "Create",
-  edit: "Edit",
 };
 
 export default function Breadcrumb() {

@@ -35,8 +35,7 @@ type ResourceTable =
   | "catalogs"
   | "domains"
   | "subscriptions"
-  | "api_keys"
-  | "search_configs";
+  | "api_keys";
 
 /**
  * Resolve a resource identifier (UUID or `<prefix>_xxx` public_id) to the

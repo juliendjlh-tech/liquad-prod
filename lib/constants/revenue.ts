@@ -5,7 +5,8 @@
 // rows linked by grant_id:
 //   - debit         : -price_eur on the consumer wallet
 //   - content_owner : +CONTENT_OWNER × price (recipient = catalogue's publisher)
-//   - sub_manager   : +SUB_MANAGER × price (recipient = network's workspace)
+//   - sub_manager   : +SUB_MANAGER × price (recipient = consumer workspace's
+//                     referral_workspace_id, may be NULL)
 //   - platform_fee  : +PLATFORM_FEE × price (recipient NULL, no tenant)
 //
 // Sum of the 4 amounts is 0 (invariant enforced by computeRevenueSplit).

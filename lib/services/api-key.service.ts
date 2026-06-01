@@ -1,20 +1,18 @@
 // ---------------------------------------------------------------------------
 // API Key service
 //
-// CRUD for consumer-side api_keys. Since migration 041 an API key is an
-// immutable triple:
-//   - subscription_id : the prepaid wallet that pays for grants
-//   - network_id      : the catalogue bundle the key can reach
-//   - bot_id          : the bot identity claimed at /licenses time
+// CRUD for consumer-side api_keys. Since migration 045 an API key is a pair:
+//   - subscription_id     : the prepaid wallet that pays for grants
+//   - access_settings_id  : the consumer plan (bot + catalogues + max_price)
 //
-// At INSERT time the DB trigger validate_api_key_bot_in_network enforces that
-// bot_id is referenced by at least one accepted catalogue in the network. We
-// also pre-check in TS for a friendlier error response.
+// The bot identity is carried by the access_settings, not the key. We keep
+// `bot_id` as a denormalized column for fast hot-path queries; the DB trigger
+// `trg_api_keys_validate_bot_matches_access_settings` enforces equality.
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
 import { generateApiKey, hashApiKey } from "@/lib/services/workspace.service";
-import { getNetworkDerivedBotIds } from "@/lib/db/queries/networks";
+import { getAccessSettingsById } from "@/lib/db/queries/access-settings";
 import { generatePublicId } from "@/lib/ids";
 
 // ---------------------------------------------------------------------------
@@ -25,10 +23,8 @@ export interface CreateApiKeyInput {
   label?: string;
   /** Existing subscription this key debits. */
   subscriptionId: string;
-  /** Network whose accepted catalogues this key can reach. */
-  networkId: string;
-  /** Bot identity the key claims at /licenses time. */
-  botId: string;
+  /** Access settings this key consumes — defines bot + catalogues + max_price. */
+  accessSettingsId: string;
 }
 
 export interface ApiKeyPublic {
@@ -36,11 +32,11 @@ export interface ApiKeyPublic {
   label: string | null;
   api_key_prefix: string;
   subscription_id: string;
+  subscription_public_id: string | null;
   subscription_label: string | null;
   subscription_external_user_id: string | null;
-  subscription_balance_eur: number;
-  network_id: string;
-  network_name: string | null;
+  access_settings_id: string;
+  access_settings_name: string | null;
   bot_id: string;
   bot_name: string | null;
   last_used_at: string | null;
@@ -55,7 +51,7 @@ export interface ApiKeyPublic {
 async function assertRole(
   workspaceId: string,
   userId: string,
-  allowed: Array<"owner" | "admin" | "member">
+  allowed: Array<"owner" | "admin" | "member">,
 ): Promise<void> {
   const supabase = await createServerClient();
 
@@ -82,13 +78,13 @@ async function assertRole(
  *
  * Validations:
  *   - subscriptionId must belong to the workspace and be non-archived
- *   - networkId must belong to the workspace
- *   - botId must be in the network's derived bot set (UI + DB trigger)
+ *   - accessSettingsId must belong to the workspace
+ *   - the DB trigger enforces api_keys.bot_id = access_settings.bot_id
  */
 export async function createApiKey(
   workspaceId: string,
   userId: string,
-  input: CreateApiKeyInput
+  input: CreateApiKeyInput,
 ): Promise<{ api_key: string; record: ApiKeyPublic }> {
   await assertRole(workspaceId, userId, ["owner", "admin"]);
 
@@ -105,26 +101,13 @@ export async function createApiKey(
 
   if (!subscription) throw new Error("SUBSCRIPTION_NOT_FOUND");
 
-  // 2. Network ownership.
-  const { data: network } = await supabase
-    .from("networks")
-    .select("id")
-    .eq("id", input.networkId)
-    .eq("workspace_id", workspaceId)
-    .maybeSingle();
-
-  if (!network) throw new Error("NETWORK_NOT_FOUND");
-
-  // 3. Pre-check bot ∈ derived set. The DB trigger enforces the same; we do it
-  //    in TS to return a clean 422 before hashing the key etc. There is a tiny
-  //    race window (catalogue revoked between this check and INSERT) — the
-  //    trigger will catch it and raise check_violation.
-  const derivedBots = await getNetworkDerivedBotIds(input.networkId);
-  if (!derivedBots.includes(input.botId)) {
-    throw new Error("BOT_NOT_DERIVED_FROM_NETWORK");
+  // 2. Access settings ownership + bot derivation.
+  const accessSettings = await getAccessSettingsById(input.accessSettingsId);
+  if (!accessSettings || accessSettings.workspace_id !== workspaceId) {
+    throw new Error("ACCESS_SETTINGS_NOT_FOUND");
   }
 
-  // 4. Mint + insert.
+  // 3. Mint + insert. The DB trigger validates bot_id = access_settings.bot_id.
   const apiKey = generateApiKey();
   const apiKeyHash = await hashApiKey(apiKey);
   const apiKeyPrefix = apiKey.slice(0, 11);
@@ -135,34 +118,28 @@ export async function createApiKey(
       public_id: generatePublicId("key"),
       workspace_id: workspaceId,
       subscription_id: input.subscriptionId,
-      network_id: input.networkId,
-      bot_id: input.botId,
+      access_settings_id: input.accessSettingsId,
+      bot_id: accessSettings.bot_id,
       api_key_hash: apiKeyHash,
       api_key_prefix: apiKeyPrefix,
       label: input.label ?? null,
     })
     .select(
-      "id, label, api_key_prefix, subscription_id, network_id, bot_id, last_used_at, created_at, revoked_at",
+      "id, label, api_key_prefix, subscription_id, access_settings_id, bot_id, last_used_at, created_at, revoked_at",
     )
     .single();
 
   if (error || !data) {
-    // The trigger raises with ERRCODE=check_violation when the bot is no
-    // longer derived (race between TS check and INSERT).
-    if (error?.code === "23514" || error?.message?.includes("bot_not_derived_from_network")) {
-      throw new Error("BOT_NOT_DERIVED_FROM_NETWORK");
-    }
     throw new Error(`CREATE_FAILED: ${error?.message ?? "unknown"}`);
   }
 
-  // 5. Hydrate response.
-  const [{ data: sub }, { data: net }, { data: bot }] = await Promise.all([
+  // 4. Hydrate response.
+  const [{ data: sub }, { data: bot }] = await Promise.all([
     supabase
       .from("subscriptions")
-      .select("label, external_user_id, balance_eur")
+      .select("public_id, label, external_user_id")
       .eq("id", data.subscription_id)
       .single(),
-    supabase.from("networks").select("name").eq("id", data.network_id).single(),
     supabase.from("bots").select("name").eq("id", data.bot_id).single(),
   ]);
 
@@ -170,10 +147,76 @@ export async function createApiKey(
     api_key: apiKey,
     record: {
       ...data,
+      subscription_public_id: sub?.public_id ?? null,
       subscription_label: sub?.label ?? null,
       subscription_external_user_id: sub?.external_user_id ?? null,
-      subscription_balance_eur: Number(sub?.balance_eur ?? 0),
-      network_name: net?.name ?? null,
+      access_settings_name: accessSettings.name,
+      bot_name: bot?.name ?? null,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rotate
+// ---------------------------------------------------------------------------
+
+/**
+ * Rotate the secret on an existing API key. The row stays in place
+ * (same id, same (subscription, access_settings, bot) tuple); only the
+ * stored hash + prefix change. Returns the new plaintext key once.
+ */
+export async function rotateApiKey(
+  workspaceId: string,
+  userId: string,
+  apiKeyId: string,
+): Promise<{ api_key: string; record: ApiKeyPublic }> {
+  await assertRole(workspaceId, userId, ["owner", "admin"]);
+
+  const supabase = await createServerClient();
+
+  const apiKey = generateApiKey();
+  const apiKeyHash = await hashApiKey(apiKey);
+  const apiKeyPrefix = apiKey.slice(0, 11);
+
+  const { data, error } = await supabase
+    .from("api_keys")
+    .update({
+      api_key_hash: apiKeyHash,
+      api_key_prefix: apiKeyPrefix,
+    })
+    .eq("id", apiKeyId)
+    .eq("workspace_id", workspaceId)
+    .is("revoked_at", null)
+    .select(
+      "id, label, api_key_prefix, subscription_id, access_settings_id, bot_id, last_used_at, created_at, revoked_at",
+    )
+    .maybeSingle();
+
+  if (error) throw new Error(`ROTATE_FAILED: ${error.message}`);
+  if (!data) throw new Error("NOT_FOUND");
+
+  const [{ data: sub }, { data: bot }, { data: as_t }] = await Promise.all([
+    supabase
+      .from("subscriptions")
+      .select("public_id, label, external_user_id")
+      .eq("id", data.subscription_id)
+      .single(),
+    supabase.from("bots").select("name").eq("id", data.bot_id).single(),
+    supabase
+      .from("access_settings")
+      .select("name")
+      .eq("id", data.access_settings_id)
+      .single(),
+  ]);
+
+  return {
+    api_key: apiKey,
+    record: {
+      ...data,
+      subscription_public_id: sub?.public_id ?? null,
+      subscription_label: sub?.label ?? null,
+      subscription_external_user_id: sub?.external_user_id ?? null,
+      access_settings_name: as_t?.name ?? null,
       bot_name: bot?.name ?? null,
     },
   };
@@ -186,7 +229,7 @@ export async function createApiKey(
 export async function listApiKeys(
   workspaceId: string,
   userId: string,
-  options?: { subscriptionId?: string; networkId?: string }
+  options?: { subscriptionId?: string; accessSettingsId?: string },
 ): Promise<ApiKeyPublic[]> {
   await assertRole(workspaceId, userId, ["owner", "admin", "member"]);
 
@@ -197,22 +240,22 @@ export async function listApiKeys(
     label: string | null;
     api_key_prefix: string;
     subscription_id: string;
-    network_id: string;
+    access_settings_id: string;
     bot_id: string;
     last_used_at: string | null;
     created_at: string;
     revoked_at: string | null;
-    subscriptions: { label: string | null; external_user_id: string | null; balance_eur: number } | null;
-    networks: { name: string } | null;
+    subscriptions: { public_id: string; label: string | null; external_user_id: string | null } | null;
+    access_settings: { name: string } | null;
     bots: { name: string } | null;
   };
 
   const baseQuery = supabase
     .from("api_keys")
     .select(
-      "id, label, api_key_prefix, subscription_id, network_id, bot_id, last_used_at, created_at, revoked_at, " +
-        "subscriptions(label, external_user_id, balance_eur), " +
-        "networks(name), " +
+      "id, label, api_key_prefix, subscription_id, access_settings_id, bot_id, last_used_at, created_at, revoked_at, " +
+        "subscriptions(public_id, label, external_user_id), " +
+        "access_settings(name), " +
         "bots:bot_id(name)",
     )
     .eq("workspace_id", workspaceId)
@@ -225,33 +268,28 @@ export async function listApiKeys(
   let query = baseQuery as any;
 
   if (options?.subscriptionId) query = query.eq("subscription_id", options.subscriptionId);
-  if (options?.networkId) query = query.eq("network_id", options.networkId);
+  if (options?.accessSettingsId) query = query.eq("access_settings_id", options.accessSettingsId);
 
   const { data, error } = await query as { data: ApiKeyRow[] | null; error: { message: string } | null };
 
   if (error) throw new Error(`LIST_FAILED: ${error.message}`);
 
-  return (data ?? []).map((row: ApiKeyRow) => {
-    const subscription = row.subscriptions;
-    const network = row.networks;
-    const bot = row.bots;
-    return {
-      id: row.id,
-      label: row.label,
-      api_key_prefix: row.api_key_prefix,
-      subscription_id: row.subscription_id,
-      subscription_label: subscription?.label ?? null,
-      subscription_external_user_id: subscription?.external_user_id ?? null,
-      subscription_balance_eur: Number(subscription?.balance_eur ?? 0),
-      network_id: row.network_id,
-      network_name: network?.name ?? null,
-      bot_id: row.bot_id,
-      bot_name: bot?.name ?? null,
-      last_used_at: row.last_used_at,
-      created_at: row.created_at,
-      revoked_at: row.revoked_at,
-    };
-  });
+  return (data ?? []).map((row: ApiKeyRow) => ({
+    id: row.id,
+    label: row.label,
+    api_key_prefix: row.api_key_prefix,
+    subscription_id: row.subscription_id,
+    subscription_public_id: row.subscriptions?.public_id ?? null,
+    subscription_label: row.subscriptions?.label ?? null,
+    subscription_external_user_id: row.subscriptions?.external_user_id ?? null,
+    access_settings_id: row.access_settings_id,
+    access_settings_name: row.access_settings?.name ?? null,
+    bot_id: row.bot_id,
+    bot_name: row.bots?.name ?? null,
+    last_used_at: row.last_used_at,
+    created_at: row.created_at,
+    revoked_at: row.revoked_at,
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -261,7 +299,7 @@ export async function listApiKeys(
 export async function revokeApiKey(
   workspaceId: string,
   userId: string,
-  apiKeyId: string
+  apiKeyId: string,
 ): Promise<void> {
   await assertRole(workspaceId, userId, ["owner", "admin"]);
 

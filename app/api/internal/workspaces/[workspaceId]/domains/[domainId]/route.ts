@@ -48,35 +48,22 @@ export async function GET(
 
     const { data: latestJob } = await supabase
       .from("indexing_jobs")
-      .select("id, status, error_message, urls_to_index, updated_at")
+      .select("status, error_message, urls_to_index, updated_at")
       .eq("domain_id", domainId)
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
 
     const urlsToIndex: string[] = (latestJob?.urls_to_index as string[]) ?? [];
-    const scrapeTotalPages = urlsToIndex.length;
-
-    let scrapeChunkCount = 0;
-    if (latestJob?.id) {
-      const { count } = await supabase
-        .from("chunks")
-        .select("id", { count: "exact", head: true })
-        .eq("indexing_job_id", latestJob.id)
-        .not("embedding", "is", null);
-      scrapeChunkCount = count ?? 0;
-    }
 
     return NextResponse.json({
       domain: domainRow.domain,
       sitemap_url: domainRow.sitemap_url,
       ...impact,
-      scrape_status: latestJob?.status ?? null,
-      scrape_total_pages: scrapeTotalPages,
-      scrape_processed_pages: null,
-      scrape_chunk_count: scrapeChunkCount,
-      scrape_error_message: latestJob?.error_message ?? null,
-      last_scraped_at: latestJob?.updated_at ?? null,
+      index_status: latestJob?.status ?? null,
+      index_total_urls: urlsToIndex.length,
+      index_error_message: latestJob?.error_message ?? null,
+      index_last_run_at: latestJob?.updated_at ?? null,
     });
   } catch {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

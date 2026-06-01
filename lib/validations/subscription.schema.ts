@@ -3,13 +3,14 @@ import { z } from "zod";
 /**
  * Body schema for POST /api/internal/workspaces/:id/subscriptions.
  *
- * Since migration 041, subscriptions are pure wallets. No mode, no scope, no
- * catalog allowlist, no price cap. Catalogue scope is driven by the API key's
- * network, not the subscription.
+ * Subscriptions are pure wallets — no mode, no scope, no catalog allowlist,
+ * no price cap. The catalogue scope + max_price live on the API key's
+ * access_settings, not the subscription.
  */
 export const createSubscriptionSchema = z.object({
   external_user_id: z.string().min(1).max(200).optional(),
   label: z.string().min(1).max(100).optional(),
+  monthly_cap_eur: z.number().nonnegative().max(1_000_000).nullable().optional(),
 });
 
 export type CreateSubscriptionInput = z.infer<typeof createSubscriptionSchema>;
@@ -21,20 +22,25 @@ export const updateSubscriptionSchema = z
   .object({
     label: z.string().min(1).max(100).nullable().optional(),
     external_user_id: z.string().min(1).max(200).nullable().optional(),
+    monthly_cap_eur: z.number().nonnegative().max(1_000_000).nullable().optional(),
   })
   .refine(
-    (v) => v.label !== undefined || v.external_user_id !== undefined,
+    (v) =>
+      v.label !== undefined ||
+      v.external_user_id !== undefined ||
+      v.monthly_cap_eur !== undefined,
     { message: "At least one field is required" }
   );
 
 export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;
 
 /**
- * Body schema for POST /api/internal/workspaces/:id/subscriptions/:subscriptionId/credits.
+ * Body schema for POST /api/internal/workspaces/:id/credits (admin top-up).
+ * Top-ups operate at the workspace wallet level since migration 047.
  */
-export const creditSubscriptionSchema = z.object({
+export const creditWorkspaceSchema = z.object({
   amount_eur: z.number().positive().max(100000),
   description: z.string().min(1).max(200).optional(),
 });
 
-export type CreditSubscriptionInput = z.infer<typeof creditSubscriptionSchema>;
+export type CreditWorkspaceInput = z.infer<typeof creditWorkspaceSchema>;

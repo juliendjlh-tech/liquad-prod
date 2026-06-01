@@ -10,7 +10,7 @@ import type {
   FilterRules,
 } from "@/lib/validations/catalog.schema";
 import { matchContentAgainstRules } from "@/lib/validations/catalog.schema";
-import { syncCatalogSources } from "@/lib/services/pipeline.service";
+import { syncCatalogSources } from "@/lib/services/catalog-linking.service";
 import { getDomainMap } from "@/lib/db/queries/domains";
 import { canonicalizeHostname } from "@/lib/utils/hostname";
 import { generatePublicId } from "@/lib/ids";
@@ -32,8 +32,6 @@ export interface CatalogListItem {
   status: string;
   bot_count: number;
   content_count: number;
-  rag_enabled: boolean;
-  rag_source_count: number;
   created_at: string;
 }
 
@@ -45,8 +43,6 @@ export interface CatalogDetail {
   filter_rules: FilterRules;
   price_eur: number;
   status: string;
-  rag_enabled: boolean;
-  rag_source_count: number;
   created_at: string;
   bots: Array<{
     id: string;
@@ -193,8 +189,6 @@ export async function getCatalogs(
       status: catalog.status,
       bot_count: botCountMap.get(catalog.id) ?? 0,
       content_count: contentCount,
-      rag_enabled: catalog.rag_enabled ?? false,
-      rag_source_count: catalog.rag_source_count ?? 0,
       created_at: catalog.created_at!,
     };
   });
@@ -228,8 +222,6 @@ export async function getCatalogById(
     filter_rules: catalog.filter_rules as unknown as FilterRules,
     price_eur: catalog.price_eur,
     status: catalog.status,
-    rag_enabled: catalog.rag_enabled ?? false,
-    rag_source_count: catalog.rag_source_count ?? 0,
     created_at: catalog.created_at!,
     bots,
   };
@@ -298,7 +290,6 @@ export async function updateCatalog(
   if (data.filter_rules !== undefined) updateFields.filter_rules = data.filter_rules;
   if (data.price_eur !== undefined) updateFields.price_eur = data.price_eur;
   if (data.status !== undefined) updateFields.status = data.status;
-  if (data.rag_enabled !== undefined) updateFields.rag_enabled = data.rag_enabled;
 
   if (Object.keys(updateFields).length > 0) {
     const { error } = await supabase
@@ -312,25 +303,10 @@ export async function updateCatalog(
     }
   }
 
-  // Handle RAG linking based on rag_enabled changes
-  if (data.rag_enabled === false) {
-    // Disabling RAG: remove all catalog_sources links and reset source count
-    await supabase
-      .from("catalog_sources")
-      .delete()
-      .eq("catalog_id", catalogId);
-
-    await supabase
-      .from("catalogs")
-      .update({ rag_source_count: 0 })
-      .eq("id", catalogId);
-  } else if (data.rag_enabled === true || data.filter_rules !== undefined) {
-    // Enabling RAG or changing filter_rules: re-link sources.
-    // Only run if the catalog is (now) RAG-enabled.
-    const currentCatalog = await getCatalogById(catalogId, workspaceId);
-    if (currentCatalog?.rag_enabled) {
-      await syncCatalogSources(workspaceId, catalogId);
-    }
+  // Re-materialize catalog_sources when filter_rules change. The /licenses
+  // URL→catalog lookup reads this junction directly.
+  if (data.filter_rules !== undefined) {
+    await syncCatalogSources(workspaceId, catalogId);
   }
 
   return getCatalogById(catalogId, workspaceId) as Promise<CatalogDetail>;

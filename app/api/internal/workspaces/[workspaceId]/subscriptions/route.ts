@@ -11,7 +11,7 @@ import { requireWorkspaceMembership } from "@/lib/services/workspace-resolver";
  * List non-archived subscriptions for the workspace.
  */
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ workspaceId: string }> }
 ): Promise<NextResponse> {
   try {
@@ -20,7 +20,15 @@ export async function GET(
     if (!auth.ok) return auth.response;
     const { workspaceId, userId } = auth.workspace;
 
-    const subscriptions = await listSubscriptions(workspaceId, userId);
+    const publicIdPrefix =
+      request.nextUrl.searchParams.get("public_id_prefix") ?? undefined;
+    const limitRaw = request.nextUrl.searchParams.get("limit");
+    const limit = limitRaw ? Math.min(Math.max(Number(limitRaw), 1), 50) : undefined;
+
+    const subscriptions = await listSubscriptions(workspaceId, userId, {
+      publicIdPrefix,
+      limit,
+    });
     return NextResponse.json(subscriptions, { status: 200 });
   } catch (err) {
     return mapError(err);
@@ -55,6 +63,7 @@ export async function POST(
     const subscription = await createSubscription(workspaceId, userId, {
       externalUserId: parsed.data.external_user_id ?? null,
       label: parsed.data.label ?? null,
+      monthlyCapEur: parsed.data.monthly_cap_eur ?? null,
     });
 
     return NextResponse.json(subscription, { status: 201 });

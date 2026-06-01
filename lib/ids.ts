@@ -20,10 +20,9 @@ export const ID_PREFIXES = {
   domain: 'dom',
   subscription: 'sub',
   apiKey: 'key',
-  searchConfig: 'sc',
   workspace: 'wks',
   gateway: 'gw',
-  network: 'net',
+  accessSettings: 'as',
 } as const;
 
 export type IdPrefix = (typeof ID_PREFIXES)[keyof typeof ID_PREFIXES];

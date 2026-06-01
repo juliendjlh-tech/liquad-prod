@@ -24,12 +24,11 @@ transactions.
 4. [Découverte des catalogues — `GET /api/consumer/v1/catalogs`](#4-découverte-des-catalogues--get-apiconsumerv1catalogs)
 5. [Découverte des URLs — `GET /api/consumer/v1/sources`](#5-découverte-des-urls--get-apiconsumerv1sources)
 6. [Achat de licences — `POST /api/consumer/v1/licenses`](#6-achat-de-licences--post-apiconsumerv1licenses)
-7. [Recherche sémantique — `POST /api/consumer/v1/query`](#7-recherche-sémantique--post-apiconsumerv1query)
-8. [Solde — `GET /api/consumer/v1/balance`](#8-solde--get-apiconsumerv1balance)
-9. [Historique — `GET /api/consumer/v1/transactions`](#9-historique--get-apiconsumerv1transactions)
-10. [Format des tokens HMAC et vérification gateway](#10-format-des-tokens-hmac-et-vérification-gateway)
-11. [Catalogue d'erreurs](#11-catalogue-derreurs)
-12. [Limites et quotas](#12-limites-et-quotas)
+7. [Solde — `GET /api/consumer/v1/balance`](#7-solde--get-apiconsumerv1balance)
+8. [Historique — `GET /api/consumer/v1/transactions`](#8-historique--get-apiconsumerv1transactions)
+9. [Format des tokens HMAC et vérification gateway](#9-format-des-tokens-hmac-et-vérification-gateway)
+10. [Catalogue d'erreurs](#10-catalogue-derreurs)
+11. [Limites et quotas](#11-limites-et-quotas)
 
 ---
 
@@ -56,41 +55,40 @@ présence dans un workspace est représentée par la table de jonction
 ### 1.2 Subscription
 
 Une **subscription** est un compte prépayé **workspace-scoped et
-bot-agnostique**. Elle porte :
+bot-agnostique**. C'est un wallet pur :
 
 - `balance_eur` — solde prépayé,
-- `scope_to_workspace` — mode end-user (`true`, défaut, partage avec
-  partenaires) ou client (`false`, accès réseau pour usage interne),
+- `label` — libellé optionnel,
 - `external_user_id` — identifiant optionnel pour le cas multi-tenant
   (ex : une subscription par end-user de votre produit). Unique par
   workspace.
 
-Le bot avec lequel on opère est **précisé par appel** dans `/licenses`,
-ou hérité de la clé via `default_bot_id` (cf. §1.3). Une même
-subscription peut donc servir à plusieurs bots successivement.
+L'accès aux catalogues ne se fait pas via la subscription mais via
+l'**access settings** portée par la clé (cf. §1.5). Une même
+subscription peut donc financer plusieurs access settings (et donc
+plusieurs bots) en parallèle.
 
 ### 1.3 API key
 
-Une **API key** est attachée à exactement une subscription et hérite donc
-de son `workspace_id` et de son scope. Elle peut **optionnellement** être
-créée avec un `default_bot_id` :
+Une **API key** est une paire immuable :
 
-- `default_bot_id = NULL` (clé bot-agnostique) : le caller doit fournir
-  `bot_id` à chaque appel `/licenses`. Cas par défaut pour un usage
-  multi-bot.
-- `default_bot_id = <uuid>` (clé bound à un bot par défaut) : le caller
-  peut omettre `bot_id` dans `/licenses` — le serveur fallback sur ce
-  default. Idéal pour le scénario *partenaire d'un publisher* : le
-  publisher binde la clé au bot custom qu'il a créé pour le partenaire,
-  qui n'a alors **rien d'autre que sa clé** à envoyer. `body.bot_id`
-  override le default si fourni explicitement.
+- `subscription_id` — la subscription débitée à chaque grant ;
+- `access_settings_id` — l'**access settings** consommée (cf §1.5). Elle
+  porte le bot, la liste de catalogues, et le `max_price_eur`. Le `bot_id`
+  est dénormalisé sur la clé pour la lecture rapide ; un trigger DB
+  garantit qu'il égale `access_settings.bot_id`.
 
-Le `default_bot_id` est validé à la création contre `workspace_bots`. Si
-le bot est supprimé plus tard, la colonne passe à NULL et la clé
-redevient bot-agnostique (le partenaire devra alors envoyer `bot_id`).
+Le caller n'envoie **jamais** `bot_id`, `network_id` ou `search_config_id`
+dans le body des endpoints `/catalogs`, `/sources`, `/licenses` : tout est
+résolu depuis la clé.
+
+**Rotation** : `POST /api/internal/.../api-keys/:keyId/rotate` régénère le
+secret en place. L'ancien secret est invalidé, la paire
+`(subscription, access_settings)` reste la même.
 
 Format : `lq_<random>` — préfixe sur 11 caractères + secret. Hashée en
-base de données ; ne peut être révélée qu'au moment de la création.
+base de données ; ne peut être révélée qu'au moment de la création ou
+d'une rotation.
 
 À utiliser dans le header `Authorization: Bearer lq_...`.
 
@@ -116,7 +114,24 @@ Un consumer raisonne **par catalogue** : c'est l'unité que vous
 découvrez, que vous filtrez, et qui porte le pricing. Voir
 [`/catalogs`](#4-découverte-des-catalogues--get-apiconsumerv1catalogs).
 
-### 1.5 Indexed source
+### 1.5 Access settings
+
+Une **access settings** est le plan d'accès du consumer pour un de ses
+bots. Elle bundle :
+
+- `bot_id` — le bot (preset ou custom) que la clé impersonne au runtime ;
+- une liste de **catalogues** parmi ceux disponibles sur la marketplace
+  (`status = 'active'`) ou les catalogues privés du même workspace ;
+- `max_price_eur` — un plafond par grant qui protège le consumer si un
+  publisher remonte son prix : tout catalogue dont `catalog.price_eur >
+  max_price_eur` est silencieusement filtré au moment de `/licenses`.
+
+C'est la concentration des deux concepts historiques (network publisher +
+search config). Une `access_settings` est créée depuis le dashboard
+consumer : pour chaque bot, le consumer choisit ses catalogues et son
+ceiling. Une API key référence exactement une access settings.
+
+### 1.6 Indexed source
 
 Une **indexed source** est une URL spécifique référencée dans la base
 Liquad. Seules les URLs indexées peuvent être achetées. La découverte
@@ -129,21 +144,22 @@ Liquad. Seules les URLs indexées peuvent être achetées. La découverte
 Une clé API peut vivre dans **deux contextes** différents, selon que vous
 êtes un consumer self-serve ou un partenaire d'un publisher. Les deux modes
 utilisent **strictement les mêmes endpoints** ; la différence porte sur
-**qui finance** et **quels catalogues sont visibles**.
+**qui finance** et **quel access settings la clé porte**.
 
 ### 2.1 Mode A — Consumer self-serve (par défaut)
 
-**Cas d'usage** : votre AI company crée un workspace Liquad, déclare son bot
-(IPs, ua_pattern), top-up un wallet et utilise la clé API pour acheter des
-licences chez **n'importe quel publisher** Liquad dont le contenu vous
-intéresse.
+**Cas d'usage** : votre AI company crée un workspace Liquad, déclare son
+bot (IPs, ua_pattern), top-up un wallet, construit ses access settings
+(catalogues souhaités + max price) et utilise la clé API pour acheter
+des licences chez **n'importe quel publisher** Liquad dont le contenu
+vous intéresse.
 
 | | |
 |---|---|
 | `workspace_bots.workspace_id` | votre workspace |
-| `subscription.scope_to_workspace` | `false` (mode client) |
+| `access_settings.workspace_id` | votre workspace |
 | `subscription.workspace_id` | votre workspace |
-| Catalogues visibles | tous les catalogues de tous les publishers dont le bot lié partage votre `ua_pattern` et au moins une IP |
+| Catalogues visibles | ceux que vous avez ajoutés à l'access settings (marketplace) |
 | Qui finance | vous (top-up sur votre wallet) |
 
 Avantage : onboarding totalement self-serve, accès unifié à tout le catalogue
@@ -153,35 +169,28 @@ multi-publishers.
 
 **Cas d'usage** : un publisher P travaille avec un partenaire qui n'a pas
 de compte Liquad, mais à qui P veut donner un accès gratuit ou pré-payé à
-**ses propres catalogues uniquement**. Le publisher crée la bot subscription
-et la clé API dans son propre workspace, puis l'envoie au partenaire.
+**ses propres catalogues uniquement**. Le publisher crée la subscription,
+construit une access settings **sur son propre workspace** qui inclut
+**uniquement ses catalogues privés** (`catalog.status = 'inactive'`,
+mêmes `workspace_id`), puis émet une clé liée à cette access settings.
 
 | | |
 |---|---|
 | `workspace_bots.workspace_id` | workspace du **publisher** |
-| `subscription.scope_to_workspace` | `true` (mode end-user, défaut) |
+| `access_settings.workspace_id` | workspace du **publisher** |
 | `subscription.workspace_id` | workspace du **publisher** |
-| `api_key.default_bot_id` | typiquement le bot custom créé pour ce partenaire (optionnel) |
-| Catalogues visibles | **uniquement** les catalogues du publisher hôte |
+| Catalogues visibles | **uniquement** ceux ajoutés à l'access settings (privés du publisher hôte) |
 | Qui finance | le publisher (top-up sur son propre wallet) |
 
-L'isolation est strictement appliquée par
-`subscription.scope_to_workspace = true` : `/catalogs`, `/sources` et
-`/licenses` filtrent les catalogues retournés à
-`workspace_id = <workspace du publisher>`. Toggable à tout moment côté
-publisher (via le détail subscription dans le dashboard) — n'invalide
-aucune clé API existante, prend effet à l'appel suivant.
-
-Quand le publisher bind un `default_bot_id` à la clé du partenaire, ce
-dernier peut appeler `/licenses` **sans rien savoir du UUID du bot** —
-sa clé suffit.
+L'isolation est structurelle : un catalogue privé (`status = 'inactive'`)
+ne peut être ajouté qu'à une access settings du même workspace — le
+trigger `validate_access_settings_catalog` rejette toute autre tentative.
 
 > **Note pour l'intégrateur** : du point de vue de votre code, **rien ne
-> change** entre Mode A et Mode B. Vous appelez les mêmes endpoints avec la
-> même clé API. La différence se manifeste uniquement dans le contenu de
-> `/catalogs` et `/sources` (combien de catalogues / URLs et de quels
-> publishers) et dans le wallet qui se vide. Si vous recevez une clé API
-> d'un publisher, attendez-vous à ne voir que ses catalogues.
+> change** entre Mode A et Mode B. Vous appelez les mêmes endpoints avec
+> la même clé API. La différence est dans le contenu de `/catalogs` et
+> `/sources` (combien de catalogues / URLs et de quels publishers) et
+> dans le wallet qui se vide.
 
 ---
 
@@ -202,14 +211,9 @@ Content-Type: application/json
 { "error": "invalid_api_key" }
 ```
 
-Le workspace de débit et la subscription sont **dérivés de la clé**. Vous
-n'avez jamais à les fournir.
-
-L'identité bot, en revanche :
-- est **fournie par appel** dans `/licenses` (`body.bot_id`),
-- ou héritée de la clé si elle a été créée avec un `default_bot_id`,
-- est **toujours requise** sur `/sources` et `/catalogs` (paramètre
-  `?bot_id=<uuid>`).
+Le workspace de débit, la subscription, le bot et la liste des catalogues
+accessibles sont **tous dérivés de la clé** via son `access_settings`.
+Vous n'avez jamais à les fournir dans le query string ou le body.
 
 ---
 
@@ -227,14 +231,13 @@ Endpoint **idempotent et gratuit** : aucun token, aucun débit.
 ### Requête
 
 ```http
-GET /api/consumer/v1/catalogs?bot_id=<uuid> HTTP/1.1
+GET /api/consumer/v1/catalogs HTTP/1.1
 Host: app.liquad.io
 Authorization: Bearer lq_...
 ```
 
-| Paramètre | Type | Requis | Description |
-|---|---|---|---|
-| `bot_id` | uuid | oui | Bot avec lequel le filtrage est effectué (UA + IP intersection). Doit appartenir à `workspace_bots(subscription.workspace_id)`. |
+Aucun query param. Le bot, l'allowlist de catalogues et le `max_price_eur`
+sont tous résolus depuis la clé via son `access_settings`.
 
 ### Réponse 200
 
@@ -248,7 +251,6 @@ Authorization: Bearer lq_...
       "publisher_workspace_id": "a31b...",
       "price_eur": 0.05,
       "ttl_minutes": 60,
-      "rag_enabled": true,
       "source_count": 12473,
       "allowed_ips": ["203.0.113.0/24"]
     }
@@ -264,7 +266,6 @@ Authorization: Bearer lq_...
 | `publisher_workspace_id` | UUID du workspace publisher propriétaire. Stable, sert d'identifiant publisher. |
 | `price_eur` | Prix par URL achetée (EUR). |
 | `ttl_minutes` | Durée de validité d'un token émis pour ce catalogue. |
-| `rag_enabled` | Si `true`, le catalogue est interrogeable via `/query` (RAG sémantique). |
 | `source_count` | Nombre d'indexed sources liées au catalogue. Approximation de la taille. |
 | `allowed_ips` | IPs (CIDR) depuis lesquelles le scrape sera autorisé. Union des intersections avec votre bot. |
 
@@ -294,14 +295,16 @@ Pagination par **cursor keyset** : performance constante, ordre stable.
 ### Requête
 
 ```http
-GET /api/consumer/v1/sources?bot_id=<uuid>&domain=example.com&path_prefix=/blog/&limit=2000 HTTP/1.1
+GET /api/consumer/v1/sources?domain=example.com&path_prefix=/blog/&limit=2000 HTTP/1.1
 Host: app.liquad.io
 Authorization: Bearer lq_...
 ```
 
+Le bot et l'allowlist viennent de la clé via son `access_settings`. Pas de
+`bot_id` dans le query string.
+
 | Paramètre | Type | Défaut | Description |
 |---|---|---|---|
-| `bot_id` | UUID | **requis** | Bot avec lequel le filtrage est effectué. Doit appartenir à `workspace_bots(subscription.workspace_id)`. |
 | `cursor` | UUID | (aucun) | Curseur opaque renvoyé par la réponse précédente (`next_cursor`). Omettre pour la première page. |
 | `limit` | int | 1000 | Plage : 1–5000. Nombre max d'URLs renvoyées sur cette page. |
 | `domain` | string | (aucun) | Filtre par hostname publisher (ex : `example.com`). Format : `[a-zA-Z0-9.-]+`, max 253 caractères. |
@@ -395,16 +398,19 @@ Content-Type: application/json
   "urls": [
     "https://example.com/articles/2026/billing-guide",
     "https://example.com/articles/2026/refund-policy"
-  ],
-  "max_price_eur": 0.10
+  ]
 }
 ```
 
 | Champ | Type | Requis | Description |
 |---|---|---|---|
 | `urls` | string[] | oui | 1 à 100 URLs absolues (`http(s)://...`). Normalisation appliquée côté serveur (suppression du fragment, tri des query params). |
-| `bot_id` | uuid | conditionnel | Identifiant du bot avec lequel vous opérez. **Requis** sauf si la clé API a été créée avec un `default_bot_id` — dans ce cas, omettre fait fallback sur le default. Si fourni explicitement, override le default. Validé contre `workspace_bots(subscription.workspace_id)`. |
-| `max_price_eur` | number | non | Plafond de prix par URL (0 ≤ x ≤ 100). Les catalogues plus chers sont ignorés pour cet appel. |
+
+Le bot, la liste de catalogues accessibles et le plafond de prix
+(`max_price_eur`) viennent **tous** de la clé via son `access_settings`.
+Le caller n'envoie ni `bot_id`, ni `catalog_ids`, ni `network_id`, ni
+`max_price_eur`. Pour ajuster le plafond, modifier l'access settings via
+le dashboard ou `PATCH /api/internal/.../access-settings/:id`.
 
 ### Réponse 200
 
@@ -450,15 +456,12 @@ Content-Type: application/json
 |---|---|---|
 | `granted` | Token émis et débité (ou cached). `crawl_url` contient le token. | Fetch `crawl_url`. |
 | `no_match` | L'URL n'est indexée par aucun publisher Liquad. | Vérifier l'URL ; appeler `/sources` pour découvrir les URLs accessibles. |
-| `no_catalog` | L'URL est indexée mais aucun catalogue actif ne couvre votre `ua_pattern` (ou tous les catalogues UA-compatibles ont été filtrés par votre `max_price_eur` ou par le `scope_to_workspace=true` de votre clé). | Augmenter `max_price_eur` ; demander au publisher d'ajouter votre bot à un catalogue ; vérifier que vous êtes sur le bon workspace si vous êtes en Mode B. |
+| `no_catalog` | L'URL est indexée mais aucun catalogue de votre access settings ne la couvre, ou tous ceux qui la couvrent dépassent votre `max_price_eur` ou sont devenus inactifs sur la marketplace. | Ajouter le catalogue à votre plan ; augmenter le `max_price_eur` ; demander au publisher d'ajouter votre bot à un catalogue éligible. |
 | `no_matching_ips` | Catalogue(s) UA-compatibles existent mais aucun ne partage d'IP avec votre bot. | Mettre à jour `declared_ips` de votre bot pour inclure les IPs réellement utilisées par votre crawler. |
 | `domain_not_registered` | Aucun publisher Liquad n'opère ce hostname. | URL hors-système — le crawl direct passe en clair, aucune visibilité Liquad possible. |
 | `insufficient_balance` | Solde insuffisant — **dégradation gracieuse** appliquée à toutes les URLs du batch. Aucun token émis, aucun débit. | Recharger la subscription puis réessayer. |
 
-### Exemple — partenaire avec `default_bot_id` sur la clé
-
-Si le publisher vous a fourni une clé créée avec un `default_bot_id`,
-vous pouvez omettre `bot_id` dans le body :
+### Exemple minimal
 
 ```bash
 curl -X POST https://app.liquad.io/api/consumer/v1/licenses \
@@ -466,9 +469,6 @@ curl -X POST https://app.liquad.io/api/consumer/v1/licenses \
   -H "Content-Type: application/json" \
   -d '{ "urls": ["https://example.com/articles/2026/billing-guide"] }'
 ```
-
-Le serveur résout automatiquement `bot_id` depuis la clé. Le résultat
-est strictement identique à un appel avec `bot_id` explicite.
 
 ### Idempotence
 
@@ -482,10 +482,9 @@ risquer la double facturation.
 | Statut | Code | Cause |
 |---|---|---|
 | 401 | `invalid_api_key` | Clé absente / invalide. **Strict** — jamais dégradé en 200. |
-| 403 | `bot_not_in_workspace` | Le `bot_id` résolu (body ou default) n'appartient pas à `workspace_bots(subscription.workspace_id)`. |
-| 404 | `bot_not_found` | Le `bot_id` fourni n'existe pas. |
+| 404 | `bot_not_found` | Le bot porté par l'access settings de la clé n'existe plus. |
+| 404 | `access_settings_not_found` | L'access settings référencée par la clé a été supprimée. |
 | 422 | `bot_missing_ips` | Le bot n'a aucune IP déclarée. |
-| 422 | `bot_id_required` | Aucun `bot_id` fourni dans le body et la clé n'a pas de `default_bot_id`. |
 | 422 | `invalid_url` | Une des URLs est malformée. |
 
 > **Note** : `insufficient_balance` et `domain_not_registered` ne sont
@@ -498,58 +497,7 @@ risquer la double facturation.
 
 ---
 
-## 7. Recherche sémantique — `POST /api/consumer/v1/query`
-
-Recherche vectorielle (RAG) sur les chunks indexés des catalogues spécifiés.
-Retourne des extraits + tokens HMAC pour récupérer la page complète si
-besoin. Charge par résultat retourné (cf `price_eur` du catalogue).
-
-> **Statut MVP** : RAG n'est pas dans le scope du MVP transactionnel. Cette
-> section décrit l'API existante mais peut évoluer. Privilégiez `/sources`
-> + `/licenses` pour l'instant.
-
-### Requête
-
-```http
-POST /api/consumer/v1/query HTTP/1.1
-Authorization: Bearer lq_...
-Content-Type: application/json
-
-{
-  "query": "How does billing work?",
-  "bot_id": "<uuid>",
-  "catalog_ids": ["<uuid>"],
-  "max_results": 5,
-  "max_price_eur": 0.10,
-  "total_budget_eur": 0.50,
-  "dry_run": false
-}
-```
-
-| Champ | Type | Description |
-|---|---|---|
-| `query` | string | 1–2000 caractères. La requête naturelle. |
-| `bot_id` | uuid | Doit correspondre à votre clé. |
-| `search_config_id` ou `catalog_ids` | uuid / uuid[] | Au moins l'un des deux est requis. |
-| `path_filters` | array | Optionnel — restreint la recherche à un sous-ensemble par path rules (`contains`, `starts_with`, etc.). |
-| `max_results` | int | 1–20, défaut 5. |
-| `max_price_eur` | number | 0–1, prix max par résultat. |
-| `total_budget_eur` | number | Budget total max pour cet appel. |
-| `dry_run` | bool | Si `true`, renvoie les métadonnées des résultats **sans** snippets et **sans** débit. |
-
-### Réponse 200
-
-Voir la doc RAG dédiée (à venir). Structure typique : `results[]` avec
-`snippet`, `score`, `token`, `expires_at`, `price_eur`, `source_url`.
-
-### Codes d'erreur
-
-`401`, `402` (budget insuffisant), `403` (bot non autorisé sur le catalogue),
-`404` (catalogue inactif ou RAG désactivé), `422` (validation).
-
----
-
-## 8. Solde — `GET /api/consumer/v1/balance`
+## 7. Solde — `GET /api/consumer/v1/balance`
 
 Retourne le solde et le résumé de dépense pour la subscription liée à la
 clé API.
@@ -570,7 +518,7 @@ clé API.
 
 ---
 
-## 9. Historique — `GET /api/consumer/v1/transactions`
+## 8. Historique — `GET /api/consumer/v1/transactions`
 
 Historique paginé des débits de la subscription liée à la clé.
 
@@ -614,7 +562,7 @@ prochain appel.
 
 ---
 
-## 10. Format des tokens HMAC et vérification gateway
+## 9. Format des tokens HMAC et vérification gateway
 
 ### 10.1 Anatomie d'un token
 
@@ -677,17 +625,15 @@ ré-appelant `/licenses`).
 
 ---
 
-## 11. Catalogue d'erreurs
+## 10. Catalogue d'erreurs
 
 | HTTP | `error` code | Sens | Endpoints concernés |
 |---|---|---|---|
 | 400 | `validation_error` | Param ou body invalide (cursor, limit, domain, path_prefix, catalog_id). | `/sources`, `/transactions` |
 | 401 | `invalid_api_key` | Clé absente / révoquée / inconnue. | tous |
-| 402 | `insufficient_balance` | Solde insuffisant. Détails : `{ balance_eur, required_eur }`. | `/query` |
-| 403 | `bot_not_in_workspace` | Le `bot_id` résolu n'appartient pas à `workspace_bots` du workspace de la subscription. | `/catalogs`, `/sources`, `/licenses` |
-| 404 | `bot_not_found` | Le `bot_id` fourni n'existe pas. | `/licenses` |
+| 404 | `bot_not_found` | Le bot porté par l'access settings n'existe plus. | `/catalogs`, `/sources`, `/licenses` |
+| 404 | `access_settings_not_found` | L'access settings référencée par la clé a été supprimée. | `/catalogs`, `/sources`, `/licenses` |
 | 422 | `bot_missing_ips` | Bot sans IP déclarée → impossible d'établir la confiance. | `/catalogs`, `/sources`, `/licenses` |
-| 422 | `bot_id_required` | Aucun `bot_id` dans le body et clé sans `default_bot_id`. | `/licenses` |
 | 422 | `invalid_url` | URL malformée. | `/licenses` |
 | 422 | `validation_error` | Body invalide (Zod) ou paramètre query invalide. | tous |
 | 500 | `internal_error` | Erreur serveur. | tous |
@@ -698,7 +644,7 @@ Toutes les erreurs renvoient un body JSON `{ error: "<code>", message?: ..., det
 
 ---
 
-## 12. Limites et quotas
+## 11. Limites et quotas
 
 | Limite | Valeur | Endpoint |
 |---|---|---|

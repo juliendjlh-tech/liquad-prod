@@ -5,6 +5,7 @@ import {
   updateBot,
   removeBotFromWorkspace,
 } from "@/lib/services/agent.service";
+import { createServerClient } from "@/lib/db/supabase-server";
 import { requireWorkspaceMembership } from "@/lib/services/workspace-resolver";
 
 /**
@@ -97,6 +98,27 @@ export async function DELETE(
     const auth = await requireWorkspaceMembership(param);
     if (!auth.ok) return auth.response;
     const { workspaceId } = auth.workspace;
+
+    // Block if any access_settings of this workspace references the bot —
+    // deleting it would orphan the plans (and any api_keys bound to them
+    // would lose their bot identity).
+    const supabase = await createServerClient();
+    const { count: planCount } = await supabase
+      .from("access_settings")
+      .select("id", { count: "exact", head: true })
+      .eq("workspace_id", workspaceId)
+      .eq("bot_id", botId);
+
+    if ((planCount ?? 0) > 0) {
+      return NextResponse.json(
+        {
+          error: "bot_in_use",
+          plan_count: planCount,
+          message: `Delete the ${planCount} plan(s) using this integration first.`,
+        },
+        { status: 422 },
+      );
+    }
 
     const result = await removeBotFromWorkspace(workspaceId, botId);
 

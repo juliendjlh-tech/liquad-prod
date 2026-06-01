@@ -29,7 +29,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
 
     const result = await listAccessibleCatalogs(
       authResult.workspaceId,
-      authResult.networkId,
+      authResult.accessSettingsId,
       authResult.botId,
     );
 

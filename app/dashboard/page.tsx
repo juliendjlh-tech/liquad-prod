@@ -26,5 +26,9 @@ export default async function DashboardIndex() {
     redirect("/onboarding");
   }
 
-  redirect(workspace.is_publisher ? "/dashboard/publisher" : "/dashboard/access");
+  redirect(
+    workspace.is_publisher
+      ? "/dashboard/publisher"
+      : "/dashboard/publisher/distribute/subscriptions",
+  );
 }

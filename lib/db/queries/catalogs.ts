@@ -2,8 +2,8 @@
 // Catalog query module
 //
 // Centralizes queries for catalogs and the catalog_sources junction table.
-// Replaces duplicate inline queries across catalog, sdk-rules,
-// rag-query, and catalog-linking services.
+// Replaces duplicate inline queries across catalog, sdk-rules, and
+// catalog-linking services.
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
@@ -29,8 +29,6 @@ export interface CatalogRecord {
   ttl_minutes: number | null;
   status: string;
   workspace_id: string;
-  rag_enabled: boolean;
-  rag_source_count: number;
   created_at: string | null;
 }
 
@@ -58,7 +56,7 @@ export async function getCatalogs(
 
   let query = supabase
     .from("catalogs")
-    .select("id, public_id, name, description, filter_rules, price_eur, ttl_minutes, status, workspace_id, rag_enabled, rag_source_count, created_at")
+    .select("id, public_id, name, description, filter_rules, price_eur, ttl_minutes, status, workspace_id, created_at")
     .order("created_at", { ascending: true });
 
   if (catalogIds.length > 0) {

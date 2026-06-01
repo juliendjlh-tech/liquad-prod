@@ -40,7 +40,7 @@ interface WorkspaceInfo {
  * - Domain list
  * - Member management (invite, remove, change role)
  *
- * SDK keys are managed per-gateway on /dashboard/publisher/gateways.
+ * SDK keys are managed per-gateway on /dashboard/publisher/protect/gateway.
  */
 export default function SettingsPage() {
   const [workspace, setWorkspace] = useState<WorkspaceInfo | null>(null);
@@ -170,12 +170,19 @@ export default function SettingsPage() {
           Your workspace essentials: name, registered domains, and the
           teammates who can manage it with you. SDK keys live on the{" "}
           <a
-            href="/dashboard/publisher/gateways"
+            href="/dashboard/publisher/protect/gateway"
             className="text-blue-600 hover:text-blue-800 underline"
           >
             Gateways
           </a>{" "}
-          page.
+          page. Workspace wallet + Stripe subscription:{" "}
+          <a
+            href="/dashboard/publisher/distribute/billing"
+            className="text-blue-600 hover:text-blue-800 underline"
+          >
+            Billing
+          </a>
+          .
         </p>
       </div>
 

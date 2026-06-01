@@ -2,25 +2,21 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   async redirects() {
-    // Backwards-compat: the publisher dashboard moved from /dashboard/* to
-    // /dashboard/publisher/*. Anything that's not under /dashboard/access or
-    // /dashboard/publisher is forwarded to the publisher namespace so old
-    // bookmarks keep working for one release. Drop this block once /access
-    // and /publisher are stable.
     return [
+      // Legacy: /dashboard/* (pre-publisher-namespace) → new nested L1 routes.
       {
         source: "/dashboard/bots/:path*",
-        destination: "/dashboard/publisher/bots/:path*",
+        destination: "/dashboard/publisher/licence/bots/:path*",
         permanent: false,
       },
       {
         source: "/dashboard/domains/:path*",
-        destination: "/dashboard/publisher/domains/:path*",
+        destination: "/dashboard/publisher/licence/domains/:path*",
         permanent: false,
       },
       {
         source: "/dashboard/catalogs/:path*",
-        destination: "/dashboard/publisher/catalogs/:path*",
+        destination: "/dashboard/publisher/licence/catalogs/:path*",
         permanent: false,
       },
       {
@@ -35,7 +31,39 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/dashboard/subscriptions/:path*",
-        destination: "/dashboard/publisher/subscriptions/:path*",
+        destination: "/dashboard/publisher/distribute/subscriptions/:path*",
+        permanent: false,
+      },
+      // Flat /dashboard/publisher/* → nested L1 routes (Licence / Protect /
+      // Distribute). Keeps existing bookmarks working after the IA refactor.
+      {
+        source: "/dashboard/publisher/domains/:path*",
+        destination: "/dashboard/publisher/licence/domains/:path*",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/publisher/bots/:path*",
+        destination: "/dashboard/publisher/licence/bots/:path*",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/publisher/catalogs/:path*",
+        destination: "/dashboard/publisher/licence/catalogs/:path*",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/publisher/gateways/:path*",
+        destination: "/dashboard/publisher/protect/gateway/:path*",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/publisher/gateways",
+        destination: "/dashboard/publisher/protect/gateway",
+        permanent: false,
+      },
+      {
+        source: "/dashboard/publisher/subscriptions",
+        destination: "/dashboard/publisher/distribute/subscriptions",
         permanent: false,
       },
     ];

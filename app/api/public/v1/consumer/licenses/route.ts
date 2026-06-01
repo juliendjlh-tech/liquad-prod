@@ -73,7 +73,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const result = await authorize(
       authResult.workspaceId,
       authResult.apiKeyId,
-      authResult.networkId,
+      authResult.accessSettingsId,
       authResult.botId,
       parsed.data,
     );

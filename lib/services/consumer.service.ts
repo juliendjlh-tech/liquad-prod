@@ -5,20 +5,21 @@
 // Handles content authorization (pre-purchase of signed tokens) and
 // discovery of accessible indexed sources.
 //
-// Design (post-network refactor, migrations 040-042):
+// Design (post-access-settings refactor, migration 045):
 //   - Indexed source-based matching: only indexed URLs can be purchased
 //   - ua_pattern reconciliation: consumer bot matched to publisher catalogs
 //     via ua_pattern (not strict bot_id), so preset and operator bots unify
 //   - Bot-bound tokens: ua_pattern encoded in HMAC signature, gateway verifies
 //   - Publisher-controlled TTL: catalog.ttl_minutes, not consumer-provided
 //   - declared_ips required: bots without IP ranges cannot participate
-//   - Network-driven access: the API key's network defines the catalogue set
-//     (network_catalogs.status='accepted'). No more subscription-level
-//     allowlist, max_price, or workspace scope — all removed in migration 041.
-//   - Bot identity is on the API key (api_keys.bot_id), not in the request
-//     body. workspace_bots is no longer queried at runtime.
+//   - Access settings drive access scope: the API key's access_settings carries
+//     the catalogue allowlist (access_settings_catalogs) plus a max_price_eur
+//     ceiling that filters catalogues whose publisher price exceeds the plan.
+//   - Bot identity is on the API key (api_keys.bot_id, denormalized from
+//     access_settings.bot_id; trigger enforces equality).
 //   - Revenue split (85/7/8) computed in TS (lib/constants/revenue.ts) and
-//     passed pre-computed to the RPC.
+//     passed pre-computed to the RPC. The sub_manager 7% recipient is now
+//     the consumer workspace's `referral_workspace_id` (may be NULL).
 // ---------------------------------------------------------------------------
 
 import { createServerClient } from "@/lib/db/supabase-server";
@@ -36,7 +37,11 @@ import {
   getCatalogBots,
   type BotRecord,
 } from "@/lib/db/queries/agents";
-import { getNetworkAcceptedCatalogIds } from "@/lib/db/queries/networks";
+import {
+  getAccessSettingsById,
+  getAccessSettingsCatalogIds,
+  type AccessSettingsRecord,
+} from "@/lib/db/queries/access-settings";
 import { computeRevenueSplit } from "@/lib/constants/revenue";
 import { normalizeUrl } from "@liquad/sdk/url-normalize";
 import { ok, err, type ServiceResult } from "@/lib/utils/service-result";
@@ -60,7 +65,8 @@ export type AuthorizeReason =
   | "no_catalog"
   | "no_matching_ips"
   | "domain_not_registered"
-  | "insufficient_balance";
+  | "insufficient_balance"
+  | "monthly_cap_exceeded";
 
 interface AuthorizeUrlGranted {
   url: string;
@@ -172,13 +178,23 @@ interface BatchDebitSuccess {
   grants: BatchGrantResult[];
 }
 
-interface BatchDebitFailure {
+interface BatchDebitInsufficient {
   success: false;
   reason: "insufficient_balance";
   balance: number;
   required: number;
 }
 
+interface BatchDebitCapExceeded {
+  success: false;
+  reason: "monthly_cap_exceeded";
+  cap: number;
+  spent: number;
+  required: number;
+  balance: number;
+}
+
+type BatchDebitFailure = BatchDebitInsufficient | BatchDebitCapExceeded;
 type BatchDebitResult = BatchDebitSuccess | BatchDebitFailure;
 
 async function batchDebitAndGrant(
@@ -187,26 +203,26 @@ async function batchDebitAndGrant(
   supabase: SupabaseClient
 ): Promise<BatchDebitResult> {
   if (debits.length === 0) {
-    // No URLs to grant — return the current subscription balance.
+    // No URLs to grant — return the current workspace balance.
     const { data: apiKey } = await supabase
       .from("api_keys")
-      .select("subscription_id")
+      .select("workspace_id")
       .eq("id", apiKeyId)
       .single();
 
-    if (!apiKey?.subscription_id) {
+    if (!apiKey?.workspace_id) {
       return { success: true, new_balance: 0, grants: [] };
     }
 
-    const { data: subscription } = await supabase
-      .from("subscriptions")
+    const { data: workspace } = await supabase
+      .from("workspaces")
       .select("balance_eur")
-      .eq("id", apiKey.subscription_id)
+      .eq("id", apiKey.workspace_id)
       .single();
 
     return {
       success: true,
-      new_balance: subscription?.balance_eur ?? 0,
+      new_balance: workspace?.balance_eur ?? 0,
       grants: [],
     };
   }
@@ -242,9 +258,36 @@ async function batchDebitAndGrant(
     reason?: string;
     balance?: number;
     required?: number;
+    cap?: number;
+    spent?: number;
   };
 
   if (!result.success) {
+    if (result.reason === "monthly_cap_exceeded") {
+      // Workspace balance is unaffected when the cap blocks the batch — fetch
+      // it so the response still surfaces the latest figure.
+      const { data: apiKey } = await supabase
+        .from("api_keys")
+        .select("workspace_id")
+        .eq("id", apiKeyId)
+        .single();
+      const { data: workspace } = apiKey?.workspace_id
+        ? await supabase
+            .from("workspaces")
+            .select("balance_eur")
+            .eq("id", apiKey.workspace_id)
+            .single()
+        : { data: null };
+
+      return {
+        success: false,
+        reason: "monthly_cap_exceeded",
+        cap: result.cap ?? 0,
+        spent: result.spent ?? 0,
+        required: result.required ?? 0,
+        balance: workspace?.balance_eur ?? 0,
+      };
+    }
     return {
       success: false,
       reason: "insufficient_balance",
@@ -283,10 +326,10 @@ interface ResolvedBot {
 }
 
 /**
- * Resolve and validate a consumer bot. The bot is already bound to the API key
- * at creation time (api_keys.bot_id) and was validated against the network's
- * derived set (trigger validate_api_key_bot_in_network). Runtime checks here
- * are limited to:
+ * Resolve and validate a consumer bot. The bot is bound to the API key at
+ * creation time (api_keys.bot_id, denormalized from access_settings.bot_id;
+ * the trigger trg_api_keys_validate_bot_matches_access_settings enforces
+ * equality). Runtime checks here are limited to:
  *   - bot exists in the global registry
  *   - bot has at least one declared IP
  *
@@ -325,18 +368,20 @@ interface AccessibleCatalogInfo {
  * given consumer bot, and the IP intersection per catalog.
  *
  * Logic:
- *   1. Restrict candidates to the network's accepted catalogues (allowlist
- *      derived from network_catalogs(network_id, status='accepted')). Empty
- *      allowlist → empty result (an API key references exactly one network).
+ *   1. Restrict candidates to the access_settings allowlist (catalogues the
+ *      consumer added to their plan). Empty allowlist → empty result.
  *   2. Load catalog_bots for the surviving candidates.
  *   3. Keep links whose bot.ua_pattern equals the consumer's uaPattern.
  *   4. Compute IP intersection between consumer's declared_ips and the
  *      publisher bot's declared_ips. UNION across multiple UA-matching
  *      publisher bots on the same catalog.
  *   5. Drop catalogs with empty IP intersection.
- *   6. Load CatalogRecords for the survivors, restricted to status='active'
- *      (marketplace visibility). A catalogue listed in a network but no
- *      longer 'active' is invisible to the consumer.
+ *   6. Load CatalogRecords for the survivors and apply two runtime filters:
+ *        a. marketplace visibility — drop status='inactive' UNLESS the
+ *           catalogue belongs to the consumer's own workspace (private cat).
+ *        b. max-price guard — drop catalogues whose price_eur exceeds the
+ *           plan's max_price_eur (publisher raised the price after the
+ *           catalogue was added to the plan).
  *
  * Returns:
  *   - accessible: Map<catalog_id, { catalog, allowedIps }>
@@ -348,21 +393,22 @@ async function filterAccessibleCatalogs(
   candidateCatalogIds: string[],
   consumerBot: ResolvedBot,
   options: {
-    /**
-     * Network-derived catalogue allowlist (catalogues whose membership is
-     * 'accepted'). Required: an API key is always tied to one network.
-     */
-    networkAcceptedCatalogIds: string[];
+    /** Catalogue allowlist from access_settings_catalogs. Required. */
+    accessSettingsCatalogIds: string[];
+    /** Plan's max_price_eur ceiling. NULL = no cap. */
+    maxPriceEur: number | null;
+    /** Workspace owning the access_settings (= consumer). Allows private cats. */
+    consumerWorkspaceId: string;
   }
 ): Promise<{
   accessible: Map<string, AccessibleCatalogInfo>;
   uaCompatibleCatalogIds: Set<string>;
 }> {
-  if (candidateCatalogIds.length === 0 || options.networkAcceptedCatalogIds.length === 0) {
+  if (candidateCatalogIds.length === 0 || options.accessSettingsCatalogIds.length === 0) {
     return { accessible: new Map(), uaCompatibleCatalogIds: new Set() };
   }
 
-  const allowed = new Set(options.networkAcceptedCatalogIds);
+  const allowed = new Set(options.accessSettingsCatalogIds);
   const prunedCandidates = candidateCatalogIds.filter((id) => allowed.has(id));
   if (prunedCandidates.length === 0) {
     return { accessible: new Map(), uaCompatibleCatalogIds: new Set() };
@@ -392,15 +438,29 @@ async function filterAccessibleCatalogs(
     return { accessible: new Map(), uaCompatibleCatalogIds };
   }
 
-  // Marketplace visibility: only catalogues currently 'active' are returned.
-  // A catalogue accepted in the network but switched to 'inactive' by its
-  // owner is silently filtered out — caller sees `no_catalog` for that URL.
-  const catalogs = await getCatalogs(ipCompatibleIds, { status: "active" });
+  // Load survivors without a status filter so we can keep the consumer's own
+  // private (status=inactive) catalogues. Marketplace + max-price guards are
+  // applied in the loop below.
+  const catalogs = await getCatalogs(ipCompatibleIds);
 
   const accessible = new Map<string, AccessibleCatalogInfo>();
   for (const catalog of catalogs) {
     const ips = catalogIdToAllowedIps.get(catalog.id);
     if (!ips || ips.size === 0) continue;
+
+    // Marketplace visibility: a catalogue switched to 'inactive' is still
+    // available if it belongs to the consumer's own workspace.
+    if (catalog.status !== "active" && catalog.workspace_id !== options.consumerWorkspaceId) {
+      continue;
+    }
+
+    // Max-price guard: silently drop catalogues whose price exceeds the plan's
+    // ceiling. The publisher may have raised price after the consumer added
+    // the catalogue to their plan. NULL = no cap, every price passes.
+    if (options.maxPriceEur !== null && catalog.price_eur > options.maxPriceEur) {
+      continue;
+    }
+
     accessible.set(catalog.id, { catalog, allowedIps: [...ips] });
   }
 
@@ -419,18 +479,16 @@ async function filterAccessibleCatalogs(
  *   Pass 2: Find cheapest valid catalog per URL (ua_pattern reconciliation)
  *   Pass 3: Batch debit + sign bot-bound HMAC tokens
  *
- * networkId and botId are sourced from the API key by the route handler:
- *   - networkId → the allowed catalogue set (network_catalogs accepted)
- *   - botId     → the bot identity claimed by the key (immutable)
- *
- * No more bot_id in the request body since migration 041. No more
- * scope_to_workspace / max_price_eur / subscription.catalog_ids since they
- * were dropped along with the legacy subscription scope model.
+ * accessSettingsId + botId are sourced from the API key by the route handler.
+ * The access_settings provides the catalogue allowlist + max_price ceiling;
+ * the bot identity is what the consumer "claims" at /licenses time (kept
+ * denormalized on api_keys for hot-path queries; DB trigger enforces it
+ * matches access_settings.bot_id).
  */
 export async function authorize(
   consumerWorkspaceId: string,
   apiKeyId: string,
-  networkId: string,
+  accessSettingsId: string,
   botId: string,
   input: TransactionInput,
 ): Promise<ServiceResult<AuthorizeSuccess>> {
@@ -441,8 +499,12 @@ export async function authorize(
   const consumerBot = resolved.data;
   const uaPattern = consumerBot.uaPattern;
 
-  // Resolve the network's accepted catalogues once for the whole batch.
-  const networkAcceptedCatalogIds = await getNetworkAcceptedCatalogIds(networkId);
+  // Resolve the plan + its catalogue allowlist once for the whole batch.
+  const accessSettings = await getAccessSettingsById(accessSettingsId);
+  if (!accessSettings) {
+    return err("access_settings_not_found", 404, { access_settings_id: accessSettingsId });
+  }
+  const accessSettingsCatalogIds = await getAccessSettingsCatalogIds(accessSettingsId);
 
   // Each entry preserves the original URL (echoed back to the caller) alongside
   // the normalized URL used for matching and HMAC signing. Entries stay in
@@ -526,12 +588,16 @@ export async function authorize(
     const allCatalogIds = [...new Set(sourceCatalogLinks.map((l) => l.catalog_id))];
 
     // Reconcile catalogs against the consumer bot (UA equality + IP intersection)
-    // restricted to the network's accepted catalogue set.
+    // restricted to the access_settings allowlist + max_price ceiling.
     // See filterAccessibleCatalogs for full logic.
     const { accessible, uaCompatibleCatalogIds } = await filterAccessibleCatalogs(
       allCatalogIds,
       consumerBot,
-      { networkAcceptedCatalogIds }
+      {
+        accessSettingsCatalogIds,
+        maxPriceEur: accessSettings.max_price_eur,
+        consumerWorkspaceId,
+      }
     );
 
     for (const i of indexedIndices) {
@@ -550,8 +616,8 @@ export async function authorize(
 
       if (!bestCatalog) {
         // Distinguish "no catalog at all" from "catalogs exist but none IP-compatible".
-        // A catalogue not in the network's accepted set is reported as "no_catalog"
-        // — from the caller's perspective the catalogue is invisible.
+        // A catalogue not in the access_settings allowlist is reported as
+        // "no_catalog" — from the caller's perspective it is invisible.
         const hasUaCompatible = catalogIds.some((id) => uaCompatibleCatalogIds.has(id));
         outcomes.set(i, hasUaCompatible ? "no_matching_ips" : "no_catalog");
         continue;
@@ -615,10 +681,15 @@ export async function authorize(
   // SDK will block tokenless requests and emit a denial event; URLs hosted on
   // unregistered domains pass through the GPT untouched as before.
   if (!debitResult.success) {
+    const fallbackReason: AuthorizeReason =
+      debitResult.reason === "monthly_cap_exceeded"
+        ? "monthly_cap_exceeded"
+        : "insufficient_balance";
+
     const results: AuthorizeUrlResult[] = entries.map((entry, i) => {
       const existing = outcomes.get(i);
       // Domain unknown / no source / no catalog stay as-is — they were never
-      // going to get a token regardless of balance.
+      // going to get a token regardless of balance or cap.
       if (existing) {
         return {
           url: entry.originalUrl,
@@ -629,7 +700,7 @@ export async function authorize(
       return {
         url: entry.originalUrl,
         crawl_url: entry.originalUrl,
-        reason: "insufficient_balance",
+        reason: fallbackReason,
       };
     });
 
@@ -765,10 +836,11 @@ export interface ListAccessibleSourcesOptions {
  *
  * Algorithm:
  *   1. Resolve consumer bot (must exist, have IPs).
- *   2. Resolve the network's accepted catalogue set once.
+ *   2. Resolve the plan's catalogue allowlist + max_price once.
  *   3. Find all bots in DB sharing the consumer's ua_pattern.
  *   4. catalog_bots links → candidate catalog_ids (cross-workspace).
- *   5. filterAccessibleCatalogs: UA equality, IP intersection, network membership.
+ *   5. filterAccessibleCatalogs: UA equality, IP intersection, plan membership,
+ *      marketplace status (own-workspace exception), max_price ceiling.
  *   6. Optional ?catalog_id= filter intersected with the accessible set.
  *   7. Optional ?domain= resolved to domain_id (or short-circuit empty if unknown).
  *   8. catalog_sources → indexed_source_ids for accessible catalogs.
@@ -777,13 +849,13 @@ export interface ListAccessibleSourcesOptions {
  *
  * Cursor pagination: keyset on `indexed_sources.id` (UUIDv4, stable).
  *
- * @param workspaceId - Consumer workspace owning the API key (debited).
- * @param networkId   - Network bound to the API key (defines the catalogue set).
- * @param botId       - Bot identity bound to the API key.
+ * @param workspaceId      - Consumer workspace owning the API key (debited).
+ * @param accessSettingsId - Access settings bound to the API key.
+ * @param botId            - Bot identity bound to the API key.
  */
 export async function listAccessibleSources(
   workspaceId: string,
-  networkId: string,
+  accessSettingsId: string,
   botId: string,
   options: ListAccessibleSourcesOptions = {},
 ): Promise<ServiceResult<ListAccessibleSourcesSuccess>> {
@@ -791,11 +863,14 @@ export async function listAccessibleSources(
   const resolved = await resolveConsumerBot(botId);
   if (!resolved.ok) return resolved;
   const consumerBot = resolved.data;
-  void workspaceId; // currently unused at runtime; kept for symmetry with /licenses.
 
-  // Resolve the network's accepted catalogues once for the whole query.
-  const networkAcceptedCatalogIds = await getNetworkAcceptedCatalogIds(networkId);
-  if (networkAcceptedCatalogIds.length === 0) {
+  // Resolve the plan once for the whole query.
+  const accessSettings = await getAccessSettingsById(accessSettingsId);
+  if (!accessSettings) {
+    return err("access_settings_not_found", 404, { access_settings_id: accessSettingsId });
+  }
+  const accessSettingsCatalogIds = await getAccessSettingsCatalogIds(accessSettingsId);
+  if (accessSettingsCatalogIds.length === 0) {
     return ok({ sources: [], next_cursor: null });
   }
 
@@ -840,7 +915,11 @@ export async function listAccessibleSources(
   const { accessible } = await filterAccessibleCatalogs(
     candidateCatalogIds,
     consumerBot,
-    { networkAcceptedCatalogIds }
+    {
+      accessSettingsCatalogIds,
+      maxPriceEur: accessSettings.max_price_eur,
+      consumerWorkspaceId: workspaceId,
+    }
   );
 
   if (accessible.size === 0) {
@@ -971,7 +1050,6 @@ interface AccessibleCatalog {
   publisher_workspace_id: string;
   price_eur: number;
   ttl_minutes: number;
-  rag_enabled: boolean;
   source_count: number;
   allowed_ips: string[];
 }
@@ -984,29 +1062,32 @@ export interface ListAccessibleCatalogsSuccess {
  * List all catalogs accessible to the consumer's bot.
  *
  * Same matching logic as `listAccessibleSources` (UA equality + IP intersection
- * + network membership + status=active), but returns the catalog metadata
- * directly without expanding to sources.
+ * + access_settings membership + marketplace/own-workspace + max_price), but
+ * returns the catalog metadata directly without expanding to sources.
  *
  * Volume is small (catalogs « sources), so no pagination.
  *
- * @param workspaceId - Consumer workspace owning the API key.
- * @param networkId   - Network bound to the API key.
- * @param botId       - Bot identity bound to the API key.
+ * @param workspaceId      - Consumer workspace owning the API key.
+ * @param accessSettingsId - Access settings bound to the API key.
+ * @param botId            - Bot identity bound to the API key.
  */
 export async function listAccessibleCatalogs(
   workspaceId: string,
-  networkId: string,
+  accessSettingsId: string,
   botId: string,
 ): Promise<ServiceResult<ListAccessibleCatalogsSuccess>> {
   // ── 1. Resolve consumer bot ───────────────────────────────────────────
   const resolved = await resolveConsumerBot(botId);
   if (!resolved.ok) return resolved;
   const consumerBot = resolved.data;
-  void workspaceId;
 
-  // Resolve the network's accepted catalogues once.
-  const networkAcceptedCatalogIds = await getNetworkAcceptedCatalogIds(networkId);
-  if (networkAcceptedCatalogIds.length === 0) {
+  // Resolve the plan once.
+  const accessSettings = await getAccessSettingsById(accessSettingsId);
+  if (!accessSettings) {
+    return err("access_settings_not_found", 404, { access_settings_id: accessSettingsId });
+  }
+  const accessSettingsCatalogIds = await getAccessSettingsCatalogIds(accessSettingsId);
+  if (accessSettingsCatalogIds.length === 0) {
     return ok({ catalogs: [] });
   }
 
@@ -1045,7 +1126,11 @@ export async function listAccessibleCatalogs(
   const { accessible } = await filterAccessibleCatalogs(
     candidateCatalogIds,
     consumerBot,
-    { networkAcceptedCatalogIds }
+    {
+      accessSettingsCatalogIds,
+      maxPriceEur: accessSettings.max_price_eur,
+      consumerWorkspaceId: workspaceId,
+    }
   );
 
   if (accessible.size === 0) {
@@ -1078,7 +1163,6 @@ export async function listAccessibleCatalogs(
       publisher_workspace_id: info.catalog.workspace_id,
       price_eur: info.catalog.price_eur,
       ttl_minutes: info.catalog.ttl_minutes ?? DEFAULT_TTL_MINUTES,
-      rag_enabled: info.catalog.rag_enabled,
       source_count: sourceCounts.get(id) ?? 0,
       allowed_ips: info.allowedIps,
     };

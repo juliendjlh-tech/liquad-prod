@@ -54,6 +54,7 @@ export async function PATCH(
     const updated = await updateSubscription(workspaceId, userId, subscriptionId, {
       label: parsed.data.label,
       externalUserId: parsed.data.external_user_id,
+      monthlyCapEur: parsed.data.monthly_cap_eur,
     });
 
     return NextResponse.json(updated, { status: 200 });
@@ -72,6 +73,9 @@ function mapError(err: unknown): NextResponse {
     }
     if (err.message === "NOT_FOUND") {
       return NextResponse.json({ error: "Subscription not found" }, { status: 404 });
+    }
+    if (err.message === "INVALID_MONTHLY_CAP") {
+      return NextResponse.json({ error: "Invalid monthly_cap_eur" }, { status: 400 });
     }
     if (err.message === "SUBSCRIPTION_HAS_BALANCE") {
       return NextResponse.json(
